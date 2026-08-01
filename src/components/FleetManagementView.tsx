@@ -1,0 +1,534 @@
+import React, { useState, useMemo } from 'react';
+import { 
+  Truck, Plus, Search, Filter, QrCode, Wrench, Fuel, CheckCircle2, 
+  AlertTriangle, Clock, Calendar, Shield, X, Edit3, Trash2, Printer, Eye
+} from 'lucide-react';
+import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, FuelLog } from '../types';
+import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
+
+interface FleetManagementViewProps {
+  vehicles: Vehicle[];
+  users: User[];
+  currentUser: User;
+  maintenanceLogs: MaintenanceLog[];
+  fuelLogs: FuelLog[];
+  onAddVehicle: (v: Omit<Vehicle, 'id'>) => void;
+  onUpdateVehicle: (id: string, v: Partial<Vehicle>) => void;
+  onDeleteVehicle: (id: string) => void;
+  onOpenFuelingModalWithEquipment: (equipmentId: string) => void;
+  darkMode: boolean;
+}
+
+export const FleetManagementView: React.FC<FleetManagementViewProps> = ({
+  vehicles,
+  users,
+  currentUser,
+  maintenanceLogs,
+  fuelLogs,
+  onAddVehicle,
+  onUpdateVehicle,
+  onDeleteVehicle,
+  onOpenFuelingModalWithEquipment,
+  darkMode
+}) => {
+  const [activeTab, setActiveTab] = useState<EquipmentCategory>('VEICULO');
+  const [search, setSearch] = useState('');
+  const [sectorFilter, setSectorFilter] = useState<string>('ALL');
+
+  // Modal Passport
+  const [passportVehicle, setPassportVehicle] = useState<Vehicle | null>(null);
+
+  // New Equipment Modal
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [model, setModel] = useState('');
+  const [manufacturer, setManufacturer] = useState('');
+  const [year, setYear] = useState(2024);
+  const [licensePlate, setLicensePlate] = useState('');
+  const [patrimonyCode, setPatrimonyCode] = useState('');
+  const [sector, setSector] = useState<Sector>('AGRICOLA');
+  const [fuelType, setFuelType] = useState<FuelType>('DIESEL_S10');
+  const [tankCapacityLiters, setTankCapacityLiters] = useState(100);
+  const [currentKm, setCurrentKm] = useState(0);
+  const [currentHourmeter, setCurrentHourmeter] = useState(0);
+  const [assignedOperatorId, setAssignedOperatorId] = useState('');
+  const [photoUrl, setPhotoUrl] = useState('');
+
+  const filteredVehicles = useMemo(() => {
+    return vehicles.filter(v => {
+      // Tab category match
+      if (activeTab === 'MAQUINA_AGRICOLA') {
+        if (v.category !== 'MAQUINA_AGRICOLA' && v.category !== 'IMPLEMENTO') return false;
+      } else {
+        if (v.category !== activeTab) return false;
+      }
+
+      // Search
+      if (search) {
+        const q = search.toLowerCase();
+        const matchModel = v.model.toLowerCase().includes(q);
+        const matchPlate = (v.licensePlate || v.patrimonyCode || '').toLowerCase().includes(q);
+        const matchBrand = v.manufacturer.toLowerCase().includes(q);
+        if (!matchModel && !matchPlate && !matchBrand) return false;
+      }
+
+      // Sector
+      if (sectorFilter !== 'ALL' && v.sector !== sectorFilter) return false;
+
+      return true;
+    });
+  }, [vehicles, activeTab, search, sectorFilter]);
+
+  const handleCreateEquipment = (e: React.FormEvent) => {
+    e.preventDefault();
+    const operator = users.find(u => u.id === assignedOperatorId);
+
+    onAddVehicle({
+      category: activeTab,
+      model,
+      manufacturer,
+      year,
+      color: 'Verde/Branco',
+      licensePlate: activeTab === 'VEICULO' ? licensePlate : `AGRO-${patrimonyCode}`,
+      patrimonyCode: activeTab !== 'VEICULO' ? patrimonyCode : undefined,
+      sector,
+      fuelType,
+      tankCapacityLiters,
+      currentKm: activeTab === 'VEICULO' ? currentKm : 0,
+      currentHourmeter: activeTab !== 'VEICULO' ? currentHourmeter : undefined,
+      status: 'ATIVO',
+      assignedOperatorId: operator?.id,
+      assignedOperatorName: operator?.name,
+      photoUrl: photoUrl || 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80'
+    });
+
+    setShowAddModal(false);
+    // Reset
+    setModel('');
+    setManufacturer('');
+    setLicensePlate('');
+    setPatrimonyCode('');
+  };
+
+  const handlePrintBadge = (v: Vehicle) => {
+    const printWin = window.open('', '_blank');
+    if (!printWin) return;
+
+    printWin.document.write(`
+      <html>
+        <head>
+          <title>Ficha do Equipamento QR - ${v.model}</title>
+          <style>
+            body { font-family: sans-serif; padding: 20px; text-align: center; }
+            .card { border: 3px solid #0f3822; padding: 20px; border-radius: 16px; max-w: 400px; margin: 0 auto; }
+            h1 { color: #0f3822; font-size: 22px; margin-bottom: 4px; }
+            .tag { background: #d4af37; color: #000; font-weight: bold; padding: 4px 8px; border-radius: 6px; display: inline-block; }
+            .qr { margin: 20px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>AndradeAgro</h1>
+            <p><strong>${v.model}</strong></p>
+            <p className="tag">${v.licensePlate || v.patrimonyCode}</p>
+            <div class="qr">
+              <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`ANDRADEAGRO:${v.id}:${v.licensePlate || v.patrimonyCode}`)}" alt="QR Code" />
+            </div>
+            <p>Setor: ${getSectorName(v.sector)}</p>
+            <p>Tanque: ${v.tankCapacityLiters} Litros (${getFuelTypeName(v.fuelType)})</p>
+          </div>
+          <script>window.print();</script>
+        </body>
+      </html>
+    `);
+    printWin.document.close();
+  };
+
+  return (
+    <div className="space-y-5 animate-in fade-in duration-300">
+      
+      {/* Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-black text-gray-900 dark:text-emerald-100 flex items-center gap-2">
+            <Truck className="w-6 h-6 text-amber-500" />
+            Gestão de Frota, Tratores & Máquinas
+          </h1>
+          <p className="text-xs text-gray-500 dark:text-emerald-400">
+            Cadastros completos, horímetros, odômetros, status de manutenção e QR Codes.
+          </p>
+        </div>
+
+        {currentUser.role === 'ADMIN' && (
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto"
+          >
+            <Plus className="w-4 h-4 text-amber-400" />
+            <span>Cadastrar Equipamento</span>
+          </button>
+        )}
+      </div>
+
+      {/* Category Tabs & Search */}
+      <div className={`p-4 rounded-2xl border space-y-4 ${
+        darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100'
+      }`}>
+        <div className="flex items-center gap-2 border-b border-emerald-800/20 pb-3 overflow-x-auto">
+          <button
+            onClick={() => setActiveTab('VEICULO')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'VEICULO'
+                ? 'bg-amber-500 text-gray-950 shadow-md'
+                : 'text-gray-600 dark:text-emerald-300 hover:bg-emerald-500/10'
+            }`}
+          >
+            Veículos com Placa ({vehicles.filter(v => v.category === 'VEICULO').length})
+          </button>
+          <button
+            onClick={() => setActiveTab('TRATOR')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'TRATOR'
+                ? 'bg-amber-500 text-gray-950 shadow-md'
+                : 'text-gray-600 dark:text-emerald-300 hover:bg-emerald-500/10'
+            }`}
+          >
+            Tratores ({vehicles.filter(v => v.category === 'TRATOR').length})
+          </button>
+          <button
+            onClick={() => setActiveTab('MAQUINA_AGRICOLA')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'MAQUINA_AGRICOLA'
+                ? 'bg-amber-500 text-gray-950 shadow-md'
+                : 'text-gray-600 dark:text-emerald-300 hover:bg-emerald-500/10'
+            }`}
+          >
+            Máquinas Agrícolas ({vehicles.filter(v => v.category === 'MAQUINA_AGRICOLA' || v.category === 'IMPLEMENTO').length})
+          </button>
+        </div>
+
+        {/* Filter Controls */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por modelo, fabricante ou código..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className={`w-full pl-9 pr-3 py-2 rounded-xl border outline-none ${
+                darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
+              }`}
+            />
+          </div>
+
+          <select
+            value={sectorFilter}
+            onChange={(e) => setSectorFilter(e.target.value)}
+            className={`px-3 py-2 rounded-xl border outline-none ${
+              darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
+            }`}
+          >
+            <option value="ALL">Todos os Setores</option>
+            <option value="PREPARO_SOLO">Preparo de Solo</option>
+            <option value="COLHEITA">Colheita</option>
+            <option value="PULVERIZACAO">Pulverização</option>
+            <option value="AGRICOLA">Agrícola</option>
+            <option value="LOGISTICA">Logística / Transporte</option>
+            <option value="DIRETORIA">Diretoria</option>
+            <option value="OFICINA_MANUTENCAO">Oficina</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Equipment Cards Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {filteredVehicles.map(v => (
+          <div
+            key={v.id}
+            className={`rounded-2xl border overflow-hidden flex flex-col transition-all hover:shadow-lg ${
+              darkMode ? 'bg-emerald-950/50 border-emerald-900' : 'bg-white border-emerald-100 shadow-sm'
+            }`}
+          >
+            {/* Image Banner */}
+            <div className="h-40 relative bg-emerald-900/20 overflow-hidden">
+              <img
+                src={v.photoUrl || 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80'}
+                alt={v.model}
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute top-2 right-2 flex gap-1">
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase shadow-md ${
+                  v.status === 'ATIVO' 
+                    ? 'bg-emerald-500 text-gray-950' 
+                    : v.status === 'EM_MANUTENCAO' 
+                    ? 'bg-amber-500 text-gray-950' 
+                    : 'bg-red-500 text-white'
+                }`}>
+                  {v.status === 'EM_MANUTENCAO' ? 'Manutenção' : v.status}
+                </span>
+              </div>
+              <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/20 text-white font-extrabold text-xs">
+                {v.licensePlate || v.patrimonyCode}
+              </div>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+              <div>
+                <p className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400">
+                  {v.manufacturer} • {v.year}
+                </p>
+                <h3 className="font-extrabold text-sm text-gray-900 dark:text-emerald-100 line-clamp-1">
+                  {v.model}
+                </h3>
+                <p className="text-[11px] text-gray-500 dark:text-emerald-300 font-medium mt-0.5">
+                  Setor: <strong className="text-gray-800 dark:text-emerald-200">{getSectorName(v.sector)}</strong>
+                </p>
+              </div>
+
+              {/* Specs Badge */}
+              <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-gray-500 dark:text-emerald-400">Uso Atual:</span>
+                  <strong className="text-emerald-800 dark:text-emerald-300">
+                    {v.category === 'VEICULO' ? `${v.currentKm.toLocaleString('pt-BR')} km` : `${v.currentHourmeter || 0} horas`}
+                  </strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500 dark:text-emerald-400">Tanque:</span>
+                  <strong className="text-gray-800 dark:text-emerald-200">{v.tankCapacityLiters}L ({getFuelTypeName(v.fuelType)})</strong>
+                </div>
+                {v.assignedOperatorName && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500 dark:text-emerald-400">Operador:</span>
+                    <strong className="text-amber-600 dark:text-amber-400 truncate max-w-[110px]">{v.assignedOperatorName}</strong>
+                  </div>
+                )}
+              </div>
+
+              {/* Card Actions */}
+              <div className="pt-2 border-t border-emerald-800/20 flex items-center justify-between gap-1">
+                <button
+                  onClick={() => setPassportVehicle(v)}
+                  className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-1"
+                >
+                  <Eye className="w-3.5 h-3.5" /> Ficha
+                </button>
+
+                <button
+                  onClick={() => onOpenFuelingModalWithEquipment(v.id)}
+                  className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-bold flex items-center gap-1 shadow-sm"
+                >
+                  <Fuel className="w-3.5 h-3.5" /> Abastecer
+                </button>
+
+                <button
+                  onClick={() => handlePrintBadge(v)}
+                  className="p-1.5 rounded-lg bg-gray-100 dark:bg-emerald-900/40 text-gray-600 dark:text-emerald-300"
+                  title="Imprimir Emblema com QR Code"
+                >
+                  <QrCode className="w-4 h-4 text-amber-500" />
+                </button>
+              </div>
+
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Equipment Passport Modal */}
+      {passportVehicle && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className={`w-full max-w-2xl rounded-2xl shadow-2xl border p-5 max-h-[90vh] overflow-y-auto space-y-4 ${
+            darkMode ? 'bg-emerald-950 border-emerald-800 text-emerald-100' : 'bg-white border-emerald-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between border-b pb-3 border-emerald-800/20">
+              <div className="flex items-center gap-2">
+                <QrCode className="w-5 h-5 text-amber-500" />
+                <span className="font-bold text-sm">Passaporte / Ficha do Equipamento</span>
+              </div>
+              <button onClick={() => setPassportVehicle(null)} className="p-1 rounded-lg hover:bg-emerald-500/10">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* QR Code & Badge */}
+              <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center flex flex-col items-center justify-center">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(`ANDRADEAGRO:${passportVehicle.id}:${passportVehicle.licensePlate || passportVehicle.patrimonyCode}`)}`}
+                  alt="QR Code"
+                  className="w-36 h-36 border rounded-xl p-1 bg-white"
+                />
+                <span className="mt-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase">
+                  {passportVehicle.licensePlate || passportVehicle.patrimonyCode}
+                </span>
+                <button
+                  onClick={() => handlePrintBadge(passportVehicle)}
+                  className="mt-3 px-3 py-1.5 rounded-lg bg-amber-500 text-gray-950 font-bold text-xs flex items-center gap-1"
+                >
+                  <Printer className="w-3.5 h-3.5" /> Imprimir QR
+                </button>
+              </div>
+
+              {/* Specs */}
+              <div className="md:col-span-2 space-y-2 text-xs">
+                <p className="text-base font-extrabold text-gray-900 dark:text-emerald-100">{passportVehicle.model}</p>
+                <div className="grid grid-cols-2 gap-2 text-gray-600 dark:text-emerald-300">
+                  <p><strong>Fabricante:</strong> {passportVehicle.manufacturer}</p>
+                  <p><strong>Ano:</strong> {passportVehicle.year}</p>
+                  <p><strong>Setor:</strong> {getSectorName(passportVehicle.sector)}</p>
+                  <p><strong>Tanque:</strong> {passportVehicle.tankCapacityLiters} Litros</p>
+                  <p><strong>Combustível:</strong> {getFuelTypeName(passportVehicle.fuelType)}</p>
+                  <p><strong>Uso Atual:</strong> {passportVehicle.category === 'VEICULO' ? `${passportVehicle.currentKm} km` : `${passportVehicle.currentHourmeter || 0} h`}</p>
+                  <p><strong>Operador:</strong> {passportVehicle.assignedOperatorName || 'Não atribuído'}</p>
+                  <p><strong>Status:</strong> {passportVehicle.status}</p>
+                </div>
+
+                {passportVehicle.notes && (
+                  <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-emerald-900/30 border text-[11px]">
+                    <strong>Observações:</strong> {passportVehicle.notes}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t flex justify-end gap-2">
+              <button
+                onClick={() => setPassportVehicle(null)}
+                className="px-4 py-2 rounded-xl bg-emerald-800 text-white font-bold text-xs"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add New Equipment Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className={`w-full max-w-lg rounded-2xl shadow-2xl border p-5 space-y-4 max-h-[90vh] overflow-y-auto ${
+            darkMode ? 'bg-emerald-950 border-emerald-800 text-emerald-100' : 'bg-white border-emerald-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between border-b pb-3 border-emerald-800/20">
+              <span className="font-bold text-sm">Cadastrar Novo Equipamento</span>
+              <button onClick={() => setShowAddModal(false)} className="p-1 rounded-lg hover:bg-emerald-500/10">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateEquipment} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold mb-1">Modelo do Equipamento</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: John Deere 8370R / Hilux SRX..."
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold mb-1">Fabricante</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Toyota, John Deere..."
+                    value={manufacturer}
+                    onChange={(e) => setManufacturer(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Ano</label>
+                  <input
+                    type="number"
+                    value={year}
+                    onChange={(e) => setYear(parseInt(e.target.value) || 2024)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  />
+                </div>
+              </div>
+
+              {activeTab === 'VEICULO' ? (
+                <div>
+                  <label className="block font-bold mb-1">Placa do Veículo</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: QAA-8J90"
+                    value={licensePlate}
+                    onChange={(e) => setLicensePlate(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block font-bold mb-1">Código de Patrimônio</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: TRAT-003 ou MAQ-005"
+                    value={patrimonyCode}
+                    onChange={(e) => setPatrimonyCode(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold mb-1">Setor Operacional</label>
+                  <select
+                    value={sector}
+                    onChange={(e) => setSector(e.target.value as Sector)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  >
+                    <option value="PREPARO_SOLO">Preparo de Solo</option>
+                    <option value="COLHEITA">Colheita</option>
+                    <option value="PULVERIZACAO">Pulverização</option>
+                    <option value="AGRICOLA">Agrícola</option>
+                    <option value="LOGISTICA">Logística / Transporte</option>
+                    <option value="DIRETORIA">Diretoria</option>
+                    <option value="OFICINA_MANUTENCAO">Oficina</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">Capacidade Tanque (L)</label>
+                  <input
+                    type="number"
+                    value={tankCapacityLiters}
+                    onChange={(e) => setTankCapacityLiters(parseInt(e.target.value) || 0)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-3 py-1.5 rounded-xl hover:bg-emerald-500/10"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-amber-500 text-gray-950 font-bold"
+                >
+                  Cadastrar Equipamento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+};

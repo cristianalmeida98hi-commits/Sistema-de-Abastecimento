@@ -1,0 +1,6 @@
+{
+  "name": "AndradeAgro",
+  "description": "Sistema de gestão inteligente do agronegócio para controle de abastecimentos, frotas, máquinas agrícolas, manutenções e consumo de combustível.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

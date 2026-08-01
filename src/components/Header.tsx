@@ -9,6 +9,7 @@ import { getUsers, setCurrentUser } from '../utils/storage';
 interface HeaderProps {
   currentUser: User;
   onUserChanged: (user: User) => void;
+  onLogout: () => void;
   onOpenFuelingModal: () => void;
   onOpenQRScanner: () => void;
   onNavigate: (tab: string) => void;
@@ -22,6 +23,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   currentUser,
   onUserChanged,
+  onLogout,
   onOpenFuelingModal,
   onOpenQRScanner,
   onNavigate,
@@ -46,7 +48,9 @@ export const Header: React.FC<HeaderProps> = ({
           
           {/* Section Title */}
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Visão Geral</h1>
+            <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">
+              {currentUser.role === 'FUNCIONARIO' ? 'Módulo do Operador' : 'Painel Administrativo'}
+            </h1>
           </div>
 
           {/* Quick Search Input */}
@@ -93,70 +97,72 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="hidden sm:inline">Novo Abastecimento</span>
             </button>
 
-            {/* Notifications Bell */}
-            <div className="relative">
-              <button
-                onClick={() => setShowAlertsDropdown(!showAlertsDropdown)}
-                className={`w-9 h-9 rounded-full border flex items-center justify-center relative transition-colors ${
-                  darkMode
-                    ? 'bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60'
-                    : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
-                }`}
-                title="Alertas e Notificações"
-              >
-                <Bell className="w-4.5 h-4.5" />
-                {unresolvedAlerts.length > 0 && (
-                  <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full"></span>
-                )}
-              </button>
-
-              {/* Alerts Dropdown Popover */}
-              {showAlertsDropdown && (
-                <div className={`absolute right-0 mt-3 w-80 sm:w-96 rounded-3xl shadow-2xl border p-4 z-50 animate-in fade-in slide-in-from-top-2 ${
-                  darkMode ? 'bg-[#042d23] border-emerald-800 text-emerald-100' : 'bg-white border-slate-200 text-slate-800'
-                }`}>
-                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-emerald-900/50">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-500" />
-                      <span className="font-bold text-xs">Alertas Críticos ({unresolvedAlerts.length})</span>
-                    </div>
-                    <button 
-                      onClick={() => { setShowAlertsDropdown(false); onNavigate('alerts'); }}
-                      className="text-[11px] text-[#064E3B] dark:text-[#C5A059] font-bold hover:underline"
-                    >
-                      Ver Todos
-                    </button>
-                  </div>
-
-                  {unresolvedAlerts.length === 0 ? (
-                    <div className="py-6 text-center text-xs text-slate-400">
-                      <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-1.5 opacity-80" />
-                      Nenhum alerta pendente.
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                      {unresolvedAlerts.slice(0, 4).map(alert => (
-                        <div 
-                          key={alert.id}
-                          onClick={() => { setShowAlertsDropdown(false); onNavigate('alerts'); }}
-                          className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
-                            alert.severity === 'ALTA' 
-                              ? 'bg-red-50 border-red-100 text-red-900 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-200' 
-                              : 'bg-emerald-50 border-emerald-100 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-200'
-                          }`}
-                        >
-                          <div className="font-semibold flex items-center justify-between mb-0.5">
-                            <span>{alert.title}</span>
-                            <span className="text-[10px] opacity-75">{alert.date}</span>
-                          </div>
-                          <p className="text-[11px] opacity-90 line-clamp-2">{alert.description}</p>
-                        </div>
-                      ))}
-                    </div>
+            {/* Notifications Bell (Only for ADMINs) */}
+            {currentUser.role === 'ADMIN' && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowAlertsDropdown(!showAlertsDropdown)}
+                  className={`w-9 h-9 rounded-full border flex items-center justify-center relative transition-colors ${
+                    darkMode
+                      ? 'bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60'
+                      : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+                  }`}
+                  title="Alertas e Notificações"
+                >
+                  <Bell className="w-4.5 h-4.5" />
+                  {unresolvedAlerts.length > 0 && (
+                    <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full"></span>
                   )}
-                </div>
-              )}
-            </div>
+                </button>
+
+                {/* Alerts Dropdown Popover */}
+                {showAlertsDropdown && (
+                  <div className={`absolute right-0 mt-3 w-80 sm:w-96 rounded-3xl shadow-2xl border p-4 z-50 animate-in fade-in slide-in-from-top-2 ${
+                    darkMode ? 'bg-[#042d23] border-emerald-800 text-emerald-100' : 'bg-white border-slate-200 text-slate-800'
+                  }`}>
+                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-emerald-900/50">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-500" />
+                        <span className="font-bold text-xs">Alertas Críticos ({unresolvedAlerts.length})</span>
+                      </div>
+                      <button 
+                        onClick={() => { setShowAlertsDropdown(false); onNavigate('alerts'); }}
+                        className="text-[11px] text-[#064E3B] dark:text-[#C5A059] font-bold hover:underline"
+                      >
+                        Ver Todos
+                      </button>
+                    </div>
+
+                    {unresolvedAlerts.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-400">
+                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-1.5 opacity-80" />
+                        Nenhum alerta pendente.
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                        {unresolvedAlerts.slice(0, 4).map(alert => (
+                          <div 
+                            key={alert.id}
+                            onClick={() => { setShowAlertsDropdown(false); onNavigate('alerts'); }}
+                            className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
+                              alert.severity === 'ALTA' 
+                                ? 'bg-red-50 border-red-100 text-red-900 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-200' 
+                                : 'bg-emerald-50 border-emerald-100 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-200'
+                            }`}
+                          >
+                            <div className="font-semibold flex items-center justify-between mb-0.5">
+                              <span>{alert.title}</span>
+                              <span className="text-[10px] opacity-75">{alert.date}</span>
+                            </div>
+                            <p className="text-[11px] opacity-90 line-clamp-2">{alert.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Dark Mode Toggle */}
             <button
@@ -240,17 +246,35 @@ export const Header: React.FC<HeaderProps> = ({
                     ))}
                   </div>
 
-                  <div className="mt-3 pt-2 border-t border-slate-100 dark:border-emerald-900/40 text-center">
+                  <div className="mt-3 pt-2 border-t border-slate-100 dark:border-emerald-900/40 text-center space-y-2">
                     <button
                       onClick={() => { setShowRoleModal(false); onNavigate('settings'); }}
                       className="text-[11px] text-[#064E3B] dark:text-[#C5A059] font-bold hover:underline flex items-center justify-center gap-1 w-full"
                     >
                       <UserIcon className="w-3.5 h-3.5" /> Configurações de Perfil
                     </button>
+
+                    <button
+                      onClick={() => { setShowRoleModal(false); onLogout(); }}
+                      className="text-[11px] text-red-600 dark:text-red-400 font-bold hover:bg-red-50 dark:hover:bg-red-950/40 py-1.5 px-2 rounded-xl flex items-center justify-center gap-1.5 w-full transition-colors"
+                    >
+                      <LogOut className="w-3.5 h-3.5" /> Sair da Conta (Logout)
+                    </button>
                   </div>
                 </div>
               )}
             </div>
+
+            {/* Logout Quick Button */}
+            <button
+              onClick={onLogout}
+              className={`p-2 rounded-full border text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 transition-colors ${
+                darkMode ? 'border-emerald-900' : 'border-slate-200'
+              }`}
+              title="Sair da Conta (Logout)"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
 
           </div>
 

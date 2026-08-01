@@ -9,7 +9,8 @@ import {
 
 const STORAGE_KEYS = {
   USERS: 'andradeagro_users_v1',
-  CURRENT_USER: 'andradeagro_current_user_v1',
+  REMEMBERED_USER: 'andradeagro_remembered_user_v1',
+  SESSION_USER: 'andradeagro_session_user_v1',
   VEHICLES: 'andradeagro_vehicles_v1',
   GAS_STATIONS: 'andradeagro_gas_stations_v1',
   FUEL_LOGS: 'andradeagro_fuel_logs_v1',
@@ -53,9 +54,6 @@ export function initStorage() {
   if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
     setStored(STORAGE_KEYS.USERS, INITIAL_USERS);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.CURRENT_USER)) {
-    setStored(STORAGE_KEYS.CURRENT_USER, INITIAL_USERS[0]); // Default Admin Carlos Andrade
-  }
   if (!localStorage.getItem(STORAGE_KEYS.VEHICLES)) {
     setStored(STORAGE_KEYS.VEHICLES, INITIAL_VEHICLES);
   }
@@ -84,12 +82,78 @@ export function getUsers(): User[] {
   return getStored(STORAGE_KEYS.USERS, INITIAL_USERS);
 }
 
-export function getCurrentUser(): User {
-  return getStored(STORAGE_KEYS.CURRENT_USER, INITIAL_USERS[0]);
+export function getCurrentUser(): User | null {
+  try {
+    // Check active session first
+    const sessionStr = sessionStorage.getItem(STORAGE_KEYS.SESSION_USER);
+    if (sessionStr) {
+      return JSON.parse(sessionStr);
+    }
+    // Then check remembered user in localStorage
+    const rememberedStr = localStorage.getItem(STORAGE_KEYS.REMEMBERED_USER);
+    if (rememberedStr) {
+      return JSON.parse(rememberedStr);
+    }
+  } catch (err) {
+    console.error('Error reading current user session:', err);
+  }
+  return null;
+}
+
+export function loginUser(email: string, password: string, rememberMe: boolean): { success: boolean; user?: User; error?: string } {
+  const users = getUsers();
+  const targetEmail = email.trim().toLowerCase();
+  
+  const user = users.find(u => u.email.toLowerCase() === targetEmail);
+
+  if (!user) {
+    return { success: false, error: 'E-mail não cadastrado no sistema AndradeAgro.' };
+  }
+
+  if (!user.active) {
+    return { success: false, error: 'Este usuário está inativo no sistema. Fale com a administração.' };
+  }
+
+  const expectedPassword = user.password || '123456';
+  if (password !== expectedPassword) {
+    return { success: false, error: 'Senha incorreta. Verifique e tente novamente.' };
+  }
+
+  try {
+    sessionStorage.setItem(STORAGE_KEYS.SESSION_USER, JSON.stringify(user));
+    if (rememberMe) {
+      localStorage.setItem(STORAGE_KEYS.REMEMBERED_USER, JSON.stringify(user));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.REMEMBERED_USER);
+    }
+
+    // Add Audit Log
+    logAuditEvent('LOGIN', 'Acesso', `Login realizado com sucesso (${user.role === 'ADMIN' ? 'Administrador' : 'Funcionário'})`);
+
+    window.dispatchEvent(new Event('andradeagro_data_updated'));
+    return { success: true, user };
+  } catch (err) {
+    return { success: false, error: 'Erro ao salvar sessão de login.' };
+  }
+}
+
+export function logoutUser(): void {
+  try {
+    sessionStorage.removeItem(STORAGE_KEYS.SESSION_USER);
+    localStorage.removeItem(STORAGE_KEYS.REMEMBERED_USER);
+    window.dispatchEvent(new Event('andradeagro_data_updated'));
+  } catch (err) {
+    console.error('Error logging out:', err);
+  }
 }
 
 export function setCurrentUser(user: User): void {
-  setStored(STORAGE_KEYS.CURRENT_USER, user);
+  try {
+    sessionStorage.setItem(STORAGE_KEYS.SESSION_USER, JSON.stringify(user));
+    window.dispatchEvent(new Event('andradeagro_data_updated'));
+  } catch (err) {
+    console.error('Error setting current user:', err);
+  }
 }
 
 export function getVehicles(): Vehicle[] {

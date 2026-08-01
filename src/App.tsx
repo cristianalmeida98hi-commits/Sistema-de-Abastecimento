@@ -9,7 +9,7 @@ import {
   getFuelLogs, getMaintenanceLogs, getAlerts, getAuditLogs, getSettings,
   addFuelLog, updateFuelLog, deleteFuelLog, addVehicle, updateVehicle, deleteVehicle,
   addMaintenance, updateMaintenance, addGasStation, updateGasStation, addUser,
-  updateUser, resolveAlert, updateSettings
+  updateUser, resolveAlert, updateSettings, logoutUser
 } from './utils/storage';
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings } from './types';
 import { Header } from './components/Header';
@@ -27,6 +27,8 @@ import { SettingsAndAboutView } from './components/SettingsAndAboutView';
 import { OperatorFuelingView } from './components/OperatorFuelingView';
 import { FuelingFormModal } from './components/FuelingFormModal';
 import { QRCodeScannerModal } from './components/QRCodeScannerModal';
+import { QRCodeModuleView } from './components/QRCodeModuleView';
+import { LoginView } from './components/LoginView';
 
 export default function App() {
   // Init Local Storage Seed
@@ -35,7 +37,7 @@ export default function App() {
   }, []);
 
   // State
-  const [currentUser, setCurrentUser] = useState<User>(getCurrentUser());
+  const [currentUser, setCurrentUser] = useState<User | null>(getCurrentUser());
   const [users, setUsers] = useState<User[]>(getUsers());
   const [vehicles, setVehicles] = useState<Vehicle[]>(getVehicles());
   const [gasStations, setGasStations] = useState<GasStation[]>(getGasStations());
@@ -46,22 +48,20 @@ export default function App() {
   const [settings, setSettings] = useState<SystemSettings>(getSettings());
 
   // UI State
-  const [activeTab, setActiveTab] = useState<string>(
-    currentUser.role === 'FUNCIONARIO' ? 'operator-fueling' : 'dashboard'
-  );
+  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [loginSuccessMessage, setLoginSuccessMessage] = useState<string | null>(null);
 
-  // Sync tab on user role change
+  // Sync tab when currentUser changes or logs in
   useEffect(() => {
-    if (currentUser.role === 'FUNCIONARIO') {
-      if (activeTab !== 'operator-fueling' && activeTab !== 'my-fuel-logs') {
-        setActiveTab('operator-fueling');
-      }
-    } else if (currentUser.role === 'ADMIN') {
-      if (activeTab === 'operator-fueling' || activeTab === 'my-fuel-logs') {
-        setActiveTab('dashboard');
+    if (currentUser) {
+      if (currentUser.role === 'FUNCIONARIO') {
+        if (activeTab !== 'operator-fueling' && activeTab !== 'my-fuel-logs' && activeTab !== 'qr-codes') {
+          setActiveTab('operator-fueling');
+        }
       }
     }
-  }, [currentUser]);
+  }, [currentUser, activeTab]);
+
   const [darkMode, setDarkMode] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -73,7 +73,8 @@ export default function App() {
 
   // Sync state on updates
   const refreshState = () => {
-    setCurrentUser(getCurrentUser());
+    const freshUser = getCurrentUser();
+    setCurrentUser(freshUser);
     setUsers(getUsers());
     setVehicles(getVehicles());
     setGasStations(getGasStations());
@@ -91,6 +92,21 @@ export default function App() {
   }, []);
 
   // Handlers
+  const handleLogout = () => {
+    logoutUser();
+    setCurrentUser(null);
+  };
+
+  const handleLoginSuccess = (user: User) => {
+    setCurrentUser(user);
+    setLoginSuccessMessage(null);
+    if (user.role === 'FUNCIONARIO') {
+      setActiveTab('operator-fueling');
+    } else {
+      setActiveTab('dashboard');
+    }
+  };
+
   const handleOpenFuelingModalWithEquipment = (equipmentId: string) => {
     setPreSelectedVehicleId(equipmentId);
     setIsFuelingModalOpen(true);
@@ -99,7 +115,23 @@ export default function App() {
   const handleAddFuelLog = (logData: Omit<FuelLog, 'id' | 'createdAt'>) => {
     addFuelLog(logData);
     refreshState();
+    
+    // Auto logout back to login screen as requested
+    logoutUser();
+    setCurrentUser(null);
+    setLoginSuccessMessage('Abastecimento registrado com sucesso! O sistema retornou para a tela de login.');
   };
+
+  // 1. If not authenticated, render Login Screen
+  if (!currentUser) {
+    return (
+      <LoginView
+        onLoginSuccess={handleLoginSuccess}
+        darkMode={darkMode}
+        successMessage={loginSuccessMessage}
+      />
+    );
+  }
 
   return (
     <div className={`min-h-screen flex flex-row font-sans antialiased transition-colors duration-300 ${
@@ -110,6 +142,7 @@ export default function App() {
       <Sidebar
         activeTab={activeTab}
         onNavigate={(tab) => setActiveTab(tab)}
+        onLogout={handleLogout}
         currentUser={currentUser}
         alerts={alerts}
         darkMode={darkMode}
@@ -124,6 +157,7 @@ export default function App() {
         <Header
           currentUser={currentUser}
           onUserChanged={(u) => { setCurrentUser(u); refreshState(); }}
+          onLogout={handleLogout}
           onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
           onOpenQRScanner={() => setIsQRScannerModalOpen(true)}
           onNavigate={(tab) => setActiveTab(tab)}
@@ -200,6 +234,16 @@ export default function App() {
               onAddVehicle={(v) => { addVehicle(v); refreshState(); }}
               onUpdateVehicle={(id, fields) => { updateVehicle(id, fields); refreshState(); }}
               onDeleteVehicle={(id) => { deleteVehicle(id); refreshState(); }}
+              onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
+              darkMode={darkMode}
+            />
+          )}
+
+          {activeTab === 'qr-codes' && (
+            <QRCodeModuleView
+              vehicles={vehicles}
+              fuelLogs={fuelLogs}
+              currentUser={currentUser}
               onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
               darkMode={darkMode}
             />
@@ -294,6 +338,7 @@ export default function App() {
         isOpen={isQRScannerModalOpen}
         onClose={() => setIsQRScannerModalOpen(false)}
         vehicles={vehicles}
+        fuelLogs={fuelLogs}
         onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
         darkMode={darkMode}
       />

@@ -7,11 +7,12 @@ import React, { useState, useEffect } from 'react';
 import { 
   initStorage, getCurrentUser, getUsers, getVehicles, getGasStations, 
   getFuelLogs, getMaintenanceLogs, getAlerts, getAuditLogs, getSettings,
+  getMachineIssues, getPreventiveItems, addMachineIssue, resolveMachineIssue, recordPreventiveService,
   addFuelLog, updateFuelLog, deleteFuelLog, addVehicle, updateVehicle, deleteVehicle,
   addMaintenance, updateMaintenance, addGasStation, updateGasStation, addUser,
   updateUser, resolveAlert, updateSettings, logoutUser
 } from './utils/storage';
-import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings } from './types';
+import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -28,6 +29,7 @@ import { OperatorFuelingView } from './components/OperatorFuelingView';
 import { FuelingFormModal } from './components/FuelingFormModal';
 import { QRCodeScannerModal } from './components/QRCodeScannerModal';
 import { QRCodeModuleView } from './components/QRCodeModuleView';
+import { MachineDigitalSheetModal } from './components/MachineDigitalSheetModal';
 import { LoginView } from './components/LoginView';
 
 export default function App() {
@@ -43,6 +45,8 @@ export default function App() {
   const [gasStations, setGasStations] = useState<GasStation[]>(getGasStations());
   const [fuelLogs, setFuelLogs] = useState<FuelLog[]>(getFuelLogs());
   const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>(getMaintenanceLogs());
+  const [machineIssues, setMachineIssues] = useState<MachineIssue[]>(getMachineIssues());
+  const [preventiveItems, setPreventiveItems] = useState<PreventiveMaintenanceItem[]>(getPreventiveItems());
   const [alerts, setAlerts] = useState<SmartAlert[]>(getAlerts());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(getAuditLogs());
   const [settings, setSettings] = useState<SystemSettings>(getSettings());
@@ -70,6 +74,7 @@ export default function App() {
   const [isFuelingModalOpen, setIsFuelingModalOpen] = useState<boolean>(false);
   const [preSelectedVehicleId, setPreSelectedVehicleId] = useState<string | undefined>(undefined);
   const [isQRScannerModalOpen, setIsQRScannerModalOpen] = useState<boolean>(false);
+  const [selectedDigitalSheetVehicle, setSelectedDigitalSheetVehicle] = useState<Vehicle | null>(null);
 
   // Sync state on updates
   const refreshState = () => {
@@ -80,6 +85,8 @@ export default function App() {
     setGasStations(getGasStations());
     setFuelLogs(getFuelLogs());
     setMaintenanceLogs(getMaintenanceLogs());
+    setMachineIssues(getMachineIssues());
+    setPreventiveItems(getPreventiveItems());
     setAlerts(getAlerts());
     setAuditLogs(getAuditLogs());
     setSettings(getSettings());
@@ -235,6 +242,7 @@ export default function App() {
               onUpdateVehicle={(id, fields) => { updateVehicle(id, fields); refreshState(); }}
               onDeleteVehicle={(id) => { deleteVehicle(id); refreshState(); }}
               onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
+              onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
               darkMode={darkMode}
             />
           )}
@@ -245,6 +253,7 @@ export default function App() {
               fuelLogs={fuelLogs}
               currentUser={currentUser}
               onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
+              onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
               darkMode={darkMode}
             />
           )}
@@ -340,8 +349,40 @@ export default function App() {
         vehicles={vehicles}
         fuelLogs={fuelLogs}
         onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
+        onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
         darkMode={darkMode}
       />
+
+      {selectedDigitalSheetVehicle && (
+        <MachineDigitalSheetModal
+          isOpen={!!selectedDigitalSheetVehicle}
+          onClose={() => setSelectedDigitalSheetVehicle(null)}
+          vehicle={selectedDigitalSheetVehicle}
+          fuelLogs={fuelLogs}
+          maintenanceLogs={maintenanceLogs}
+          machineIssues={machineIssues}
+          preventiveItems={preventiveItems}
+          currentUser={currentUser}
+          onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
+          onReportProblemSubmit={(issueData) => {
+            addMachineIssue(issueData);
+            refreshState();
+          }}
+          onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => {
+            recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes);
+            refreshState();
+          }}
+          onResolveIssue={(issueId) => {
+            resolveMachineIssue(issueId);
+            refreshState();
+          }}
+          onUpdateVehicleStatus={(vehicleId, newStatus) => {
+            updateVehicle(vehicleId, { status: newStatus });
+            refreshState();
+          }}
+          darkMode={darkMode}
+        />
+      )}
 
     </div>
   );

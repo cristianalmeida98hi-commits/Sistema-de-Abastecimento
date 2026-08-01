@@ -1,4 +1,4 @@
-import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings } from '../types';
+import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from '../types';
 
 export const INITIAL_USERS: User[] = [
   {
@@ -342,3 +342,164 @@ export const INITIAL_SETTINGS: SystemSettings = {
   autoAlertsEnabled: true,
   themeMode: 'LIGHT'
 };
+
+export const INITIAL_MACHINE_ISSUES: MachineIssue[] = [
+  {
+    id: 'iss-001',
+    equipmentId: 'veh-002',
+    equipmentName: 'John Deere 7230J',
+    equipmentPlateOrCode: 'PAT-TR-002',
+    reportedByUserId: 'usr-003',
+    reportedByUserName: 'João Silva',
+    description: 'Vazamento leve de óleo hidráulico no engate rápido traseiro do comando.',
+    dateTime: '2026-07-30T10:15:00.000Z',
+    status: 'ABERTO',
+    photoUrl: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=600&auto=format&fit=crop&q=80'
+  }
+];
+
+export const INITIAL_PREVENTIVE_ITEMS: PreventiveMaintenanceItem[] = [
+  // veh-002: John Deere 7230J (Horímetro 1840)
+  {
+    id: 'prev-002-1',
+    equipmentId: 'veh-002',
+    itemKey: 'TROCA_OLEO_MOTOR',
+    itemName: 'Troca de Óleo do Motor',
+    lastServiceDate: '2026-06-15',
+    lastServiceHourmeter: 1600,
+    nextScheduledHourmeter: 1850, // 10h restantes -> Amarelo
+    intervalHours: 250
+  },
+  {
+    id: 'prev-002-2',
+    equipmentId: 'veh-002',
+    itemKey: 'FILTRO_OLEO',
+    itemName: 'Filtro de Óleo Lubrificante',
+    lastServiceDate: '2026-06-15',
+    lastServiceHourmeter: 1600,
+    nextScheduledHourmeter: 1850,
+    intervalHours: 250
+  },
+  {
+    id: 'prev-002-3',
+    equipmentId: 'veh-002',
+    itemKey: 'FILTRO_COMBUSTIVEL',
+    itemName: 'Filtro de Combustível / Separador',
+    lastServiceDate: '2026-05-10',
+    lastServiceHourmeter: 1400,
+    nextScheduledHourmeter: 1900,
+    intervalHours: 500
+  },
+  {
+    id: 'prev-002-4',
+    equipmentId: 'veh-002',
+    itemKey: 'FILTRO_AR',
+    itemName: 'Filtro de Ar do Motor',
+    lastServiceDate: '2026-06-01',
+    lastServiceHourmeter: 1500,
+    nextScheduledHourmeter: 2000,
+    intervalHours: 500
+  },
+  {
+    id: 'prev-002-5',
+    equipmentId: 'veh-002',
+    itemKey: 'LUBRIFICACAO',
+    itemName: 'Lubrificação Geral (Graxa)',
+    lastServiceDate: '2026-07-25',
+    lastServiceHourmeter: 1800,
+    nextScheduledHourmeter: 1850,
+    intervalHours: 50
+  },
+  {
+    id: 'prev-002-6',
+    equipmentId: 'veh-002',
+    itemKey: 'REVISAO_GERAL',
+    itemName: 'Revisões Gerais do Trator',
+    lastServiceDate: '2026-03-10',
+    lastServiceHourmeter: 1000,
+    nextScheduledHourmeter: 2000,
+    intervalHours: 1000
+  },
+  {
+    id: 'prev-002-7',
+    equipmentId: 'veh-002',
+    itemKey: 'PNEUS_ESTEIRAS',
+    itemName: 'Calibragem & Inspeção de Pneus/Esteiras',
+    lastServiceDate: '2026-07-20',
+    lastServiceHourmeter: 1780,
+    nextScheduledHourmeter: 1880,
+    intervalHours: 100
+  },
+
+  // veh-003: Colheitadeira Case 8250 (Horímetro 950)
+  {
+    id: 'prev-003-1',
+    equipmentId: 'veh-003',
+    itemKey: 'TROCA_OLEO_MOTOR',
+    itemName: 'Troca de Óleo do Motor',
+    lastServiceDate: '2026-07-01',
+    lastServiceHourmeter: 700,
+    nextScheduledHourmeter: 950, // 0h restantes -> Vermelho (Atrasado/Exato)
+    intervalHours: 250
+  },
+  {
+    id: 'prev-003-2',
+    equipmentId: 'veh-003',
+    itemKey: 'FILTRO_OLEO',
+    itemName: 'Filtro de Óleo Lubrificante',
+    lastServiceDate: '2026-07-01',
+    lastServiceHourmeter: 700,
+    nextScheduledHourmeter: 950,
+    intervalHours: 250
+  },
+  {
+    id: 'prev-003-3',
+    equipmentId: 'veh-003',
+    itemKey: 'FILTRO_COMBUSTIVEL',
+    itemName: 'Filtro de Combustível / Separador',
+    lastServiceDate: '2026-04-10',
+    lastServiceHourmeter: 500,
+    nextScheduledHourmeter: 1000,
+    intervalHours: 500
+  },
+  {
+    id: 'prev-003-4',
+    equipmentId: 'veh-003',
+    itemKey: 'FILTRO_AR',
+    itemName: 'Filtro de Ar do Motor',
+    lastServiceDate: '2026-06-10',
+    lastServiceHourmeter: 650,
+    nextScheduledHourmeter: 1150,
+    intervalHours: 500
+  },
+  {
+    id: 'prev-003-5',
+    equipmentId: 'veh-003',
+    itemKey: 'LUBRIFICACAO',
+    itemName: 'Lubrificação Geral (Graxa)',
+    lastServiceDate: '2026-07-28',
+    lastServiceHourmeter: 920,
+    nextScheduledHourmeter: 970,
+    intervalHours: 50
+  },
+  {
+    id: 'prev-003-6',
+    equipmentId: 'veh-003',
+    itemKey: 'REVISAO_GERAL',
+    itemName: 'Revisões Gerais da Colheitadeira',
+    lastServiceDate: '2026-01-15',
+    lastServiceHourmeter: 400,
+    nextScheduledHourmeter: 1400,
+    intervalHours: 1000
+  },
+  {
+    id: 'prev-003-7',
+    equipmentId: 'veh-003',
+    itemKey: 'PNEUS_ESTEIRAS',
+    itemName: 'Calibragem & Inspeção de Pneus/Esteiras',
+    lastServiceDate: '2026-07-15',
+    lastServiceHourmeter: 880,
+    nextScheduledHourmeter: 980,
+    intervalHours: 100
+  }
+];

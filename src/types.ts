@@ -131,7 +131,44 @@ export interface MaintenanceLog {
   notes?: string;
 }
 
-export type AlertType = 'SUSPICIOUS_FUEL' | 'MAINTENANCE_DUE' | 'IDLE_VEHICLE' | 'DOCUMENT_EXPIRING' | 'LOW_TANK_LEVEL';
+export type AlertType = 'SUSPICIOUS_FUEL' | 'MAINTENANCE_DUE' | 'IDLE_VEHICLE' | 'DOCUMENT_EXPIRING' | 'LOW_TANK_LEVEL' | 'MACHINE_ISSUE';
+
+export interface MachineIssue {
+  id: string;
+  equipmentId: string;
+  equipmentName: string;
+  equipmentPlateOrCode: string;
+  reportedByUserId: string;
+  reportedByUserName: string;
+  description: string;
+  photoUrl?: string;
+  dateTime: string;
+  status: 'ABERTO' | 'EM_ANALISE' | 'RESOLVIDO';
+  resolvedAt?: string;
+  resolvedBy?: string;
+  notes?: string;
+}
+
+export type PreventiveItemKey = 
+  | 'TROCA_OLEO_MOTOR' 
+  | 'FILTRO_OLEO' 
+  | 'FILTRO_COMBUSTIVEL' 
+  | 'FILTRO_AR' 
+  | 'LUBRIFICACAO' 
+  | 'REVISAO_GERAL' 
+  | 'PNEUS_ESTEIRAS';
+
+export interface PreventiveMaintenanceItem {
+  id: string;
+  equipmentId: string;
+  itemKey: PreventiveItemKey;
+  itemName: string;
+  lastServiceDate: string;
+  lastServiceHourmeter: number;
+  nextScheduledHourmeter: number;
+  intervalHours: number;
+  notes?: string;
+}
 
 export interface SmartAlert {
   id: string;

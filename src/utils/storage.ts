@@ -1,10 +1,10 @@
 import { 
-  User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings 
+  User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem, PreventiveItemKey 
 } from '../types';
 import { 
   INITIAL_USERS, INITIAL_VEHICLES, INITIAL_GAS_STATIONS, 
   INITIAL_FUEL_LOGS, INITIAL_MAINTENANCE_LOGS, INITIAL_ALERTS, 
-  INITIAL_AUDIT_LOGS, INITIAL_SETTINGS 
+  INITIAL_AUDIT_LOGS, INITIAL_SETTINGS, INITIAL_MACHINE_ISSUES, INITIAL_PREVENTIVE_ITEMS 
 } from '../data/seedData';
 
 const STORAGE_KEYS = {
@@ -15,6 +15,8 @@ const STORAGE_KEYS = {
   GAS_STATIONS: 'andradeagro_gas_stations_v1',
   FUEL_LOGS: 'andradeagro_fuel_logs_v1',
   MAINTENANCE_LOGS: 'andradeagro_maintenance_logs_v1',
+  MACHINE_ISSUES: 'andradeagro_machine_issues_v1',
+  PREVENTIVE_ITEMS: 'andradeagro_preventive_items_v1',
   ALERTS: 'andradeagro_alerts_v1',
   AUDIT_LOGS: 'andradeagro_audit_logs_v1',
   SETTINGS: 'andradeagro_settings_v1',
@@ -74,6 +76,12 @@ export function initStorage() {
   }
   if (!localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
     setStored(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.MACHINE_ISSUES)) {
+    setStored(STORAGE_KEYS.MACHINE_ISSUES, INITIAL_MACHINE_ISSUES);
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.PREVENTIVE_ITEMS)) {
+    setStored(STORAGE_KEYS.PREVENTIVE_ITEMS, INITIAL_PREVENTIVE_ITEMS);
   }
 }
 
@@ -182,6 +190,48 @@ export function getAuditLogs(): AuditLog[] {
 
 export function getSettings(): SystemSettings {
   return getStored(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+}
+
+export function getMachineIssues(): MachineIssue[] {
+  return getStored(STORAGE_KEYS.MACHINE_ISSUES, INITIAL_MACHINE_ISSUES);
+}
+
+export function getPreventiveItems(equipmentId?: string): PreventiveMaintenanceItem[] {
+  const all = getStored<PreventiveMaintenanceItem[]>(STORAGE_KEYS.PREVENTIVE_ITEMS, INITIAL_PREVENTIVE_ITEMS);
+  if (!equipmentId) return all;
+  
+  // Filter for equipment
+  const items = all.filter(item => item.equipmentId === equipmentId);
+  if (items.length > 0) return items;
+
+  // Default fallback generator if machine has no preventive items yet
+  const defaultKeys: { key: PreventiveItemKey; name: string; interval: number }[] = [
+    { key: 'TROCA_OLEO_MOTOR', name: 'Troca de Óleo do Motor', interval: 250 },
+    { key: 'FILTRO_OLEO', name: 'Filtro de Óleo Lubrificante', interval: 250 },
+    { key: 'FILTRO_COMBUSTIVEL', name: 'Filtro de Combustível / Separador', interval: 500 },
+    { key: 'FILTRO_AR', name: 'Filtro de Ar do Motor', interval: 500 },
+    { key: 'LUBRIFICACAO', name: 'Lubrificação Geral (Graxa)', interval: 50 },
+    { key: 'REVISAO_GERAL', name: 'Revisões Gerais do Equipamento', interval: 1000 },
+    { key: 'PNEUS_ESTEIRAS', name: 'Calibragem & Inspeção de Pneus/Esteiras', interval: 100 }
+  ];
+
+  const vehicles = getVehicles();
+  const target = vehicles.find(v => v.id === equipmentId);
+  const curHour = target?.currentHourmeter || 1000;
+
+  const generated: PreventiveMaintenanceItem[] = defaultKeys.map((def, idx) => ({
+    id: `prev-${equipmentId}-${idx + 1}`,
+    equipmentId,
+    itemKey: def.key,
+    itemName: def.name,
+    lastServiceDate: new Date().toISOString().slice(0, 10),
+    lastServiceHourmeter: Math.max(0, curHour - (def.interval / 2)),
+    nextScheduledHourmeter: curHour + (def.interval / 2),
+    intervalHours: def.interval
+  }));
+
+  setStored(STORAGE_KEYS.PREVENTIVE_ITEMS, [...all, ...generated]);
+  return generated;
 }
 
 // Audit Helper
@@ -305,6 +355,98 @@ export function updateMaintenance(id: string, fields: Partial<MaintenanceLog>): 
   const logs = getMaintenanceLogs();
   setStored(STORAGE_KEYS.MAINTENANCE_LOGS, logs.map(m => m.id === id ? { ...m, ...fields } : m));
   logAuditEvent('EDITAR', 'Manutenção', `Atualizou registro de manutenção ID ${id}.`);
+}
+
+// Machine Issue Mutators
+export function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' | 'status'>): MachineIssue {
+  const current = getMachineIssues();
+  const newIssue: MachineIssue = {
+    ...issueData,
+    id: `iss-${Date.now()}`,
+    dateTime: new Date().toISOString(),
+    status: 'ABERTO'
+  };
+  setStored(STORAGE_KEYS.MACHINE_ISSUES, [newIssue, ...current]);
+
+  // Also create smart alert for admins
+  const alerts = getAlerts();
+  const newAlert: SmartAlert = {
+    id: `alt-iss-${Date.now()}`,
+    type: 'MACHINE_ISSUE',
+    severity: 'ALTA',
+    title: `Problema Relatado: ${newIssue.equipmentName}`,
+    description: `Operador ${newIssue.reportedByUserName} relatou: "${newIssue.description}"`,
+    equipmentId: newIssue.equipmentId,
+    equipmentName: newIssue.equipmentName,
+    date: newIssue.dateTime.slice(0, 10),
+    resolved: false
+  };
+  setStored(STORAGE_KEYS.ALERTS, [newAlert, ...alerts]);
+
+  logAuditEvent('CRIAR', 'Problema', `Relatou problema em ${newIssue.equipmentName}: ${newIssue.description}`);
+  return newIssue;
+}
+
+export function resolveMachineIssue(issueId: string, notes?: string): void {
+  const current = getMachineIssues();
+  const user = getCurrentUser();
+  const updated = current.map(iss => {
+    if (iss.id === issueId) {
+      return {
+        ...iss,
+        status: 'RESOLVIDO' as const,
+        resolvedAt: new Date().toISOString(),
+        resolvedBy: user?.name || 'Administrador',
+        notes: notes || iss.notes
+      };
+    }
+    return iss;
+  });
+  setStored(STORAGE_KEYS.MACHINE_ISSUES, updated);
+  logAuditEvent('EDITAR', 'Problema', `Resolveu o problema relatado ID ${issueId}`);
+}
+
+// Preventive Maintenance Mutators
+export function recordPreventiveService(
+  equipmentId: string, 
+  itemKey: PreventiveItemKey, 
+  currentHourmeter: number, 
+  notes?: string
+): void {
+  const all = getPreventiveItems();
+  const target = all.find(item => item.equipmentId === equipmentId && item.itemKey === itemKey);
+  
+  if (target) {
+    const updatedItem: PreventiveMaintenanceItem = {
+      ...target,
+      lastServiceDate: new Date().toISOString().slice(0, 10),
+      lastServiceHourmeter: currentHourmeter,
+      nextScheduledHourmeter: currentHourmeter + target.intervalHours,
+      notes: notes || target.notes
+    };
+    const updatedList = all.map(item => item.id === target.id ? updatedItem : item);
+    setStored(STORAGE_KEYS.PREVENTIVE_ITEMS, updatedList);
+
+    // Create a maintenance log entry
+    addMaintenance({
+      equipmentId,
+      equipmentName: target.itemName,
+      equipmentPlateOrCode: equipmentId,
+      date: new Date().toISOString().slice(0, 10),
+      type: 'TROCA_OLEO',
+      title: `Manutenção Preventiva: ${target.itemName}`,
+      description: `Serviço realizado no horímetro ${currentHourmeter}h. Próxima com +${target.intervalHours}h.`,
+      kmOrHourAtService: currentHourmeter,
+      nextServiceKmOrHour: currentHourmeter + target.intervalHours,
+      cost: 0,
+      supplierOrWorkshop: 'Oficina Interna AndradeAgro',
+      performedBy: getCurrentUser()?.name || 'Oficina',
+      status: 'CONCLUIDO',
+      notes
+    });
+
+    logAuditEvent('CRIAR', 'Manutenção Preventiva', `Registrou ${target.itemName} no horímetro ${currentHourmeter}h.`);
+  }
 }
 
 // Gas Stations Mutators

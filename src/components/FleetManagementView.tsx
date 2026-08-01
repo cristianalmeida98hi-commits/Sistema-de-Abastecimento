@@ -16,6 +16,7 @@ interface FleetManagementViewProps {
   onUpdateVehicle: (id: string, v: Partial<Vehicle>) => void;
   onDeleteVehicle: (id: string) => void;
   onOpenFuelingModalWithEquipment: (equipmentId: string) => void;
+  onOpenDigitalSheet?: (vehicle: Vehicle) => void;
   darkMode: boolean;
 }
 
@@ -29,6 +30,7 @@ export const FleetManagementView: React.FC<FleetManagementViewProps> = ({
   onUpdateVehicle,
   onDeleteVehicle,
   onOpenFuelingModalWithEquipment,
+  onOpenDigitalSheet,
   darkMode
 }) => {
   const [activeTab, setActiveTab] = useState<EquipmentCategory>('VEICULO');
@@ -309,10 +311,16 @@ export const FleetManagementView: React.FC<FleetManagementViewProps> = ({
               {/* Card Actions */}
               <div className="pt-2 border-t border-emerald-800/20 flex items-center justify-between gap-1">
                 <button
-                  onClick={() => setPassportVehicle(v)}
+                  onClick={() => {
+                    if (onOpenDigitalSheet) {
+                      onOpenDigitalSheet(v);
+                    } else {
+                      setPassportVehicle(v);
+                    }
+                  }}
                   className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-1"
                 >
-                  <Eye className="w-3.5 h-3.5" /> Ficha
+                  <Eye className="w-3.5 h-3.5" /> Ficha Digital
                 </button>
 
                 <button

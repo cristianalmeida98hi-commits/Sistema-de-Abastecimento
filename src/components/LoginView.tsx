@@ -232,56 +232,131 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, darkMode, 
             </form>
           </div>
 
-          {/* Quick Select Demo Cards - Somente Funcionários */}
-          <div className="pt-6 border-t border-slate-100 dark:border-emerald-900/60 mt-6 space-y-2">
+          {/* Quick Select Demo Cards - Todos os Usuários (ADMs e Funcionários) */}
+          <div className="pt-6 border-t border-slate-100 dark:border-emerald-900/60 mt-6 space-y-3">
             <p className="text-[11px] font-extrabold uppercase text-slate-600 dark:text-emerald-300 tracking-wider">
-              Atalho de Acesso Rápido para Funcionários:
+              Atalhos de Acesso Rápido (ADMs e Funcionários):
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-              
-              {/* Funcionário João Silva */}
-              <button
-                type="button"
-                onClick={() => handleQuickSelect('joao.silva@andradeagro.com.br', '123456')}
-                className={`p-2.5 rounded-2xl border text-left transition-all hover:border-[#064E3B] ${
-                  darkMode ? 'bg-emerald-950/60 border-emerald-900' : 'bg-slate-50 border-slate-200'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-[#064E3B] dark:text-[#FACC15]">
-                    João Silva (Operador)
-                  </span>
-                  <span className="text-[9px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                    FUNCIONÁRIO
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-600 dark:text-emerald-300/80 truncate mt-0.5">
-                  joao.silva@andradeagro.com.br
-                </p>
-              </button>
+            {/* Seção Administradores */}
+            <div className="space-y-1">
+              <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-400 uppercase tracking-widest">
+                Administradores (Acesso Total)
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                {/* Admin Carlos */}
+                <button
+                  type="button"
+                  onClick={() => handleQuickSelect('admin@andradeagro.com.br', '123456')}
+                  className={`p-2.5 rounded-2xl border text-left transition-all hover:border-[#064E3B] ${
+                    darkMode ? 'bg-emerald-950/60 border-emerald-900' : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-[#064E3B] dark:text-[#FACC15]">
+                      Carlos Andrade
+                    </span>
+                    <span className="text-[9px] font-bold bg-[#064E3B]/10 dark:bg-[#FACC15]/20 text-[#064E3B] dark:text-[#FACC15] px-1.5 py-0.5 rounded">
+                      ADMIN
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-600 dark:text-emerald-300/80 truncate mt-0.5">
+                    admin@andradeagro.com.br
+                  </p>
+                </button>
 
-              {/* Funcionário Roberto Santos */}
-              <button
-                type="button"
-                onClick={() => handleQuickSelect('roberto.frentista@andradeagro.com.br', '123456')}
-                className={`p-2.5 rounded-2xl border text-left transition-all hover:border-[#064E3B] ${
-                  darkMode ? 'bg-emerald-950/60 border-emerald-900' : 'bg-slate-50 border-slate-200'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-[#064E3B] dark:text-[#FACC15]">
-                    Roberto Santos (Frentista)
-                  </span>
-                  <span className="text-[9px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                    FUNCIONÁRIO
-                  </span>
-                </div>
-                <p className="text-[10px] text-slate-600 dark:text-emerald-300/80 truncate mt-0.5">
-                  roberto.frentista@andradeagro.com.br
-                </p>
-              </button>
+                {/* Admin Patrícia */}
+                <button
+                  type="button"
+                  onClick={() => handleQuickSelect('patricia.gestao@andradeagro.com.br', '123456')}
+                  className={`p-2.5 rounded-2xl border text-left transition-all hover:border-[#064E3B] ${
+                    darkMode ? 'bg-emerald-950/60 border-emerald-900' : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-[#064E3B] dark:text-[#FACC15]">
+                      Patrícia Lima
+                    </span>
+                    <span className="text-[9px] font-bold bg-[#064E3B]/10 dark:bg-[#FACC15]/20 text-[#064E3B] dark:text-[#FACC15] px-1.5 py-0.5 rounded">
+                      ADMIN
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-600 dark:text-emerald-300/80 truncate mt-0.5">
+                    patricia.gestao@andradeagro.com.br
+                  </p>
+                </button>
+              </div>
+            </div>
 
+            {/* Seção Funcionários */}
+            <div className="space-y-1 pt-1">
+              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-widest">
+                Funcionários (Campo & Operação)
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                {/* João Silva */}
+                <button
+                  type="button"
+                  onClick={() => handleQuickSelect('joao.silva@andradeagro.com.br', '123456')}
+                  className={`p-2 rounded-2xl border text-left transition-all hover:border-[#064E3B] ${
+                    darkMode ? 'bg-emerald-950/60 border-emerald-900' : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-[#064E3B] dark:text-[#FACC15] truncate">
+                      João Silva
+                    </span>
+                    <span className="text-[8px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1 py-0.5 rounded shrink-0">
+                      OPERADOR
+                    </span>
+                  </div>
+                  <p className="text-[9px] text-slate-600 dark:text-emerald-300/80 truncate mt-0.5">
+                    joao.silva@andradeagro...
+                  </p>
+                </button>
+
+                {/* Marcos Oliveira */}
+                <button
+                  type="button"
+                  onClick={() => handleQuickSelect('marcos.operador@andradeagro.com.br', '123456')}
+                  className={`p-2 rounded-2xl border text-left transition-all hover:border-[#064E3B] ${
+                    darkMode ? 'bg-emerald-950/60 border-emerald-900' : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-[#064E3B] dark:text-[#FACC15] truncate">
+                      Marcos Oliveira
+                    </span>
+                    <span className="text-[8px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1 py-0.5 rounded shrink-0">
+                      COLHEITA
+                    </span>
+                  </div>
+                  <p className="text-[9px] text-slate-600 dark:text-emerald-300/80 truncate mt-0.5">
+                    marcos.operador@andrade...
+                  </p>
+                </button>
+
+                {/* Roberto Santos */}
+                <button
+                  type="button"
+                  onClick={() => handleQuickSelect('roberto.frentista@andradeagro.com.br', '123456')}
+                  className={`p-2 rounded-2xl border text-left transition-all hover:border-[#064E3B] ${
+                    darkMode ? 'bg-emerald-950/60 border-emerald-900' : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-[#064E3B] dark:text-[#FACC15] truncate">
+                      Roberto Santos
+                    </span>
+                    <span className="text-[8px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1 py-0.5 rounded shrink-0">
+                      FRENTISTA
+                    </span>
+                  </div>
+                  <p className="text-[9px] text-slate-600 dark:text-emerald-300/80 truncate mt-0.5">
+                    roberto.frentista@andrade...
+                  </p>
+                </button>
+              </div>
             </div>
           </div>
 

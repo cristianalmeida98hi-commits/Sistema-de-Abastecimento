@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { 
   QrCode, Search, Filter, Printer, Download, Fuel, Truck, 
   CheckCircle2, Camera, Clock, Calendar, Shield, ExternalLink,
-  RefreshCw, FileText, ArrowRight, User as UserIcon
+  RefreshCw, FileText, ArrowRight, User as UserIcon, Info
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Vehicle, User, FuelLog, EquipmentCategory, Sector } from '../types';
@@ -440,25 +440,25 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
                 </div>
               </div>
 
-              {/* ACTION: Initiate new fuel log or open digital sheet */}
+              {/* Notice Banner */}
+              <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-2">
+                <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                <p>
+                  <strong>📌 Ficha Digital Fixa:</strong> O QR Code da máquina serve exclusivamente para consulta de informações e histórico atualizado em tempo real. Os registros de abastecimento são feitos unicamente pelo Tablet Operacional dos colaboradores.
+                </p>
+              </div>
+
+              {/* ACTION: Open digital sheet */}
               <div className="space-y-2 pt-1">
                 {onOpenDigitalSheet && (
                   <button
                     onClick={() => onOpenDigitalSheet(currentScannedVehicle)}
-                    className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md transition-transform active:scale-[0.99]"
+                    className="w-full py-3.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.99]"
                   >
-                    <FileText className="w-4 h-4" />
-                    <span>📄 ABRIR FICHA DIGITAL DA MÁQUINA</span>
+                    <FileText className="w-4 h-4 text-[#FACC15]" />
+                    <span>📄 ABRIR FICHA DIGITAL COMPLETA DA MÁQUINA</span>
                   </button>
                 )}
-
-                <button
-                  onClick={() => onOpenFuelingModalWithEquipment(currentScannedVehicle.id)}
-                  className="w-full py-3.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.99]"
-                >
-                  <Fuel className="w-4 h-4 fill-[#FACC15]" />
-                  <span>⚡ INICIAR NOVO REGISTRO DE ABASTECIMENTO</span>
-                </button>
               </div>
 
               {/* Recent Fueling History for Scanned Machine */}

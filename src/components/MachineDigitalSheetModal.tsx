@@ -332,22 +332,11 @@ export const MachineDigitalSheetModal: React.FC<MachineDigitalSheetModalProps> =
             {/* Quick Action Buttons */}
             <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
               <button
-                onClick={() => {
-                  onClose();
-                  onOpenFuelingModalWithEquipment(vehicle.id);
-                }}
-                className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-md transition-transform active:scale-95"
-              >
-                <Fuel className="w-4 h-4 fill-[#FACC15]" />
-                <span>Novo Abastecimento</span>
-              </button>
-
-              <button
                 onClick={() => setIsReportProblemOpen(true)}
                 className="flex-1 md:flex-initial px-4 py-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-md transition-transform active:scale-95"
               >
                 <AlertTriangle className="w-4 h-4" />
-                <span>Informar Problema</span>
+                <span>Informar Problema Na Máquina</span>
               </button>
             </div>
 

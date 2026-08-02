@@ -192,26 +192,20 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
 
             {/* Action buttons */}
             <div className="space-y-2 pt-1">
-              {onOpenDigitalSheet && liveVehicle && (
+              {liveVehicle && (
                 <button
                   onClick={() => {
                     onClose();
-                    onOpenDigitalSheet(liveVehicle);
+                    if (onOpenDigitalSheet) {
+                      onOpenDigitalSheet(liveVehicle);
+                    }
                   }}
-                  className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-md transition-transform active:scale-[0.99]"
+                  className="w-full py-3.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.99]"
                 >
-                  <FileText className="w-4 h-4" />
-                  <span>📄 ABRIR FICHA DIGITAL DA MÁQUINA</span>
+                  <FileText className="w-4 h-4 text-[#FACC15]" />
+                  <span>📄 ABRIR FICHA DIGITAL DA MÁQUINA (EM TEMPO REAL)</span>
                 </button>
               )}
-
-              <button
-                onClick={handleStartFueling}
-                className="w-full py-3.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.99]"
-              >
-                <Fuel className="w-4 h-4 fill-[#FACC15]" />
-                <span>⚡ INICIAR NOVO REGISTRO DE ABASTECIMENTO</span>
-              </button>
             </div>
           </div>
         )}

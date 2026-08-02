@@ -8,7 +8,7 @@ interface QRCodeScannerModalProps {
   onClose: () => void;
   vehicles: Vehicle[];
   fuelLogs?: FuelLog[];
-  onOpenFuelingModalWithEquipment: (equipmentId: string) => void;
+  onOpenFuelingModalWithEquipment?: (equipmentId: string) => void;
   onOpenDigitalSheet?: (vehicle: Vehicle) => void;
   darkMode: boolean;
 }
@@ -18,7 +18,6 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
   onClose,
   vehicles,
   fuelLogs = [],
-  onOpenFuelingModalWithEquipment,
   onOpenDigitalSheet,
   darkMode
 }) => {
@@ -33,25 +32,14 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
     return vehicles.find(v => v.id === scannedResult.id) || scannedResult;
   }, [scannedResult, vehicles]);
 
-  // Fuel logs for live vehicle
-  const liveVehicleFuelLogs = useMemo(() => {
-    if (!liveVehicle) return [];
-    return fuelLogs
-      .filter(f => f.equipmentId === liveVehicle.id)
-      .sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-  }, [liveVehicle, fuelLogs]);
-
   const handleScan = () => {
     const found = vehicles.find(v => v.id === selectedVehicleId);
     if (found) {
       setScannedResult(found);
-    }
-  };
-
-  const handleStartFueling = () => {
-    if (liveVehicle) {
-      onClose();
-      onOpenFuelingModalWithEquipment(liveVehicle.id);
+      if (onOpenDigitalSheet) {
+        onClose();
+        onOpenDigitalSheet(found);
+      }
     }
   };
 
@@ -164,30 +152,12 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
               </div>
             </div>
 
-            {/* Histórico de Abastecimento */}
-            <div className="space-y-2 text-xs">
-              <h4 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                <FileText className="w-4 h-4 text-[#064E3B] dark:text-[#FACC15]" />
-                <span>Histórico de Abastecimento ({liveVehicleFuelLogs.length})</span>
-              </h4>
-              {liveVehicleFuelLogs.length === 0 ? (
-                <div className="p-3 text-center text-[11px] text-slate-500 border border-dashed rounded-xl">
-                  Nenhum registro de abastecimento para este equipamento ainda.
-                </div>
-              ) : (
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                  {liveVehicleFuelLogs.slice(0, 4).map(log => (
-                    <div key={log.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-emerald-950/60 border text-[11px] flex items-center justify-between">
-                      <div>
-                        <span className="font-extrabold text-slate-900 dark:text-slate-100">{log.liters} L</span>
-                        <span className="text-slate-500 ml-2">{new Date(log.dateTime).toLocaleDateString('pt-BR')}</span>
-                        <p className="text-slate-600 dark:text-emerald-300">Op: {log.driverOrOperatorName}</p>
-                      </div>
-                      <span className="font-bold text-slate-800 dark:text-emerald-200">{formatCurrency(log.totalValue)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+            {/* Notice & Action button */}
+            <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-2">
+              <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+              <p>
+                <strong>📌 Ficha Digital & Manutenção:</strong> O QR Code direciona para a ficha do equipamento com controle de trocas de óleo, preventiva e histórico de manutenção. Registros de abastecimento são realizados no tablet operacional.
+              </p>
             </div>
 
             {/* Action buttons */}
@@ -203,7 +173,7 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
                   className="w-full py-3.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.99]"
                 >
                   <FileText className="w-4 h-4 text-[#FACC15]" />
-                  <span>📄 ABRIR FICHA DIGITAL DA MÁQUINA (EM TEMPO REAL)</span>
+                  <span>📄 ABRIR FICHA DIGITAL & ABA DE MANUTENÇÃO</span>
                 </button>
               )}
             </div>

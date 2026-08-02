@@ -51,7 +51,7 @@ export const MachineDigitalSheetModal: React.FC<MachineDigitalSheetModalProps> =
   onRecordPreventiveService,
   onResolveIssue,
   onUpdateVehicleStatus,
-  initialTab = 'PREVENTIVE',
+  initialTab = 'HISTORY',
   darkMode
 }) => {
   if (!isOpen || !vehicle) return null;

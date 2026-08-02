@@ -72,7 +72,10 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
     const v = vehicles.find(item => item.id === vehicleId);
     if (v) {
       setSelectedVehicle(v);
-      setScanSuccessMessage(`Dados atualizados obtidos com sucesso para: ${v.model} (${v.licensePlate || v.patrimonyCode})`);
+      if (onOpenDigitalSheet) {
+        onOpenDigitalSheet(v);
+      }
+      setScanSuccessMessage(`Ficha Digital e Aba de Manutenção abertas para: ${v.model} (${v.licensePlate || v.patrimonyCode})`);
       setTimeout(() => setScanSuccessMessage(null), 4000);
     }
   };
@@ -444,7 +447,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
               <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-2">
                 <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <p>
-                  <strong>📌 Ficha Digital Fixa:</strong> O QR Code da máquina serve exclusivamente para consulta de informações e histórico atualizado em tempo real. Os registros de abastecimento são feitos unicamente pelo Tablet Operacional dos colaboradores.
+                  <strong>📌 Ficha Digital & Manutenção:</strong> O QR Code da máquina direciona diretamente para a aba de manutenção com o histórico de trocas de óleo, preventivas e registros técnicos. Os abastecimentos são efetuados via tablet operacional.
                 </p>
               </div>
 
@@ -456,53 +459,8 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
                     className="w-full py-3.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.99]"
                   >
                     <FileText className="w-4 h-4 text-[#FACC15]" />
-                    <span>📄 ABRIR FICHA DIGITAL COMPLETA DA MÁQUINA</span>
+                    <span>📄 ABRIR FICHA DIGITAL & ABA DE MANUTENÇÃO DA MÁQUINA</span>
                   </button>
-                )}
-              </div>
-
-              {/* Recent Fueling History for Scanned Machine */}
-              <div className="space-y-3 pt-2">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <h3 className="font-extrabold text-xs text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <FileText className="w-4 h-4 text-[#064E3B] dark:text-[#FACC15]" />
-                    <span>Histórico de Abastecimentos ({selectedVehicleFuelLogs.length})</span>
-                  </h3>
-                  <span className="text-[10px] text-slate-500 font-bold">Dados do Banco</span>
-                </div>
-
-                {selectedVehicleFuelLogs.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-500 border border-dashed rounded-2xl">
-                    Nenhum abastecimento registrado ainda para este equipamento.
-                  </div>
-                ) : (
-                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                    {selectedVehicleFuelLogs.slice(0, 5).map(log => (
-                      <div
-                        key={log.id}
-                        className="p-3 rounded-2xl bg-slate-50 dark:bg-emerald-950/60 border text-xs flex items-center justify-between gap-2"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-black text-slate-900 dark:text-slate-100">
-                              {log.liters} Litros
-                            </span>
-                            <span className="text-[10px] text-slate-500">
-                              {new Date(log.dateTime).toLocaleDateString('pt-BR')}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-slate-600 dark:text-emerald-300">
-                            Op: {log.driverOrOperatorName} • {formatCurrency(log.totalValue)}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-[10px] font-bold text-[#064E3B] dark:text-[#FACC15] bg-emerald-100 dark:bg-emerald-900 px-2 py-0.5 rounded-md">
-                            {log.operationType || 'PADRAO'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
                 )}
               </div>
 

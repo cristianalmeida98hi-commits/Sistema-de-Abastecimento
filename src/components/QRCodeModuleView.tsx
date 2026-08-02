@@ -12,7 +12,6 @@ interface QRCodeModuleViewProps {
   vehicles: Vehicle[];
   fuelLogs: FuelLog[];
   currentUser: User;
-  onOpenFuelingModalWithEquipment: (equipmentId: string) => void;
   onOpenDigitalSheet?: (vehicle: Vehicle) => void;
   darkMode: boolean;
 }
@@ -21,7 +20,6 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
   vehicles,
   fuelLogs,
   currentUser,
-  onOpenFuelingModalWithEquipment,
   onOpenDigitalSheet,
   darkMode
 }) => {
@@ -83,7 +81,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
   // Generate unique URL/ID link stored in QR Code
   const getVehicleQRCodeValue = (v: Vehicle) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app';
-    return `${origin}/#vehicle/${v.id}`;
+    return `${origin}/#maintenance/${v.id}`;
   };
 
   // Print Badge for single machine

@@ -115,6 +115,9 @@ export const FleetManagementView: React.FC<FleetManagementViewProps> = ({
     const printWin = window.open('', '_blank');
     if (!printWin) return;
 
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app';
+    const qrValue = `${origin}/#maintenance/${v.id}`;
+
     printWin.document.write(`
       <html>
         <head>
@@ -133,7 +136,7 @@ export const FleetManagementView: React.FC<FleetManagementViewProps> = ({
             <p><strong>${v.model}</strong></p>
             <p className="tag">${v.licensePlate || v.patrimonyCode}</p>
             <div class="qr">
-              <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(`ANDRADEAGRO:${v.id}:${v.licensePlate || v.patrimonyCode}`)}" alt="QR Code" />
+              <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrValue)}" alt="QR Code" />
             </div>
             <p>Setor: ${getSectorName(v.sector)}</p>
             <p>Tanque: ${v.tankCapacityLiters} Litros (${getFuelTypeName(v.fuelType)})</p>
@@ -364,7 +367,7 @@ export const FleetManagementView: React.FC<FleetManagementViewProps> = ({
               {/* QR Code & Badge */}
               <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center flex flex-col items-center justify-center">
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(`ANDRADEAGRO:${passportVehicle.id}:${passportVehicle.licensePlate || passportVehicle.patrimonyCode}`)}`}
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(`${typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app'}/#maintenance/${passportVehicle.id}`)}`}
                   alt="QR Code"
                   className="w-36 h-36 border rounded-xl p-1 bg-white"
                 />

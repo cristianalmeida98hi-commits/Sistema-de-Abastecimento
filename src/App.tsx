@@ -98,6 +98,37 @@ export default function App() {
     return () => window.removeEventListener('andradeagro_data_updated', handleUpdate);
   }, []);
 
+  // Listen for QR code scans or deep links via URL hash (e.g. #maintenance/v1 or #vehicle/v1)
+  useEffect(() => {
+    const handleHashCheck = () => {
+      const hash = window.location.hash;
+      if (!hash) return;
+
+      let matchedVehicleId: string | null = null;
+
+      if (hash.includes('vehicle/') || hash.includes('maintenance/')) {
+        const parts = hash.split('/');
+        matchedVehicleId = parts[parts.length - 1];
+      } else if (hash.includes('ANDRADEAGRO:')) {
+        const parts = hash.split(':');
+        matchedVehicleId = parts[1];
+      }
+
+      if (matchedVehicleId) {
+        const found = vehicles.find(v => v.id === matchedVehicleId || v.licensePlate === matchedVehicleId || v.patrimonyCode === matchedVehicleId);
+        if (found) {
+          setSelectedDigitalSheetVehicle(found);
+          setIsFuelingModalOpen(false);
+          setIsQRScannerModalOpen(false);
+        }
+      }
+    };
+
+    handleHashCheck();
+    window.addEventListener('hashchange', handleHashCheck);
+    return () => window.removeEventListener('hashchange', handleHashCheck);
+  }, [vehicles]);
+
   // Handlers
   const handleLogout = () => {
     logoutUser();
@@ -252,7 +283,6 @@ export default function App() {
               vehicles={vehicles}
               fuelLogs={fuelLogs}
               currentUser={currentUser}
-              onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
               onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
               darkMode={darkMode}
             />
@@ -348,7 +378,6 @@ export default function App() {
         onClose={() => setIsQRScannerModalOpen(false)}
         vehicles={vehicles}
         fuelLogs={fuelLogs}
-        onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
         onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
         darkMode={darkMode}
       />
@@ -363,7 +392,7 @@ export default function App() {
           machineIssues={machineIssues}
           preventiveItems={preventiveItems}
           currentUser={currentUser}
-          onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
+          initialTab="HISTORY"
           onAddMaintenance={(m) => {
             addMaintenance(m);
             refreshState();

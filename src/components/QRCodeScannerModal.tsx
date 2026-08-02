@@ -8,7 +8,6 @@ interface QRCodeScannerModalProps {
   onClose: () => void;
   vehicles: Vehicle[];
   fuelLogs?: FuelLog[];
-  onOpenFuelingModalWithEquipment?: (equipmentId: string) => void;
   onOpenDigitalSheet?: (vehicle: Vehicle) => void;
   darkMode: boolean;
 }

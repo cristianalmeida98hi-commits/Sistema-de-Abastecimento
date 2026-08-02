@@ -9,7 +9,7 @@ import {
   getFuelLogs, getMaintenanceLogs, getAlerts, getAuditLogs, getSettings,
   getMachineIssues, getPreventiveItems, addMachineIssue, resolveMachineIssue, recordPreventiveService,
   addFuelLog, updateFuelLog, deleteFuelLog, addVehicle, updateVehicle, deleteVehicle,
-  addMaintenance, updateMaintenance, addGasStation, updateGasStation, addUser,
+  addMaintenance, updateMaintenance, deleteMaintenance, addGasStation, updateGasStation, addUser,
   updateUser, resolveAlert, updateSettings, logoutUser
 } from './utils/storage';
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
@@ -364,6 +364,18 @@ export default function App() {
           preventiveItems={preventiveItems}
           currentUser={currentUser}
           onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
+          onAddMaintenance={(m) => {
+            addMaintenance(m);
+            refreshState();
+          }}
+          onUpdateMaintenance={(id, fields) => {
+            updateMaintenance(id, fields);
+            refreshState();
+          }}
+          onDeleteMaintenance={(id) => {
+            deleteMaintenance(id);
+            refreshState();
+          }}
           onReportProblemSubmit={(issueData) => {
             addMachineIssue(issueData);
             refreshState();

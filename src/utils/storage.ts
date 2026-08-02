@@ -357,6 +357,12 @@ export function updateMaintenance(id: string, fields: Partial<MaintenanceLog>): 
   logAuditEvent('EDITAR', 'Manutenção', `Atualizou registro de manutenção ID ${id}.`);
 }
 
+export function deleteMaintenance(id: string): void {
+  const logs = getMaintenanceLogs();
+  setStored(STORAGE_KEYS.MAINTENANCE_LOGS, logs.filter(m => m.id !== id));
+  logAuditEvent('EXCLUIR', 'Manutenção', `Excluiu o registro de manutenção ID ${id}.`);
+}
+
 // Machine Issue Mutators
 export function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' | 'status'>): MachineIssue {
   const current = getMachineIssues();

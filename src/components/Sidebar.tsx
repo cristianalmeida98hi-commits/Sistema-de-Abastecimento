@@ -17,7 +17,7 @@ interface SidebarProps {
   onToggleCollapse: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({
+export const SidebarComponent: React.FC<SidebarProps> = ({
   activeTab,
   onNavigate,
   onLogout,
@@ -27,32 +27,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggleCollapse,
 }) => {
-  const unresolvedAlertsCount = (alerts || []).filter(a => !a.resolved).length;
+  const unresolvedAlertsCount = React.useMemo(() => (alerts || []).filter(a => !a.resolved).length, [alerts]);
 
-  const navItems = currentUser.role === 'FUNCIONARIO' 
-    ? [
-        { id: 'operator-fueling', label: 'Lançamento de Campo', icon: Fuel, badge: 'Rápido' },
-        { id: 'my-fuel-logs', label: 'Meus Lançamentos', icon: GasPump, badge: null }
-      ]
-    : [
-        { id: 'dashboard', label: 'Visão Geral', icon: LayoutDashboard, badge: null },
-        { id: 'fuel-logs', label: 'Abastecimentos', icon: Fuel, badge: null },
-        { id: 'fleet', label: 'Veículos & Máquinas', icon: Truck, badge: '160' },
-        { id: 'qr-codes', label: 'Módulo QR Code', icon: QrCode, badge: 'QR' },
-        { id: 'maintenance', label: 'Manutenções', icon: Wrench, badge: null },
-        { id: 'stations', label: 'Postos & Preços', icon: GasPump, badge: null },
-        { id: 'staff', label: 'Equipe & Motoristas', icon: Users, badge: null },
-        { id: 'reports', label: 'Relatórios', icon: FileSpreadsheet, badge: 'PDF' },
-        { 
-          id: 'alerts', 
-          label: 'Alertas', 
-          icon: AlertTriangle, 
-          badge: unresolvedAlertsCount > 0 ? `${unresolvedAlertsCount}` : null,
-          badgeColor: 'bg-[#FACC15] text-[#064E3B] font-bold'
-        },
-        { id: 'audit', label: 'Auditoria & Logs', icon: ShieldCheck, badge: null },
-        { id: 'settings', label: 'Configurações', icon: Settings, badge: null },
-      ];
+  const navItems = React.useMemo(() => {
+    return currentUser.role === 'FUNCIONARIO' 
+      ? [
+          { id: 'operator-fueling', label: 'Lançamento de Campo', icon: Fuel, badge: 'Rápido' },
+          { id: 'my-fuel-logs', label: 'Meus Lançamentos', icon: GasPump, badge: null }
+        ]
+      : [
+          { id: 'dashboard', label: 'Visão Geral', icon: LayoutDashboard, badge: null },
+          { id: 'fuel-logs', label: 'Abastecimentos', icon: Fuel, badge: null },
+          { id: 'fleet', label: 'Veículos & Máquinas', icon: Truck, badge: '160' },
+          { id: 'qr-codes', label: 'Módulo QR Code', icon: QrCode, badge: 'QR' },
+          { id: 'maintenance', label: 'Manutenções', icon: Wrench, badge: null },
+          { id: 'stations', label: 'Postos & Preços', icon: GasPump, badge: null },
+          { id: 'staff', label: 'Equipe & Motoristas', icon: Users, badge: null },
+          { id: 'reports', label: 'Relatórios', icon: FileSpreadsheet, badge: 'PDF' },
+          { 
+            id: 'alerts', 
+            label: 'Alertas', 
+            icon: AlertTriangle, 
+            badge: unresolvedAlertsCount > 0 ? `${unresolvedAlertsCount}` : null,
+            badgeColor: 'bg-[#FACC15] text-[#064E3B] font-bold'
+          },
+          { id: 'audit', label: 'Auditoria & Logs', icon: ShieldCheck, badge: null },
+          { id: 'settings', label: 'Configurações', icon: Settings, badge: null },
+        ];
+  }, [currentUser.role, unresolvedAlertsCount]);
 
   return (
     <aside className={`transition-all duration-300 ease-in-out flex flex-col shrink-0 shadow-xl z-20 ${
@@ -156,4 +158,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </aside>
   );
 };
+
+export const Sidebar = React.memo(SidebarComponent);
 

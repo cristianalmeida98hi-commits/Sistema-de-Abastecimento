@@ -1,6 +1,4 @@
 import { FuelLog, Vehicle, FuelType, Sector } from '../types';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('pt-BR', {
@@ -174,11 +172,14 @@ export function calculateFuelLogMetrics(
 }
 
 // PDF Export Function
-export function exportFuelLogsPDF(
+export async function exportFuelLogsPDF(
   logs: FuelLog[],
   title: string = 'Relatório de Abastecimentos',
   companyInfo: { name: string; slogan: string; cnpj: string }
 ) {
+  const { default: jsPDF } = await import('jspdf');
+  const { default: autoTable } = await import('jspdf-autotable');
+
   const doc = new jsPDF({
     orientation: 'landscape',
     unit: 'mm',

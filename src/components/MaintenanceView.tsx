@@ -16,7 +16,7 @@ interface MaintenanceViewProps {
   darkMode: boolean;
 }
 
-export const MaintenanceView: React.FC<MaintenanceViewProps> = ({
+export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
   maintenanceLogs,
   vehicles,
   users,
@@ -335,3 +335,5 @@ export const MaintenanceView: React.FC<MaintenanceViewProps> = ({
     </div>
   );
 };
+
+export const MaintenanceView = React.memo(MaintenanceViewComponent);

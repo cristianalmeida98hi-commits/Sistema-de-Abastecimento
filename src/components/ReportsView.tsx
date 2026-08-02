@@ -18,7 +18,7 @@ interface ReportsViewProps {
   darkMode: boolean;
 }
 
-export const ReportsView: React.FC<ReportsViewProps> = ({
+export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
   fuelLogs = [],
   vehicles = [],
   gasStations = [],
@@ -45,9 +45,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     });
   }, [fuelLogs, startDate, endDate, selectedCategory, selectedEquipmentId, selectedDriverId, selectedStationId]);
 
-  const totalLiters = filteredLogs.reduce((acc, l) => acc + l.liters, 0);
-  const totalCost = filteredLogs.reduce((acc, l) => acc + l.totalValue, 0);
-  const avgPricePerLiter = totalLiters > 0 ? totalCost / totalLiters : 0;
+  const summaryMetrics = useMemo(() => {
+    const totalLiters = filteredLogs.reduce((acc, l) => acc + l.liters, 0);
+    const totalCost = filteredLogs.reduce((acc, l) => acc + l.totalValue, 0);
+    const avgPricePerLiter = totalLiters > 0 ? totalCost / totalLiters : 0;
+    return { totalLiters, totalCost, avgPricePerLiter };
+  }, [filteredLogs]);
+
+  const { totalLiters, totalCost, avgPricePerLiter } = summaryMetrics;
 
   const handleExportPDF = () => {
     exportFuelLogsPDF(
@@ -262,3 +267,5 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     </div>
   );
 };
+
+export const ReportsView = React.memo(ReportsViewComponent);

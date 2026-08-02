@@ -20,7 +20,7 @@ interface FleetManagementViewProps {
   darkMode: boolean;
 }
 
-export const FleetManagementView: React.FC<FleetManagementViewProps> = ({
+export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = ({
   vehicles,
   users,
   currentUser,
@@ -543,3 +543,5 @@ export const FleetManagementView: React.FC<FleetManagementViewProps> = ({
     </div>
   );
 };
+
+export const FleetManagementView = React.memo(FleetManagementViewComponent);

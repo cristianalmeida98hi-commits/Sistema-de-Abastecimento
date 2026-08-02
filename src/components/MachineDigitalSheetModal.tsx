@@ -31,10 +31,10 @@ interface MachineDigitalSheetModalProps {
   onResolveIssue?: (issueId: string) => void;
   onUpdateVehicleStatus?: (vehicleId: string, newStatus: 'ATIVO' | 'EM_MANUTENCAO' | 'INATIVO') => void;
   initialTab?: 'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES';
-  darkMode: boolean;
+  darkMode?: boolean;
 }
 
-export const MachineDigitalSheetModal: React.FC<MachineDigitalSheetModalProps> = ({
+export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModalProps> = ({
   isOpen,
   onClose,
   vehicle,
@@ -52,7 +52,7 @@ export const MachineDigitalSheetModal: React.FC<MachineDigitalSheetModalProps> =
   onResolveIssue,
   onUpdateVehicleStatus,
   initialTab = 'HISTORY',
-  darkMode
+  darkMode = true
 }) => {
   if (!isOpen || !vehicle) return null;
 
@@ -1306,3 +1306,5 @@ export const MachineDigitalSheetModal: React.FC<MachineDigitalSheetModalProps> =
     </div>
   );
 };
+
+export const MachineDigitalSheetModal = React.memo(MachineDigitalSheetModalComponent);

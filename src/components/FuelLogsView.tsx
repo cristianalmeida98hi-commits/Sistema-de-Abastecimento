@@ -18,11 +18,11 @@ interface FuelLogsViewProps {
   onOpenFuelingModal: () => void;
   onUpdateFuelLog: (id: string, log: Partial<FuelLog>) => void;
   onDeleteFuelLog: (id: string) => void;
-  darkMode: boolean;
+  darkMode?: boolean;
   searchQuery: string;
 }
 
-export const FuelLogsView: React.FC<FuelLogsViewProps> = ({
+export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
   fuelLogs = [],
   vehicles = [],
   gasStations = [],
@@ -32,7 +32,7 @@ export const FuelLogsView: React.FC<FuelLogsViewProps> = ({
   onOpenFuelingModal,
   onUpdateFuelLog,
   onDeleteFuelLog,
-  darkMode,
+  darkMode = true,
   searchQuery
 }) => {
   // Filters
@@ -601,3 +601,5 @@ export const FuelLogsView: React.FC<FuelLogsViewProps> = ({
     </div>
   );
 };
+
+export const FuelLogsView = React.memo(FuelLogsViewComponent);

@@ -22,7 +22,7 @@ interface FuelingFormModalProps {
   darkMode: boolean;
 }
 
-export const FuelingFormModal: React.FC<FuelingFormModalProps> = ({
+export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   isOpen,
   onClose,
   onSubmit,
@@ -597,3 +597,5 @@ export const FuelingFormModal: React.FC<FuelingFormModalProps> = ({
     </div>
   );
 };
+
+export const FuelingFormModal = React.memo(FuelingFormModalComponent);

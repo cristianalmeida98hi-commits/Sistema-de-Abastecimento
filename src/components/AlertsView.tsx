@@ -7,14 +7,13 @@ interface AlertsViewProps {
   alerts: SmartAlert[];
   currentUser: User;
   onResolveAlert: (id: string) => void;
-  darkMode: boolean;
+  darkMode?: boolean;
 }
 
 export const AlertsView: React.FC<AlertsViewProps> = ({
   alerts,
   currentUser,
-  onResolveAlert,
-  darkMode
+  onResolveAlert
 }) => {
   const unresolvedAlerts = alerts.filter(a => !a.resolved);
   const resolvedAlerts = alerts.filter(a => a.resolved);
@@ -24,28 +23,26 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
       
       {/* Header */}
       <div>
-        <h1 className="text-xl sm:text-2xl font-black text-gray-900 dark:text-emerald-100 flex items-center gap-2">
+        <h1 className="text-xl sm:text-2xl font-black text-emerald-100 flex items-center gap-2">
           <AlertTriangle className="w-6 h-6 text-amber-500" />
           Central de Alertas Inteligentes
         </h1>
-        <p className="text-xs text-gray-500 dark:text-emerald-400">
+        <p className="text-xs text-emerald-400">
           Identificação automática de consumo suspeito, revisões preventivas pendentes e vencimento de documentações.
         </p>
       </div>
 
       {/* Unresolved Alerts List */}
       <div className="space-y-3">
-        <h2 className="text-xs font-extrabold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+        <h2 className="text-xs font-extrabold uppercase tracking-wider text-amber-400">
           Alertas Pendentes ({unresolvedAlerts.length})
         </h2>
 
         {unresolvedAlerts.length === 0 ? (
-          <div className={`p-8 text-center rounded-2xl border ${
-            darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100'
-          }`}>
+          <div className="p-8 text-center rounded-2xl border bg-emerald-950/40 border-emerald-900">
             <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-80" />
-            <p className="font-bold text-sm text-gray-800 dark:text-emerald-200">Nenhum alerta pendente!</p>
-            <p className="text-xs text-gray-500 dark:text-emerald-400 mt-0.5">Tudo operando dentro das margens de segurança na fazenda.</p>
+            <p className="font-bold text-sm text-emerald-200">Nenhum alerta pendente!</p>
+            <p className="text-xs text-emerald-400 mt-0.5">Tudo operando dentro das margens de segurança na fazenda.</p>
           </div>
         ) : (
           unresolvedAlerts.map(alert => (
@@ -53,8 +50,8 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
               key={alert.id}
               className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
                 alert.severity === 'ALTA'
-                  ? 'bg-amber-500/10 border-amber-500/40 text-amber-900 dark:text-amber-200'
-                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
+                  ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
+                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
               }`}
             >
               <div className="flex items-start gap-3">
@@ -88,7 +85,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
       {/* Resolved Alerts History */}
       {resolvedAlerts.length > 0 && (
         <div className="space-y-3 pt-4 border-t border-emerald-800/20">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-emerald-400">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
             Histórico de Alertas Resolvidos ({resolvedAlerts.length})
           </h2>
 
@@ -96,15 +93,13 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
             {resolvedAlerts.map(alert => (
               <div
                 key={alert.id}
-                className={`p-3 rounded-xl border text-xs flex items-center justify-between ${
-                  darkMode ? 'bg-emerald-950/30 border-emerald-900' : 'bg-gray-50 border-gray-200'
-                }`}
+                className="p-3 rounded-xl border text-xs flex items-center justify-between bg-emerald-950/30 border-emerald-900"
               >
                 <div>
-                  <span className="font-bold">{alert.title}</span>
-                  <p className="text-[11px] opacity-80">{alert.description}</p>
+                  <span className="font-bold text-slate-100">{alert.title}</span>
+                  <p className="text-[11px] text-emerald-200 opacity-80">{alert.description}</p>
                 </div>
-                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                <span className="text-[10px] text-emerald-400 font-bold">
                   Resolvido por: {alert.resolvedBy || 'Sistema'}
                 </span>
               </div>

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import { 
   initStorage, getCurrentUser, getUsers, getVehicles, getGasStations, 
   getFuelLogs, getMaintenanceLogs, getAlerts, getAuditLogs, getSettings,
@@ -15,22 +15,30 @@ import {
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { DashboardView } from './components/DashboardView';
-import { FuelLogsView } from './components/FuelLogsView';
-import { FleetManagementView } from './components/FleetManagementView';
-import { MaintenanceView } from './components/MaintenanceView';
-import { GasStationsView } from './components/GasStationsView';
-import { StaffView } from './components/StaffView';
-import { ReportsView } from './components/ReportsView';
-import { AlertsView } from './components/AlertsView';
-import { AuditLogsView } from './components/AuditLogsView';
-import { SettingsAndAboutView } from './components/SettingsAndAboutView';
-import { OperatorFuelingView } from './components/OperatorFuelingView';
-import { FuelingFormModal } from './components/FuelingFormModal';
-import { QRCodeScannerModal } from './components/QRCodeScannerModal';
-import { QRCodeModuleView } from './components/QRCodeModuleView';
-import { MachineDigitalSheetModal } from './components/MachineDigitalSheetModal';
-import { LoginView } from './components/LoginView';
+
+// Lazy Loaded Views & Modals for optimum initial loading performance
+const DashboardView = React.lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
+const FuelLogsView = React.lazy(() => import('./components/FuelLogsView').then(m => ({ default: m.FuelLogsView })));
+const FleetManagementView = React.lazy(() => import('./components/FleetManagementView').then(m => ({ default: m.FleetManagementView })));
+const MaintenanceView = React.lazy(() => import('./components/MaintenanceView').then(m => ({ default: m.MaintenanceView })));
+const GasStationsView = React.lazy(() => import('./components/GasStationsView').then(m => ({ default: m.GasStationsView })));
+const StaffView = React.lazy(() => import('./components/StaffView').then(m => ({ default: m.StaffView })));
+const ReportsView = React.lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
+const AlertsView = React.lazy(() => import('./components/AlertsView').then(m => ({ default: m.AlertsView })));
+const AuditLogsView = React.lazy(() => import('./components/AuditLogsView').then(m => ({ default: m.AuditLogsView })));
+const SettingsAndAboutView = React.lazy(() => import('./components/SettingsAndAboutView').then(m => ({ default: m.SettingsAndAboutView })));
+const OperatorFuelingView = React.lazy(() => import('./components/OperatorFuelingView').then(m => ({ default: m.OperatorFuelingView })));
+const FuelingFormModal = React.lazy(() => import('./components/FuelingFormModal').then(m => ({ default: m.FuelingFormModal })));
+const QRCodeScannerModal = React.lazy(() => import('./components/QRCodeScannerModal').then(m => ({ default: m.QRCodeScannerModal })));
+const QRCodeModuleView = React.lazy(() => import('./components/QRCodeModuleView').then(m => ({ default: m.QRCodeModuleView })));
+const MachineDigitalSheetModal = React.lazy(() => import('./components/MachineDigitalSheetModal').then(m => ({ default: m.MachineDigitalSheetModal })));
+const LoginView = React.lazy(() => import('./components/LoginView').then(m => ({ default: m.LoginView })));
+
+const ViewLoader = () => (
+  <div className="flex items-center justify-center min-h-[300px] w-full">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-400"></div>
+  </div>
+);
 
 export default function App() {
   // Init Local Storage Seed
@@ -66,7 +74,7 @@ export default function App() {
     }
   }, [currentUser, activeTab]);
 
-  const [darkMode, setDarkMode] = useState<boolean>(false);
+  const darkMode = true;
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -77,7 +85,7 @@ export default function App() {
   const [selectedDigitalSheetVehicle, setSelectedDigitalSheetVehicle] = useState<Vehicle | null>(null);
 
   // Sync state on updates
-  const refreshState = () => {
+  const refreshState = useCallback(() => {
     const freshUser = getCurrentUser();
     setCurrentUser(freshUser);
     setUsers(getUsers());
@@ -90,13 +98,12 @@ export default function App() {
     setAlerts(getAlerts());
     setAuditLogs(getAuditLogs());
     setSettings(getSettings());
-  };
+  }, []);
 
   useEffect(() => {
-    const handleUpdate = () => refreshState();
-    window.addEventListener('andradeagro_data_updated', handleUpdate);
-    return () => window.removeEventListener('andradeagro_data_updated', handleUpdate);
-  }, []);
+    window.addEventListener('andradeagro_data_updated', refreshState);
+    return () => window.removeEventListener('andradeagro_data_updated', refreshState);
+  }, [refreshState]);
 
   // Listen for QR code scans or deep links via URL hash (e.g. #maintenance/v1 or #vehicle/v1)
   useEffect(() => {
@@ -163,18 +170,18 @@ export default function App() {
   // 1. If not authenticated, render Login Screen
   if (!currentUser) {
     return (
-      <LoginView
-        onLoginSuccess={handleLoginSuccess}
-        darkMode={darkMode}
-        successMessage={loginSuccessMessage}
-      />
+      <Suspense fallback={<ViewLoader />}>
+        <LoginView
+          onLoginSuccess={handleLoginSuccess}
+          darkMode={darkMode}
+          successMessage={loginSuccessMessage}
+        />
+      </Suspense>
     );
   }
 
   return (
-    <div className={`min-h-screen flex flex-row font-sans antialiased transition-colors duration-300 ${
-      darkMode ? 'bg-[#031d16] text-slate-100 dark' : 'bg-[#F8FAFC] text-slate-800'
-    }`}>
+    <div className="min-h-screen flex flex-row font-sans antialiased bg-[#031d16] text-slate-100 dark">
       
       {/* Sidebar Navigation */}
       <Sidebar
@@ -201,229 +208,213 @@ export default function App() {
           onNavigate={(tab) => setActiveTab(tab)}
           alerts={alerts}
           darkMode={darkMode}
-          onToggleDarkMode={() => setDarkMode(!darkMode)}
           searchQuery={searchQuery}
           onSearchChange={(q) => setSearchQuery(q)}
         />
 
         {/* Content View Container */}
         <main className="flex-1 p-6 sm:p-8 overflow-y-auto max-w-[1600px] w-full mx-auto">
-          
-          {activeTab === 'operator-fueling' && (
-            <OperatorFuelingView
-              currentUser={currentUser}
-              vehicles={vehicles}
-              gasStations={gasStations}
-              onAddFuelLog={handleAddFuelLog}
-              userLogs={fuelLogs}
-              darkMode={darkMode}
-            />
-          )}
+          <Suspense fallback={<ViewLoader />}>
+            {activeTab === 'operator-fueling' && (
+              <OperatorFuelingView
+                currentUser={currentUser}
+                vehicles={vehicles}
+                gasStations={gasStations}
+                onAddFuelLog={handleAddFuelLog}
+                userLogs={fuelLogs}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'my-fuel-logs' && (
-            <FuelLogsView
-              fuelLogs={fuelLogs.filter(l => l.createdById === currentUser.id || l.driverOrOperatorId === currentUser.id)}
-              vehicles={vehicles}
-              gasStations={gasStations}
-              users={users}
-              currentUser={currentUser}
-              settings={settings}
-              onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
-              onUpdateFuelLog={(id, fields) => { updateFuelLog(id, fields); refreshState(); }}
-              onDeleteFuelLog={(id) => { deleteFuelLog(id); refreshState(); }}
-              darkMode={darkMode}
-              searchQuery={searchQuery}
-            />
-          )}
+            {activeTab === 'my-fuel-logs' && (
+              <FuelLogsView
+                fuelLogs={fuelLogs.filter(l => l.createdById === currentUser.id || l.driverOrOperatorId === currentUser.id)}
+                vehicles={vehicles}
+                gasStations={gasStations}
+                users={users}
+                currentUser={currentUser}
+                settings={settings}
+                onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
+                onUpdateFuelLog={(id, fields) => updateFuelLog(id, fields)}
+                onDeleteFuelLog={(id) => deleteFuelLog(id)}
+                darkMode={darkMode}
+                searchQuery={searchQuery}
+              />
+            )}
 
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              fuelLogs={fuelLogs}
-              vehicles={vehicles}
-              onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
-              onNavigate={(tab) => setActiveTab(tab)}
-              darkMode={darkMode}
-            />
-          )}
+            {activeTab === 'dashboard' && (
+              <DashboardView
+                fuelLogs={fuelLogs}
+                vehicles={vehicles}
+                onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
+                onNavigate={(tab) => setActiveTab(tab)}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'fuel-logs' && (
-            <FuelLogsView
-              fuelLogs={fuelLogs}
-              vehicles={vehicles}
-              gasStations={gasStations}
-              users={users}
-              currentUser={currentUser}
-              settings={settings}
-              onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
-              onUpdateFuelLog={(id, fields) => { updateFuelLog(id, fields); refreshState(); }}
-              onDeleteFuelLog={(id) => { deleteFuelLog(id); refreshState(); }}
-              darkMode={darkMode}
-              searchQuery={searchQuery}
-            />
-          )}
+            {activeTab === 'fuel-logs' && (
+              <FuelLogsView
+                fuelLogs={fuelLogs}
+                vehicles={vehicles}
+                gasStations={gasStations}
+                users={users}
+                currentUser={currentUser}
+                settings={settings}
+                onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
+                onUpdateFuelLog={(id, fields) => updateFuelLog(id, fields)}
+                onDeleteFuelLog={(id) => deleteFuelLog(id)}
+                darkMode={darkMode}
+                searchQuery={searchQuery}
+              />
+            )}
 
-          {activeTab === 'fleet' && (
-            <FleetManagementView
-              vehicles={vehicles}
-              users={users}
-              currentUser={currentUser}
-              maintenanceLogs={maintenanceLogs}
-              fuelLogs={fuelLogs}
-              onAddVehicle={(v) => { addVehicle(v); refreshState(); }}
-              onUpdateVehicle={(id, fields) => { updateVehicle(id, fields); refreshState(); }}
-              onDeleteVehicle={(id) => { deleteVehicle(id); refreshState(); }}
-              onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
-              onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
-              darkMode={darkMode}
-            />
-          )}
+            {activeTab === 'fleet' && (
+              <FleetManagementView
+                vehicles={vehicles}
+                users={users}
+                currentUser={currentUser}
+                maintenanceLogs={maintenanceLogs}
+                fuelLogs={fuelLogs}
+                onAddVehicle={(v) => addVehicle(v)}
+                onUpdateVehicle={(id, fields) => updateVehicle(id, fields)}
+                onDeleteVehicle={(id) => deleteVehicle(id)}
+                onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
+                onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'qr-codes' && (
-            <QRCodeModuleView
-              vehicles={vehicles}
-              fuelLogs={fuelLogs}
-              currentUser={currentUser}
-              onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
-              darkMode={darkMode}
-            />
-          )}
+            {activeTab === 'qr-codes' && (
+              <QRCodeModuleView
+                vehicles={vehicles}
+                fuelLogs={fuelLogs}
+                currentUser={currentUser}
+                onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'maintenance' && (
-            <MaintenanceView
-              maintenanceLogs={maintenanceLogs}
-              vehicles={vehicles}
-              users={users}
-              currentUser={currentUser}
-              onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
-              onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}
-              darkMode={darkMode}
-            />
-          )}
+            {activeTab === 'maintenance' && (
+              <MaintenanceView
+                maintenanceLogs={maintenanceLogs}
+                vehicles={vehicles}
+                users={users}
+                currentUser={currentUser}
+                onAddMaintenance={(m) => addMaintenance(m)}
+                onUpdateMaintenance={(id, fields) => updateMaintenance(id, fields)}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'stations' && (
-            <GasStationsView
-              gasStations={gasStations}
-              onAddStation={(stn) => { addGasStation(stn); refreshState(); }}
-              onUpdateStation={(id, fields) => { updateGasStation(id, fields); refreshState(); }}
-              darkMode={darkMode}
-            />
-          )}
+            {activeTab === 'stations' && (
+              <GasStationsView
+                gasStations={gasStations}
+                onAddStation={(stn) => addGasStation(stn)}
+                onUpdateStation={(id, fields) => updateGasStation(id, fields)}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'staff' && (
-            <StaffView
-              users={users}
-              currentUser={currentUser}
-              onAddUser={(u) => { addUser(u); refreshState(); }}
-              onUpdateUser={(id, fields) => { updateUser(id, fields); refreshState(); }}
-              darkMode={darkMode}
-            />
-          )}
+            {activeTab === 'staff' && (
+              <StaffView
+                users={users}
+                currentUser={currentUser}
+                onAddUser={(u) => addUser(u)}
+                onUpdateUser={(id, fields) => updateUser(id, fields)}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'reports' && (
-            <ReportsView
-              fuelLogs={fuelLogs}
-              vehicles={vehicles}
-              gasStations={gasStations}
-              users={users}
-              settings={settings}
-              darkMode={darkMode}
-            />
-          )}
+            {activeTab === 'reports' && (
+              <ReportsView
+                fuelLogs={fuelLogs}
+                vehicles={vehicles}
+                gasStations={gasStations}
+                users={users}
+                settings={settings}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'alerts' && (
-            <AlertsView
-              alerts={alerts}
-              currentUser={currentUser}
-              onResolveAlert={(id) => { resolveAlert(id); refreshState(); }}
-              darkMode={darkMode}
-            />
-          )}
+            {activeTab === 'alerts' && (
+              <AlertsView
+                alerts={alerts}
+                currentUser={currentUser}
+                onResolveAlert={(id) => resolveAlert(id)}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'audit' && (
-            <AuditLogsView
-              auditLogs={auditLogs}
-              darkMode={darkMode}
-            />
-          )}
+            {activeTab === 'audit' && (
+              <AuditLogsView
+                auditLogs={auditLogs}
+                darkMode={darkMode}
+              />
+            )}
 
-          {activeTab === 'settings' && (
-            <SettingsAndAboutView
-              settings={settings}
-              currentUser={currentUser}
-              onUpdateSettings={(newSettings) => { updateSettings(newSettings); refreshState(); }}
-              darkMode={darkMode}
-            />
-          )}
-
+            {activeTab === 'settings' && (
+              <SettingsAndAboutView
+                settings={settings}
+                currentUser={currentUser}
+                onUpdateSettings={(newSettings) => updateSettings(newSettings)}
+                darkMode={darkMode}
+              />
+            )}
+          </Suspense>
         </main>
       </div>
 
       {/* Global Modals */}
-      <FuelingFormModal
-        isOpen={isFuelingModalOpen}
-        onClose={() => setIsFuelingModalOpen(false)}
-        onSubmit={handleAddFuelLog}
-        vehicles={vehicles}
-        gasStations={gasStations}
-        users={users}
-        currentUser={currentUser}
-        previousLogs={fuelLogs}
-        settings={settings}
-        preSelectedVehicleId={preSelectedVehicleId}
-        darkMode={darkMode}
-      />
+      <Suspense fallback={null}>
+        {isFuelingModalOpen && (
+          <FuelingFormModal
+            isOpen={isFuelingModalOpen}
+            onClose={() => setIsFuelingModalOpen(false)}
+            onSubmit={handleAddFuelLog}
+            vehicles={vehicles}
+            gasStations={gasStations}
+            users={users}
+            currentUser={currentUser}
+            previousLogs={fuelLogs}
+            settings={settings}
+            preSelectedVehicleId={preSelectedVehicleId}
+            darkMode={darkMode}
+          />
+        )}
 
-      <QRCodeScannerModal
-        isOpen={isQRScannerModalOpen}
-        onClose={() => setIsQRScannerModalOpen(false)}
-        vehicles={vehicles}
-        fuelLogs={fuelLogs}
-        onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
-        darkMode={darkMode}
-      />
+        {isQRScannerModalOpen && (
+          <QRCodeScannerModal
+            isOpen={isQRScannerModalOpen}
+            onClose={() => setIsQRScannerModalOpen(false)}
+            vehicles={vehicles}
+            fuelLogs={fuelLogs}
+            onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
+            darkMode={darkMode}
+          />
+        )}
 
-      {selectedDigitalSheetVehicle && (
-        <MachineDigitalSheetModal
-          isOpen={!!selectedDigitalSheetVehicle}
-          onClose={() => setSelectedDigitalSheetVehicle(null)}
-          vehicle={selectedDigitalSheetVehicle}
-          fuelLogs={fuelLogs}
-          maintenanceLogs={maintenanceLogs}
-          machineIssues={machineIssues}
-          preventiveItems={preventiveItems}
-          currentUser={currentUser}
-          initialTab="HISTORY"
-          onAddMaintenance={(m) => {
-            addMaintenance(m);
-            refreshState();
-          }}
-          onUpdateMaintenance={(id, fields) => {
-            updateMaintenance(id, fields);
-            refreshState();
-          }}
-          onDeleteMaintenance={(id) => {
-            deleteMaintenance(id);
-            refreshState();
-          }}
-          onReportProblemSubmit={(issueData) => {
-            addMachineIssue(issueData);
-            refreshState();
-          }}
-          onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => {
-            recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes);
-            refreshState();
-          }}
-          onResolveIssue={(issueId) => {
-            resolveMachineIssue(issueId);
-            refreshState();
-          }}
-          onUpdateVehicleStatus={(vehicleId, newStatus) => {
-            updateVehicle(vehicleId, { status: newStatus });
-            refreshState();
-          }}
-          darkMode={darkMode}
-        />
-      )}
+        {selectedDigitalSheetVehicle && (
+          <MachineDigitalSheetModal
+            isOpen={!!selectedDigitalSheetVehicle}
+            onClose={() => setSelectedDigitalSheetVehicle(null)}
+            vehicle={selectedDigitalSheetVehicle}
+            fuelLogs={fuelLogs}
+            maintenanceLogs={maintenanceLogs}
+            machineIssues={machineIssues}
+            preventiveItems={preventiveItems}
+            currentUser={currentUser}
+            initialTab="HISTORY"
+            onAddMaintenance={(m) => addMaintenance(m)}
+            onUpdateMaintenance={(id, fields) => updateMaintenance(id, fields)}
+            onDeleteMaintenance={(id) => deleteMaintenance(id)}
+            onReportProblemSubmit={(issueData) => addMachineIssue(issueData)}
+            onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes)}
+            onResolveIssue={(issueId) => resolveMachineIssue(issueId)}
+            onUpdateVehicleStatus={(vehicleId, newStatus) => updateVehicle(vehicleId, { status: newStatus })}
+            darkMode={darkMode}
+          />
+        )}
+      </Suspense>
 
     </div>
   );

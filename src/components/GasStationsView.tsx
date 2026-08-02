@@ -10,7 +10,7 @@ interface GasStationsViewProps {
   darkMode: boolean;
 }
 
-export const GasStationsView: React.FC<GasStationsViewProps> = ({
+export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
   gasStations,
   onAddStation,
   onUpdateStation,
@@ -245,3 +245,5 @@ export const GasStationsView: React.FC<GasStationsViewProps> = ({
     </div>
   );
 };
+
+export const GasStationsView = React.memo(GasStationsViewComponent);

@@ -1,92 +1,55 @@
 import { 
-  User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem 
+  collection, doc, getDocs, setDoc, updateDoc, deleteDoc 
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { 
+  User, Vehicle, GasStation, FuelLog, MaintenanceLog 
 } from '../types';
+import { 
+  getVehicles, getUsers, getFuelLogs, getMaintenanceLogs, getGasStations 
+} from '../utils/storage';
 
-export interface DatabaseState {
-  andradeagro_users_v1?: User[];
-  andradeagro_vehicles_v1?: Vehicle[];
-  andradeagro_gas_stations_v1?: GasStation[];
-  andradeagro_fuel_logs_v1?: FuelLog[];
-  andradeagro_maintenance_logs_v1?: MaintenanceLog[];
-  andradeagro_machine_issues_v1?: MachineIssue[];
-  andradeagro_preventive_items_v1?: PreventiveMaintenanceItem[];
-  andradeagro_alerts_v1?: SmartAlert[];
-  andradeagro_audit_logs_v1?: AuditLog[];
-  andradeagro_settings_v1?: SystemSettings;
-}
-
-// Online Central Database API Service Layer
+// Online Central Firebase Firestore Database Service Layer
 export const databaseService = {
-  // Fetch entire shared database from online server
-  async fetchFullDatabase(): Promise<{ version: number; data: DatabaseState } | null> {
-    try {
-      const response = await fetch('/api/db', {
-        headers: { 'Cache-Control': 'no-cache' }
-      });
-      if (!response.ok) return null;
-      return await response.json();
-    } catch (error) {
-      console.error('[DatabaseService] Error fetching full database:', error);
-      return null;
-    }
-  },
-
-  // Save specific collection/key to online server
-  async saveKey<T>(key: string, value: T): Promise<boolean> {
-    try {
-      const response = await fetch('/api/db', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key, value })
-      });
-      return response.ok;
-    } catch (error) {
-      console.error(`[DatabaseService] Error saving key ${key}:`, error);
-      return false;
-    }
-  },
-
   // MACHINES / VEHICLES
   async getMachines(): Promise<Vehicle[]> {
     try {
-      const res = await fetch('/api/machines');
-      if (res.ok) return await res.json();
-    } catch (e) {}
-    const db = await this.fetchFullDatabase();
-    return db?.data?.andradeagro_vehicles_v1 || [];
+      const snapshot = await getDocs(collection(db, 'vehicles'));
+      if (!snapshot.empty) {
+        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Vehicle));
+      }
+    } catch (e) {
+      console.error('[databaseService] Error getting machines:', e);
+    }
+    return getVehicles();
   },
 
   async addMachine(machine: Vehicle): Promise<boolean> {
     try {
-      const res = await fetch('/api/machines', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(machine)
-      });
-      return res.ok;
+      await setDoc(doc(db, 'vehicles', machine.id), machine);
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error adding machine:', e);
       return false;
     }
   },
 
   async updateMachine(id: string, fields: Partial<Vehicle>): Promise<boolean> {
     try {
-      const res = await fetch(`/api/machines/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fields)
-      });
-      return res.ok;
+      await updateDoc(doc(db, 'vehicles', id), fields);
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error updating machine:', e);
       return false;
     }
   },
 
   async deleteMachine(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`/api/machines/${id}`, { method: 'DELETE' });
-      return res.ok;
+      await deleteDoc(doc(db, 'vehicles', id));
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error deleting machine:', e);
       return false;
     }
   },
@@ -94,44 +57,42 @@ export const databaseService = {
   // EMPLOYEES / USERS
   async getEmployees(): Promise<User[]> {
     try {
-      const res = await fetch('/api/employees');
-      if (res.ok) return await res.json();
-    } catch (e) {}
-    const db = await this.fetchFullDatabase();
-    return db?.data?.andradeagro_users_v1 || [];
+      const snapshot = await getDocs(collection(db, 'users'));
+      if (!snapshot.empty) {
+        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
+      }
+    } catch (e) {
+      console.error('[databaseService] Error getting employees:', e);
+    }
+    return getUsers();
   },
 
   async addEmployee(user: User): Promise<boolean> {
     try {
-      const res = await fetch('/api/employees', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(user)
-      });
-      return res.ok;
+      await setDoc(doc(db, 'users', user.id), user);
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error adding employee:', e);
       return false;
     }
   },
 
   async updateEmployee(id: string, fields: Partial<User>): Promise<boolean> {
     try {
-      const res = await fetch(`/api/employees/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fields)
-      });
-      return res.ok;
+      await updateDoc(doc(db, 'users', id), fields);
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error updating employee:', e);
       return false;
     }
   },
 
   async deleteEmployee(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`/api/employees/${id}`, { method: 'DELETE' });
-      return res.ok;
+      await deleteDoc(doc(db, 'users', id));
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error deleting employee:', e);
       return false;
     }
   },
@@ -139,31 +100,32 @@ export const databaseService = {
   // FUEL RECORDS / ABASTECIMENTOS
   async getFuelRecords(): Promise<FuelLog[]> {
     try {
-      const res = await fetch('/api/fuel-records');
-      if (res.ok) return await res.json();
-    } catch (e) {}
-    const db = await this.fetchFullDatabase();
-    return db?.data?.andradeagro_fuel_logs_v1 || [];
+      const snapshot = await getDocs(collection(db, 'fuel_logs'));
+      if (!snapshot.empty) {
+        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelLog));
+      }
+    } catch (e) {
+      console.error('[databaseService] Error getting fuel records:', e);
+    }
+    return getFuelLogs();
   },
 
   async addFuelRecord(log: FuelLog): Promise<boolean> {
     try {
-      const res = await fetch('/api/fuel-records', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(log)
-      });
-      return res.ok;
+      await setDoc(doc(db, 'fuel_logs', log.id), log);
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error adding fuel record:', e);
       return false;
     }
   },
 
   async deleteFuelRecord(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`/api/fuel-records/${id}`, { method: 'DELETE' });
-      return res.ok;
+      await deleteDoc(doc(db, 'fuel_logs', id));
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error deleting fuel record:', e);
       return false;
     }
   },
@@ -171,44 +133,42 @@ export const databaseService = {
   // MAINTENANCE RECORDS / MANUTENÇÕES
   async getMaintenanceRecords(): Promise<MaintenanceLog[]> {
     try {
-      const res = await fetch('/api/maintenance');
-      if (res.ok) return await res.json();
-    } catch (e) {}
-    const db = await this.fetchFullDatabase();
-    return db?.data?.andradeagro_maintenance_logs_v1 || [];
+      const snapshot = await getDocs(collection(db, 'maintenance_logs'));
+      if (!snapshot.empty) {
+        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceLog));
+      }
+    } catch (e) {
+      console.error('[databaseService] Error getting maintenance records:', e);
+    }
+    return getMaintenanceLogs();
   },
 
   async addMaintenanceRecord(log: MaintenanceLog): Promise<boolean> {
     try {
-      const res = await fetch('/api/maintenance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(log)
-      });
-      return res.ok;
+      await setDoc(doc(db, 'maintenance_logs', log.id), log);
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error adding maintenance record:', e);
       return false;
     }
   },
 
   async updateMaintenanceRecord(id: string, fields: Partial<MaintenanceLog>): Promise<boolean> {
     try {
-      const res = await fetch(`/api/maintenance/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fields)
-      });
-      return res.ok;
+      await updateDoc(doc(db, 'maintenance_logs', id), fields);
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error updating maintenance record:', e);
       return false;
     }
   },
 
   async deleteMaintenanceRecord(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`/api/maintenance/${id}`, { method: 'DELETE' });
-      return res.ok;
+      await deleteDoc(doc(db, 'maintenance_logs', id));
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error deleting maintenance record:', e);
       return false;
     }
   },
@@ -216,44 +176,42 @@ export const databaseService = {
   // GAS STATIONS / POSTOS
   async getGasStations(): Promise<GasStation[]> {
     try {
-      const res = await fetch('/api/gas-stations');
-      if (res.ok) return await res.json();
-    } catch (e) {}
-    const db = await this.fetchFullDatabase();
-    return db?.data?.andradeagro_gas_stations_v1 || [];
+      const snapshot = await getDocs(collection(db, 'gas_stations'));
+      if (!snapshot.empty) {
+        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GasStation));
+      }
+    } catch (e) {
+      console.error('[databaseService] Error getting gas stations:', e);
+    }
+    return getGasStations();
   },
 
   async addGasStation(station: GasStation): Promise<boolean> {
     try {
-      const res = await fetch('/api/gas-stations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(station)
-      });
-      return res.ok;
+      await setDoc(doc(db, 'gas_stations', station.id), station);
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error adding gas station:', e);
       return false;
     }
   },
 
   async updateGasStation(id: string, fields: Partial<GasStation>): Promise<boolean> {
     try {
-      const res = await fetch(`/api/gas-stations/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(fields)
-      });
-      return res.ok;
+      await updateDoc(doc(db, 'gas_stations', id), fields);
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error updating gas station:', e);
       return false;
     }
   },
 
   async deleteGasStation(id: string): Promise<boolean> {
     try {
-      const res = await fetch(`/api/gas-stations/${id}`, { method: 'DELETE' });
-      return res.ok;
+      await deleteDoc(doc(db, 'gas_stations', id));
+      return true;
     } catch (e) {
+      console.error('[databaseService] Error deleting gas station:', e);
       return false;
     }
   }

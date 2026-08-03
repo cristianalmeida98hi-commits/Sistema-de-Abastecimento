@@ -1,0 +1,88 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user or employee",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["id", "name", "role"]
+    },
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "Agricultural machine or tractor",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "model": { "type": "string" },
+        "hourMeter": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "code", "name"]
+    },
+    "FuelLog": {
+      "title": "FuelLog",
+      "description": "Fueling transaction record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "vehicleId": { "type": "string" },
+        "driverName": { "type": "string" },
+        "liters": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "vehicleId", "liters"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Collection of users and employees"
+    },
+    "vehicles/{vehicleId}": {
+      "schema": { "$ref": "#/entities/Vehicle" },
+      "description": "Collection of machines and tractors"
+    },
+    "fuel_logs/{logId}": {
+      "schema": { "$ref": "#/entities/FuelLog" },
+      "description": "Collection of fueling records"
+    },
+    "maintenance_logs/{logId}": {
+      "description": "Collection of maintenance records",
+      "schema": "MaintenanceLog"
+    },
+    "gas_stations/{stationId}": {
+      "description": "Collection of gas stations",
+      "schema": "GasStation"
+    },
+    "machine_issues/{issueId}": {
+      "description": "Collection of machine technical issues",
+      "schema": "MachineIssue"
+    },
+    "preventive_items/{itemId}": {
+      "description": "Collection of preventive maintenance items",
+      "schema": "PreventiveItem"
+    },
+    "alerts/{alertId}": {
+      "description": "Collection of smart system alerts",
+      "schema": "Alert"
+    },
+    "audit_logs/{logId}": {
+      "description": "Collection of system audit logs",
+      "schema": "AuditLog"
+    },
+    "settings/{settingId}": {
+      "description": "System configuration documents",
+      "schema": "Settings"
+    }
+  }
+}

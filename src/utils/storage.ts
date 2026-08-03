@@ -1,4 +1,8 @@
 import { 
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDocs, writeBatch 
+} from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { 
   User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem, PreventiveItemKey 
 } from '../types';
 import { 
@@ -7,195 +11,188 @@ import {
   INITIAL_AUDIT_LOGS, INITIAL_SETTINGS, INITIAL_MACHINE_ISSUES, INITIAL_PREVENTIVE_ITEMS 
 } from '../data/seedData';
 
-const STORAGE_KEYS = {
-  USERS: 'andradeagro_users_v1',
+const SESSION_KEYS = {
   REMEMBERED_USER: 'andradeagro_remembered_user_v1',
-  SESSION_USER: 'andradeagro_session_user_v1',
-  VEHICLES: 'andradeagro_vehicles_v1',
-  GAS_STATIONS: 'andradeagro_gas_stations_v1',
-  FUEL_LOGS: 'andradeagro_fuel_logs_v1',
-  MAINTENANCE_LOGS: 'andradeagro_maintenance_logs_v1',
-  MACHINE_ISSUES: 'andradeagro_machine_issues_v1',
-  PREVENTIVE_ITEMS: 'andradeagro_preventive_items_v1',
-  ALERTS: 'andradeagro_alerts_v1',
-  AUDIT_LOGS: 'andradeagro_audit_logs_v1',
-  SETTINGS: 'andradeagro_settings_v1',
-  THEME: 'andradeagro_theme_v1'
+  SESSION_USER: 'andradeagro_session_user_v1'
 };
 
-let syncChannel: BroadcastChannel | null = null;
-if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-  try {
-    syncChannel = new BroadcastChannel('andradeagro_realtime_sync');
-    syncChannel.onmessage = () => {
-      window.dispatchEvent(new Event('andradeagro_data_updated'));
-    };
-  } catch (e) {
-    console.error('BroadcastChannel sync init error:', e);
-  }
-}
+// In-Memory Live Cache synced directly with Firestore in real-time
+let cache = {
+  users: INITIAL_USERS as User[],
+  vehicles: INITIAL_VEHICLES as Vehicle[],
+  gasStations: INITIAL_GAS_STATIONS as GasStation[],
+  fuelLogs: INITIAL_FUEL_LOGS as FuelLog[],
+  maintenanceLogs: INITIAL_MAINTENANCE_LOGS as MaintenanceLog[],
+  machineIssues: INITIAL_MACHINE_ISSUES as MachineIssue[],
+  preventiveItems: INITIAL_PREVENTIVE_ITEMS as PreventiveMaintenanceItem[],
+  alerts: INITIAL_ALERTS as SmartAlert[],
+  auditLogs: INITIAL_AUDIT_LOGS as AuditLog[],
+  settings: INITIAL_SETTINGS as SystemSettings
+};
 
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (e) => {
-    if (e.key && e.key.startsWith('andradeagro_')) {
-      window.dispatchEvent(new Event('andradeagro_data_updated'));
-    }
-  });
-}
+let isInitialized = false;
 
-function getStored<T>(key: string, defaultValue: T): T {
-  try {
-    const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : defaultValue;
-  } catch (err) {
-    console.error(`Error reading ${key} from localStorage:`, err);
-    return defaultValue;
-  }
-}
-
-function setStored<T>(key: string, value: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    window.dispatchEvent(new Event('andradeagro_data_updated'));
-    if (syncChannel) {
-      syncChannel.postMessage({ key, timestamp: Date.now() });
-    }
-    // Push update to central cloud database
-    fetch('/api/db', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value })
-    }).catch(err => console.error('[AndradeAgro Realtime] Error pushing update to server:', err));
-  } catch (err) {
-    console.error(`Error writing ${key} to localStorage:`, err);
-  }
-}
-
-let isSyncing = false;
-
-export async function syncWithServer(): Promise<boolean> {
-  if (typeof window === 'undefined' || isSyncing) return false;
-  isSyncing = true;
-  try {
-    const res = await fetch('/api/db');
-    if (!res.ok) {
-      isSyncing = false;
-      return false;
-    }
-    const { version, data } = await res.json();
-    let hasChanges = false;
-
-    if (data && typeof data === 'object') {
-      for (const [key, val] of Object.entries(data)) {
-        if (typeof key === 'string' && key.startsWith('andradeagro_')) {
-          const currentLocal = localStorage.getItem(key);
-          const serverValStr = JSON.stringify(val);
-          if (currentLocal !== serverValStr) {
-            localStorage.setItem(key, serverValStr);
-            hasChanges = true;
-          }
-        }
-      }
-    }
-
-    // Check if local has keys missing from server and upload them
-    const localMissingKeys: Record<string, any> = {};
-    for (const keyVal of Object.values(STORAGE_KEYS)) {
-      if (data && data[keyVal] === undefined) {
-        const item = localStorage.getItem(keyVal);
-        if (item) {
-          try {
-            localMissingKeys[keyVal] = JSON.parse(item);
-          } catch (e) {}
-        }
-      }
-    }
-
-    if (Object.keys(localMissingKeys).length > 0) {
-      fetch('/api/db', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullData: localMissingKeys })
-      }).catch(e => console.error('[AndradeAgro Sync] Upload missing keys error:', e));
-    }
-
-    if (hasChanges) {
-      window.dispatchEvent(new Event('andradeagro_data_updated'));
-    }
-    isSyncing = false;
-    return hasChanges;
-  } catch (err) {
-    isSyncing = false;
-    return false;
-  }
-}
-
-// Background sync loop for real multi-device synchronization
-if (typeof window !== 'undefined') {
-  setInterval(() => {
-    syncWithServer();
-  }, 2000);
-
-  window.addEventListener('focus', () => {
-    syncWithServer();
-  });
-  window.addEventListener('online', () => {
-    syncWithServer();
-  });
-}
-
-// Initializer
+// Initialize Firebase Firestore Real-Time Listeners
 export function initStorage() {
-  // Sync immediately with central server database on load
-  syncWithServer().then(() => {
-    // If still missing local keys after sync, populate fallback seeds without overwriting server
-    if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.VEHICLES)) {
-      localStorage.setItem(STORAGE_KEYS.VEHICLES, JSON.stringify(INITIAL_VEHICLES));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.GAS_STATIONS)) {
-      localStorage.setItem(STORAGE_KEYS.GAS_STATIONS, JSON.stringify(INITIAL_GAS_STATIONS));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.FUEL_LOGS)) {
-      localStorage.setItem(STORAGE_KEYS.FUEL_LOGS, JSON.stringify(INITIAL_FUEL_LOGS));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.MAINTENANCE_LOGS)) {
-      localStorage.setItem(STORAGE_KEYS.MAINTENANCE_LOGS, JSON.stringify(INITIAL_MAINTENANCE_LOGS));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.ALERTS)) {
-      localStorage.setItem(STORAGE_KEYS.ALERTS, JSON.stringify(INITIAL_ALERTS));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
-      localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(INITIAL_AUDIT_LOGS));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
-      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(INITIAL_SETTINGS));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.MACHINE_ISSUES)) {
-      localStorage.setItem(STORAGE_KEYS.MACHINE_ISSUES, JSON.stringify(INITIAL_MACHINE_ISSUES));
-    }
-    if (!localStorage.getItem(STORAGE_KEYS.PREVENTIVE_ITEMS)) {
-      localStorage.setItem(STORAGE_KEYS.PREVENTIVE_ITEMS, JSON.stringify(INITIAL_PREVENTIVE_ITEMS));
-    }
-  });
+  if (isInitialized && typeof window !== 'undefined') return;
+  isInitialized = true;
+
+  try {
+    // 1. Users Subscription
+    onSnapshot(collection(db, 'users'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('users', INITIAL_USERS);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as User));
+        cache.users = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore Users Error]', err));
+
+    // 2. Vehicles / Machines Subscription
+    onSnapshot(collection(db, 'vehicles'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('vehicles', INITIAL_VEHICLES);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Vehicle));
+        cache.vehicles = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore Vehicles Error]', err));
+
+    // 3. Gas Stations Subscription
+    onSnapshot(collection(db, 'gas_stations'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('gas_stations', INITIAL_GAS_STATIONS);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as GasStation));
+        cache.gasStations = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore GasStations Error]', err));
+
+    // 4. Fuel Logs Subscription
+    onSnapshot(collection(db, 'fuel_logs'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('fuel_logs', INITIAL_FUEL_LOGS);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FuelLog));
+        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+        cache.fuelLogs = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore FuelLogs Error]', err));
+
+    // 5. Maintenance Logs Subscription
+    onSnapshot(collection(db, 'maintenance_logs'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('maintenance_logs', INITIAL_MAINTENANCE_LOGS);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as MaintenanceLog));
+        items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        cache.maintenanceLogs = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore MaintenanceLogs Error]', err));
+
+    // 6. Machine Issues Subscription
+    onSnapshot(collection(db, 'machine_issues'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('machine_issues', INITIAL_MACHINE_ISSUES);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as MachineIssue));
+        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+        cache.machineIssues = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore Issues Error]', err));
+
+    // 7. Preventive Items Subscription
+    onSnapshot(collection(db, 'preventive_items'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('preventive_items', INITIAL_PREVENTIVE_ITEMS);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as PreventiveMaintenanceItem));
+        cache.preventiveItems = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore Preventive Error]', err));
+
+    // 8. Alerts Subscription
+    onSnapshot(collection(db, 'alerts'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('alerts', INITIAL_ALERTS);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as SmartAlert));
+        items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        cache.alerts = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore Alerts Error]', err));
+
+    // 9. Audit Logs Subscription
+    onSnapshot(collection(db, 'audit_logs'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('audit_logs', INITIAL_AUDIT_LOGS);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as AuditLog));
+        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+        cache.auditLogs = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore AuditLogs Error]', err));
+
+    // 10. System Settings Subscription
+    onSnapshot(collection(db, 'settings'), (snapshot) => {
+      if (snapshot.empty) {
+        setDoc(doc(db, 'settings', 'config'), INITIAL_SETTINGS).catch(console.error);
+      } else {
+        const configDoc = snapshot.docs.find(d => d.id === 'config') || snapshot.docs[0];
+        if (configDoc) {
+          cache.settings = configDoc.data() as SystemSettings;
+          notifyDataUpdated();
+        }
+      }
+    }, (err) => console.error('[Firestore Settings Error]', err));
+
+  } catch (err) {
+    console.error('[Firestore init error]', err);
+  }
 }
 
-// Getters
+function notifyDataUpdated() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('andradeagro_data_updated'));
+  }
+}
+
+async function seedCollection(colName: string, items: any[]) {
+  try {
+    const batch = writeBatch(db);
+    for (const item of items) {
+      if (item.id) {
+        batch.set(doc(db, colName, String(item.id)), item);
+      }
+    }
+    await batch.commit();
+  } catch (e) {
+    console.error(`[Firestore Seed Error for ${colName}]`, e);
+  }
+}
+
+// Getters - All reading from real-time Firebase cache
 export function getUsers(): User[] {
-  return getStored(STORAGE_KEYS.USERS, INITIAL_USERS);
+  return cache.users;
 }
 
 export function getCurrentUser(): User | null {
   try {
-    // Check active session first
-    const sessionStr = sessionStorage.getItem(STORAGE_KEYS.SESSION_USER);
+    if (typeof window === 'undefined') return null;
+    const sessionStr = sessionStorage.getItem(SESSION_KEYS.SESSION_USER);
     if (sessionStr) {
       return JSON.parse(sessionStr);
     }
-    // Then check remembered user in localStorage
-    const rememberedStr = localStorage.getItem(STORAGE_KEYS.REMEMBERED_USER);
+    const rememberedStr = localStorage.getItem(SESSION_KEYS.REMEMBERED_USER);
     if (rememberedStr) {
       return JSON.parse(rememberedStr);
     }
@@ -225,17 +222,16 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
   }
 
   try {
-    sessionStorage.setItem(STORAGE_KEYS.SESSION_USER, JSON.stringify(user));
+    sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
     if (rememberMe) {
-      localStorage.setItem(STORAGE_KEYS.REMEMBERED_USER, JSON.stringify(user));
+      localStorage.setItem(SESSION_KEYS.REMEMBERED_USER, JSON.stringify(user));
     } else {
-      localStorage.removeItem(STORAGE_KEYS.REMEMBERED_USER);
+      localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
     }
 
-    // Add Audit Log
     logAuditEvent('LOGIN', 'Acesso', `Login realizado com sucesso (${user.role === 'ADMIN' ? 'Administrador' : 'Funcionário'})`);
 
-    window.dispatchEvent(new Event('andradeagro_data_updated'));
+    notifyDataUpdated();
     return { success: true, user };
   } catch (err) {
     return { success: false, error: 'Erro ao salvar sessão de login.' };
@@ -244,9 +240,9 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
 
 export function logoutUser(): void {
   try {
-    sessionStorage.removeItem(STORAGE_KEYS.SESSION_USER);
-    localStorage.removeItem(STORAGE_KEYS.REMEMBERED_USER);
-    window.dispatchEvent(new Event('andradeagro_data_updated'));
+    sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
+    localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
+    notifyDataUpdated();
   } catch (err) {
     console.error('Error logging out:', err);
   }
@@ -254,50 +250,49 @@ export function logoutUser(): void {
 
 export function setCurrentUser(user: User): void {
   try {
-    sessionStorage.setItem(STORAGE_KEYS.SESSION_USER, JSON.stringify(user));
-    window.dispatchEvent(new Event('andradeagro_data_updated'));
+    sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
+    notifyDataUpdated();
   } catch (err) {
     console.error('Error setting current user:', err);
   }
 }
 
 export function getVehicles(): Vehicle[] {
-  return getStored(STORAGE_KEYS.VEHICLES, INITIAL_VEHICLES);
+  return cache.vehicles;
 }
 
 export function getGasStations(): GasStation[] {
-  return getStored(STORAGE_KEYS.GAS_STATIONS, INITIAL_GAS_STATIONS);
+  return cache.gasStations;
 }
 
 export function getFuelLogs(): FuelLog[] {
-  return getStored(STORAGE_KEYS.FUEL_LOGS, INITIAL_FUEL_LOGS);
+  return cache.fuelLogs;
 }
 
 export function getMaintenanceLogs(): MaintenanceLog[] {
-  return getStored(STORAGE_KEYS.MAINTENANCE_LOGS, INITIAL_MAINTENANCE_LOGS);
+  return cache.maintenanceLogs;
 }
 
 export function getAlerts(): SmartAlert[] {
-  return getStored(STORAGE_KEYS.ALERTS, INITIAL_ALERTS);
+  return cache.alerts;
 }
 
 export function getAuditLogs(): AuditLog[] {
-  return getStored(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+  return cache.auditLogs;
 }
 
 export function getSettings(): SystemSettings {
-  return getStored(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
+  return cache.settings;
 }
 
 export function getMachineIssues(): MachineIssue[] {
-  return getStored(STORAGE_KEYS.MACHINE_ISSUES, INITIAL_MACHINE_ISSUES);
+  return cache.machineIssues;
 }
 
 export function getPreventiveItems(equipmentId?: string): PreventiveMaintenanceItem[] {
-  const all = getStored<PreventiveMaintenanceItem[]>(STORAGE_KEYS.PREVENTIVE_ITEMS, INITIAL_PREVENTIVE_ITEMS);
+  const all = cache.preventiveItems;
   if (!equipmentId) return all;
   
-  // Filter for equipment
   const items = all.filter(item => item.equipmentId === equipmentId);
   if (items.length > 0) return items;
 
@@ -327,56 +322,57 @@ export function getPreventiveItems(equipmentId?: string): PreventiveMaintenanceI
     intervalHours: def.interval
   }));
 
-  setStored(STORAGE_KEYS.PREVENTIVE_ITEMS, [...all, ...generated]);
+  // Save generated directly to Firestore
+  generated.forEach(item => {
+    setDoc(doc(db, 'preventive_items', item.id), item).catch(console.error);
+  });
+
   return generated;
 }
 
 // Audit Helper
 export function logAuditEvent(action: AuditLog['action'], entity: string, details: string) {
   const user = getCurrentUser();
-  const logs = getAuditLogs();
   const newLog: AuditLog = {
     id: `aud-${Date.now()}`,
     dateTime: new Date().toISOString(),
-    userId: user.id,
-    userName: user.name,
+    userId: user?.id || 'sys',
+    userName: user?.name || 'Sistema',
     action,
     entity,
     details
   };
-  setStored(STORAGE_KEYS.AUDIT_LOGS, [newLog, ...logs]);
+  setDoc(doc(db, 'audit_logs', newLog.id), newLog).catch(console.error);
 }
 
-// Mutators
+// Mutators - All updating Firebase Firestore directly
 export function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): FuelLog {
-  const currentLogs = getFuelLogs();
   const newLog: FuelLog = {
     ...log,
     id: `log-${Date.now()}`,
     createdAt: new Date().toISOString()
   };
 
-  // Update Equipment current KM / Hourmeter
-  const vehicles = getVehicles();
-  const updatedVehicles = vehicles.map(v => {
-    if (v.id === log.equipmentId) {
-      const isKm = v.category === 'VEICULO';
-      const updatedKm = isKm ? Math.max(v.currentKm, log.kmAtFueling || v.currentKm) : v.currentKm;
-      const updatedHour = !isKm ? Math.max(v.currentHourmeter || 0, log.hourmeterAtFueling || v.currentHourmeter || 0) : v.currentHourmeter;
-      return {
-        ...v,
-        currentKm: updatedKm,
-        currentHourmeter: updatedHour,
-        lastFuelingDate: log.dateTime.slice(0, 10)
-      };
-    }
-    return v;
-  });
-  setStored(STORAGE_KEYS.VEHICLES, updatedVehicles);
+  // Write fuel log to Firestore
+  setDoc(doc(db, 'fuel_logs', newLog.id), newLog).catch(console.error);
 
-  // If flagged suspicious, create automated Alert
+  // Update Equipment current KM / Hourmeter in Firestore
+  const vehicles = getVehicles();
+  const targetVehicle = vehicles.find(v => v.id === log.equipmentId);
+  if (targetVehicle) {
+    const isKm = targetVehicle.category === 'VEICULO';
+    const updatedKm = isKm ? Math.max(targetVehicle.currentKm, log.kmAtFueling || targetVehicle.currentKm) : targetVehicle.currentKm;
+    const updatedHour = !isKm ? Math.max(targetVehicle.currentHourmeter || 0, log.hourmeterAtFueling || targetVehicle.currentHourmeter || 0) : targetVehicle.currentHourmeter;
+    
+    updateDoc(doc(db, 'vehicles', targetVehicle.id), {
+      currentKm: updatedKm,
+      currentHourmeter: updatedHour,
+      lastFuelingDate: log.dateTime.slice(0, 10)
+    }).catch(console.error);
+  }
+
+  // If flagged suspicious, create automated Alert in Firestore
   if (log.flaggedSuspicious) {
-    const alerts = getAlerts();
     const newAlert: SmartAlert = {
       id: `alt-${Date.now()}`,
       type: 'SUSPICIOUS_FUEL',
@@ -389,90 +385,79 @@ export function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): FuelLog {
       date: log.dateTime.slice(0, 10),
       resolved: false
     };
-    setStored(STORAGE_KEYS.ALERTS, [newAlert, ...alerts]);
+    setDoc(doc(db, 'alerts', newAlert.id), newAlert).catch(console.error);
   }
 
-  setStored(STORAGE_KEYS.FUEL_LOGS, [newLog, ...currentLogs]);
   logAuditEvent('CRIAR', 'Abastecimento', `Registrou ${newLog.liters}L em ${newLog.equipmentName} (${newLog.equipmentPlateOrCode}).`);
   return newLog;
 }
 
 export function updateFuelLog(id: string, updatedFields: Partial<FuelLog>): void {
-  const logs = getFuelLogs();
-  const updated = logs.map(l => l.id === id ? { ...l, ...updatedFields, updatedAt: new Date().toISOString() } : l);
-  setStored(STORAGE_KEYS.FUEL_LOGS, updated);
+  updateDoc(doc(db, 'fuel_logs', id), {
+    ...updatedFields,
+    updatedAt: new Date().toISOString()
+  }).catch(console.error);
   logAuditEvent('EDITAR', 'Abastecimento', `Atualizou o registro de abastecimento ID ${id}.`);
 }
 
 export function deleteFuelLog(id: string): void {
-  const logs = getFuelLogs();
-  const filtered = logs.filter(l => l.id !== id);
-  setStored(STORAGE_KEYS.FUEL_LOGS, filtered);
+  deleteDoc(doc(db, 'fuel_logs', id)).catch(console.error);
   logAuditEvent('EXCLUIR', 'Abastecimento', `Removeu o abastecimento ID ${id}.`);
 }
 
-// Vehicle Mutators
+// Vehicle / Machine Mutators
 export function addVehicle(v: Omit<Vehicle, 'id'>): Vehicle {
-  const vehicles = getVehicles();
   const newVehicle: Vehicle = {
     ...v,
     id: `veh-${Date.now()}`
   };
-  setStored(STORAGE_KEYS.VEHICLES, [newVehicle, ...vehicles]);
+  setDoc(doc(db, 'vehicles', newVehicle.id), newVehicle).catch(console.error);
   logAuditEvent('CRIAR', 'Equipamento', `Cadastrou ${newVehicle.model} (${newVehicle.licensePlate || newVehicle.patrimonyCode}).`);
   return newVehicle;
 }
 
 export function updateVehicle(id: string, updatedFields: Partial<Vehicle>): void {
-  const vehicles = getVehicles();
-  const updated = vehicles.map(v => v.id === id ? { ...v, ...updatedFields } : v);
-  setStored(STORAGE_KEYS.VEHICLES, updated);
+  updateDoc(doc(db, 'vehicles', id), updatedFields).catch(console.error);
   logAuditEvent('EDITAR', 'Equipamento', `Atualizou equipamento ID ${id}.`);
 }
 
 export function deleteVehicle(id: string): void {
-  const vehicles = getVehicles();
-  setStored(STORAGE_KEYS.VEHICLES, vehicles.filter(v => v.id !== id));
+  deleteDoc(doc(db, 'vehicles', id)).catch(console.error);
   logAuditEvent('EXCLUIR', 'Equipamento', `Excluiu equipamento ID ${id}.`);
 }
 
 // Maintenance Mutators
 export function addMaintenance(m: Omit<MaintenanceLog, 'id'>): MaintenanceLog {
-  const logs = getMaintenanceLogs();
   const newMnt: MaintenanceLog = {
     ...m,
     id: `mnt-${Date.now()}`
   };
-  setStored(STORAGE_KEYS.MAINTENANCE_LOGS, [newMnt, ...logs]);
+  setDoc(doc(db, 'maintenance_logs', newMnt.id), newMnt).catch(console.error);
   logAuditEvent('CRIAR', 'Manutenção', `Agendou/Registrou manutenção "${m.title}" em ${m.equipmentName}.`);
   return newMnt;
 }
 
 export function updateMaintenance(id: string, fields: Partial<MaintenanceLog>): void {
-  const logs = getMaintenanceLogs();
-  setStored(STORAGE_KEYS.MAINTENANCE_LOGS, logs.map(m => m.id === id ? { ...m, ...fields } : m));
+  updateDoc(doc(db, 'maintenance_logs', id), fields).catch(console.error);
   logAuditEvent('EDITAR', 'Manutenção', `Atualizou registro de manutenção ID ${id}.`);
 }
 
 export function deleteMaintenance(id: string): void {
-  const logs = getMaintenanceLogs();
-  setStored(STORAGE_KEYS.MAINTENANCE_LOGS, logs.filter(m => m.id !== id));
+  deleteDoc(doc(db, 'maintenance_logs', id)).catch(console.error);
   logAuditEvent('EXCLUIR', 'Manutenção', `Excluiu o registro de manutenção ID ${id}.`);
 }
 
 // Machine Issue Mutators
 export function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' | 'status'>): MachineIssue {
-  const current = getMachineIssues();
   const newIssue: MachineIssue = {
     ...issueData,
     id: `iss-${Date.now()}`,
     dateTime: new Date().toISOString(),
     status: 'ABERTO'
   };
-  setStored(STORAGE_KEYS.MACHINE_ISSUES, [newIssue, ...current]);
+  setDoc(doc(db, 'machine_issues', newIssue.id), newIssue).catch(console.error);
 
   // Also create smart alert for admins
-  const alerts = getAlerts();
   const newAlert: SmartAlert = {
     id: `alt-iss-${Date.now()}`,
     type: 'MACHINE_ISSUE',
@@ -484,28 +469,20 @@ export function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' 
     date: newIssue.dateTime.slice(0, 10),
     resolved: false
   };
-  setStored(STORAGE_KEYS.ALERTS, [newAlert, ...alerts]);
+  setDoc(doc(db, 'alerts', newAlert.id), newAlert).catch(console.error);
 
   logAuditEvent('CRIAR', 'Problema', `Relatou problema em ${newIssue.equipmentName}: ${newIssue.description}`);
   return newIssue;
 }
 
 export function resolveMachineIssue(issueId: string, notes?: string): void {
-  const current = getMachineIssues();
   const user = getCurrentUser();
-  const updated = current.map(iss => {
-    if (iss.id === issueId) {
-      return {
-        ...iss,
-        status: 'RESOLVIDO' as const,
-        resolvedAt: new Date().toISOString(),
-        resolvedBy: user?.name || 'Administrador',
-        notes: notes || iss.notes
-      };
-    }
-    return iss;
-  });
-  setStored(STORAGE_KEYS.MACHINE_ISSUES, updated);
+  updateDoc(doc(db, 'machine_issues', issueId), {
+    status: 'RESOLVIDO',
+    resolvedAt: new Date().toISOString(),
+    resolvedBy: user?.name || 'Administrador',
+    notes: notes || ''
+  }).catch(console.error);
   logAuditEvent('EDITAR', 'Problema', `Resolveu o problema relatado ID ${issueId}`);
 }
 
@@ -527,10 +504,10 @@ export function recordPreventiveService(
       nextScheduledHourmeter: currentHourmeter + target.intervalHours,
       notes: notes || target.notes
     };
-    const updatedList = all.map(item => item.id === target.id ? updatedItem : item);
-    setStored(STORAGE_KEYS.PREVENTIVE_ITEMS, updatedList);
+    
+    setDoc(doc(db, 'preventive_items', target.id), updatedItem).catch(console.error);
 
-    // Create a maintenance log entry
+    // Create a maintenance log entry in Firestore
     addMaintenance({
       equipmentId,
       equipmentName: target.itemName,
@@ -554,77 +531,78 @@ export function recordPreventiveService(
 
 // Gas Stations Mutators
 export function addGasStation(stn: Omit<GasStation, 'id'>): GasStation {
-  const stations = getGasStations();
   const newStn: GasStation = {
     ...stn,
     id: `stn-${Date.now()}`
   };
-  setStored(STORAGE_KEYS.GAS_STATIONS, [...stations, newStn]);
+  setDoc(doc(db, 'gas_stations', newStn.id), newStn).catch(console.error);
   logAuditEvent('CRIAR', 'Posto', `Cadastrou posto ${newStn.name}.`);
   return newStn;
 }
 
 export function updateGasStation(id: string, fields: Partial<GasStation>): void {
-  const stations = getGasStations();
-  setStored(STORAGE_KEYS.GAS_STATIONS, stations.map(s => s.id === id ? { ...s, ...fields } : s));
+  updateDoc(doc(db, 'gas_stations', id), fields).catch(console.error);
   logAuditEvent('EDITAR', 'Posto', `Atualizou tabela de preços/dados do posto ID ${id}.`);
 }
 
 export function deleteGasStation(id: string): void {
-  const stations = getGasStations();
-  setStored(STORAGE_KEYS.GAS_STATIONS, stations.filter(s => s.id !== id));
+  deleteDoc(doc(db, 'gas_stations', id)).catch(console.error);
   logAuditEvent('EXCLUIR', 'Posto', `Excluiu o posto ID ${id}.`);
 }
 
 // User Mutators
 export function addUser(user: Omit<User, 'id'>): User {
-  const users = getUsers();
   const newUser: User = {
     ...user,
     id: `usr-${Date.now()}`
   };
-  setStored(STORAGE_KEYS.USERS, [...users, newUser]);
+  setDoc(doc(db, 'users', newUser.id), newUser).catch(console.error);
   logAuditEvent('CRIAR', 'Usuário', `Cadastrou funcionário/usuário ${newUser.name}.`);
   return newUser;
 }
 
 export function updateUser(id: string, fields: Partial<User>): void {
-  const users = getUsers();
-  setStored(STORAGE_KEYS.USERS, users.map(u => u.id === id ? { ...u, ...fields } : u));
+  updateDoc(doc(db, 'users', id), fields).catch(console.error);
   logAuditEvent('EDITAR', 'Usuário', `Atualizou dados do usuário ID ${id}.`);
 }
 
 export function deleteUser(id: string): void {
-  const users = getUsers();
-  setStored(STORAGE_KEYS.USERS, users.filter(u => u.id !== id));
+  deleteDoc(doc(db, 'users', id)).catch(console.error);
   logAuditEvent('EXCLUIR', 'Usuário', `Excluiu o usuário ID ${id}.`);
 }
 
 // Alerts Mutator
 export function resolveAlert(id: string): void {
-  const alerts = getAlerts();
-  const currentUser = getCurrentUser();
-  const updated = alerts.map(a => a.id === id ? {
-    ...a,
+  const user = getCurrentUser();
+  updateDoc(doc(db, 'alerts', id), {
     resolved: true,
     resolvedAt: new Date().toISOString(),
-    resolvedBy: currentUser.name
-  } : a);
-  setStored(STORAGE_KEYS.ALERTS, updated);
+    resolvedBy: user?.name || 'Administrador'
+  }).catch(console.error);
   logAuditEvent('EDITAR', 'Alerta', `Marcou alerta ID ${id} como resolvido.`);
 }
 
 // Settings Mutator
 export function updateSettings(newSettings: Partial<SystemSettings>): void {
-  const current = getSettings();
-  const updated = { ...current, ...newSettings };
-  setStored(STORAGE_KEYS.SETTINGS, updated);
+  updateDoc(doc(db, 'settings', 'config'), newSettings).catch(console.error);
   logAuditEvent('CONFIGURACAO', 'Sistema', 'Atualizou as configurações gerais do AndradeAgro.');
 }
 
-// Reset data to default seed
-export function resetSystemData(): void {
-  localStorage.clear();
-  initStorage();
-  window.dispatchEvent(new Event('andradeagro_data_updated'));
+// Reset system data in Firestore
+export async function resetSystemData(): Promise<void> {
+  try {
+    await seedCollection('users', INITIAL_USERS);
+    await seedCollection('vehicles', INITIAL_VEHICLES);
+    await seedCollection('gas_stations', INITIAL_GAS_STATIONS);
+    await seedCollection('fuel_logs', INITIAL_FUEL_LOGS);
+    await seedCollection('maintenance_logs', INITIAL_MAINTENANCE_LOGS);
+    await seedCollection('machine_issues', INITIAL_MACHINE_ISSUES);
+    await seedCollection('preventive_items', INITIAL_PREVENTIVE_ITEMS);
+    await seedCollection('alerts', INITIAL_ALERTS);
+    await seedCollection('audit_logs', INITIAL_AUDIT_LOGS);
+    await setDoc(doc(db, 'settings', 'config'), INITIAL_SETTINGS);
+    notifyDataUpdated();
+  } catch (err) {
+    console.error('Error resetting system data in Firestore:', err);
+  }
 }

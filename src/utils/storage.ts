@@ -60,9 +60,88 @@ function setStored<T>(key: string, value: T): void {
     if (syncChannel) {
       syncChannel.postMessage({ key, timestamp: Date.now() });
     }
+    // Push update to central cloud database
+    fetch('/api/db', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value })
+    }).catch(err => console.error('[AndradeAgro Realtime] Error pushing update to server:', err));
   } catch (err) {
     console.error(`Error writing ${key} to localStorage:`, err);
   }
+}
+
+let isSyncing = false;
+
+export async function syncWithServer(): Promise<boolean> {
+  if (typeof window === 'undefined' || isSyncing) return false;
+  isSyncing = true;
+  try {
+    const res = await fetch('/api/db');
+    if (!res.ok) {
+      isSyncing = false;
+      return false;
+    }
+    const { version, data } = await res.json();
+    let hasChanges = false;
+
+    if (data && typeof data === 'object') {
+      for (const [key, val] of Object.entries(data)) {
+        if (typeof key === 'string' && key.startsWith('andradeagro_')) {
+          const currentLocal = localStorage.getItem(key);
+          const serverValStr = JSON.stringify(val);
+          if (currentLocal !== serverValStr) {
+            localStorage.setItem(key, serverValStr);
+            hasChanges = true;
+          }
+        }
+      }
+    }
+
+    // Check if local has keys missing from server and upload them
+    const localMissingKeys: Record<string, any> = {};
+    for (const keyVal of Object.values(STORAGE_KEYS)) {
+      if (data && data[keyVal] === undefined) {
+        const item = localStorage.getItem(keyVal);
+        if (item) {
+          try {
+            localMissingKeys[keyVal] = JSON.parse(item);
+          } catch (e) {}
+        }
+      }
+    }
+
+    if (Object.keys(localMissingKeys).length > 0) {
+      fetch('/api/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullData: localMissingKeys })
+      }).catch(e => console.error('[AndradeAgro Sync] Upload missing keys error:', e));
+    }
+
+    if (hasChanges) {
+      window.dispatchEvent(new Event('andradeagro_data_updated'));
+    }
+    isSyncing = false;
+    return hasChanges;
+  } catch (err) {
+    isSyncing = false;
+    return false;
+  }
+}
+
+// Background sync loop for real multi-device synchronization
+if (typeof window !== 'undefined') {
+  setInterval(() => {
+    syncWithServer();
+  }, 2000);
+
+  window.addEventListener('focus', () => {
+    syncWithServer();
+  });
+  window.addEventListener('online', () => {
+    syncWithServer();
+  });
 }
 
 // Initializer
@@ -106,6 +185,9 @@ export function initStorage() {
   if (!localStorage.getItem(STORAGE_KEYS.PREVENTIVE_ITEMS)) {
     setStored(STORAGE_KEYS.PREVENTIVE_ITEMS, INITIAL_PREVENTIVE_ITEMS);
   }
+
+  // Trigger immediate initial sync with central database
+  syncWithServer();
 }
 
 // Getters

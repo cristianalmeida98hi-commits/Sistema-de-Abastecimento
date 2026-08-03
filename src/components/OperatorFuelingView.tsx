@@ -32,6 +32,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
   
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [lastSavedLog, setLastSavedLog] = useState<Partial<FuelLog> | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const activeVehicle = vehicles.find(v => v.id === selectedVehicleId);
   const isVehicleKm = activeVehicle?.category === 'VEICULO';
@@ -52,63 +53,77 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
     }
   }, [selectedVehicleId, activeVehicle]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!selectedVehicleId || !liters || Number(liters) <= 0) {
-      alert('Por favor, selecione o veículo e informe a quantidade de litros.');
+      alert('Por favor, selecione o veículo e informe uma quantidade de litros válida.');
       return;
     }
 
-    const station = gasStations.find(g => g.id === selectedGasStationId) || gasStations[0];
-    const litersNum = Number(liters);
-    const fuelType = activeVehicle?.fuelType || 'DIESEL_S10';
-    const pricePerLiter = station?.pricePerLiter[fuelType] || 5.80;
-    const totalValue = litersNum * pricePerLiter;
-    const nowIso = new Date().toISOString();
+    if (!activeVehicle) {
+      alert('Por favor, selecione uma máquina/veículo válida.');
+      return;
+    }
 
-    const newLogData: Omit<FuelLog, 'id' | 'createdAt'> = {
-      dateTime: nowIso,
-      equipmentId: activeVehicle?.id || '',
-      equipmentName: activeVehicle?.model || 'Equipamento Agrícola',
-      equipmentCategory: activeVehicle?.category || 'TRATOR',
-      equipmentPlateOrCode: activeVehicle?.licensePlate || activeVehicle?.patrimonyCode || 'AGRO-000',
-      driverOrOperatorId: currentUser.id,
-      driverOrOperatorName: currentUser.name,
-      attendantId: currentUser.id,
-      attendantName: currentUser.name,
-      gasStationId: station?.id || 'stn-001',
-      gasStationName: station?.name || 'Posto Interno Fazenda Andrade',
-      fuelType,
-      liters: litersNum,
-      pricePerLiter,
-      totalValue,
-      operationType,
-      activityType,
-      hourmeterAtFueling: isVehicleKm ? undefined : Number(hourmeter) || undefined,
-      kmAtFueling: isVehicleKm ? Number(odometer) || undefined : undefined,
-      observations: observations.trim(),
-      createdById: currentUser.id,
-      createdByName: currentUser.name,
-    };
+    setIsSubmitting(true);
 
-    onAddFuelLog(newLogData);
-    
-    setLastSavedLog({
-      equipmentName: activeVehicle?.model,
-      liters: litersNum,
-      operationType,
-      activityType,
-      dateTime: nowIso
-    });
+    try {
+      const station = gasStations.find(g => g.id === selectedGasStationId) || gasStations[0];
+      const litersNum = Number(liters);
+      const fuelType = activeVehicle?.fuelType || 'DIESEL_S10';
+      const pricePerLiter = station?.pricePerLiter?.[fuelType] || 5.80;
+      const totalValue = litersNum * pricePerLiter;
+      const nowIso = new Date().toISOString();
 
-    setShowSuccessToast(true);
+      const newLogData: Omit<FuelLog, 'id' | 'createdAt'> = {
+        dateTime: nowIso,
+        equipmentId: activeVehicle.id,
+        equipmentName: activeVehicle.model || 'Equipamento Agrícola',
+        equipmentCategory: activeVehicle.category || 'TRATOR',
+        equipmentPlateOrCode: activeVehicle.licensePlate || activeVehicle.patrimonyCode || 'AGRO-000',
+        driverOrOperatorId: currentUser.id,
+        driverOrOperatorName: currentUser.name,
+        attendantId: currentUser.id,
+        attendantName: currentUser.name,
+        gasStationId: station?.id || 'stn-001',
+        gasStationName: station?.name || 'Posto Interno Fazenda Andrade',
+        fuelType,
+        liters: litersNum,
+        pricePerLiter,
+        totalValue,
+        operationType,
+        activityType,
+        hourmeterAtFueling: isVehicleKm ? undefined : (Number(hourmeter) || undefined),
+        kmAtFueling: isVehicleKm ? (Number(odometer) || undefined) : undefined,
+        observations: observations.trim() || undefined,
+        createdById: currentUser.id,
+        createdByName: currentUser.name,
+      };
 
-    // Reset fields for next quick entry
-    setObservations('');
-    setTimeout(() => {
-      setShowSuccessToast(false);
-    }, 4000);
+      await onAddFuelLog(newLogData);
+
+      setLastSavedLog({
+        equipmentName: activeVehicle?.model,
+        liters: litersNum,
+        operationType,
+        activityType,
+        dateTime: nowIso
+      });
+
+      setShowSuccessToast(true);
+
+      // Reset fields for next quick entry
+      setObservations('');
+      setTimeout(() => {
+        setShowSuccessToast(false);
+      }, 5000);
+    } catch (err: any) {
+      console.error('Erro ao salvar abastecimento:', err);
+      alert(`Erro ao salvar abastecimento: ${err?.message || 'Ocorreu uma falha na conexão com o Firestore.'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const myLogs = userLogs.filter(
@@ -424,10 +439,22 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
         {/* Main Big Submit Button */}
         <button
           type="submit"
-          className="w-full py-4 bg-[#064E3B] hover:bg-[#043327] text-white font-black text-sm rounded-2xl shadow-xl shadow-emerald-900/20 flex items-center justify-center gap-2 transition-all active:scale-98 border-2 border-[#FACC15]"
+          disabled={isSubmitting}
+          className={`w-full py-4 bg-[#064E3B] hover:bg-[#043327] text-white font-black text-sm rounded-2xl shadow-xl shadow-emerald-900/20 flex items-center justify-center gap-2 transition-all active:scale-98 border-2 border-[#FACC15] ${
+            isSubmitting ? 'opacity-70 cursor-wait' : ''
+          }`}
         >
-          <Send className="w-5 h-5 text-[#FACC15]" />
-          <span>Salvar Abastecimento</span>
+          {isSubmitting ? (
+            <>
+              <Clock className="w-5 h-5 text-[#FACC15] animate-spin" />
+              <span>Salvando no Firestore...</span>
+            </>
+          ) : (
+            <>
+              <Send className="w-5 h-5 text-[#FACC15]" />
+              <span>Salvar Abastecimento</span>
+            </>
+          )}
         </button>
 
       </form>

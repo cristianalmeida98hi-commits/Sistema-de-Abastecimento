@@ -182,14 +182,14 @@ export default function App() {
     setIsFuelingModalOpen(true);
   };
 
-  const handleAddFuelLog = (logData: Omit<FuelLog, 'id' | 'createdAt'>) => {
-    addFuelLog(logData);
-    refreshState();
-    
-    // Auto logout back to login screen as requested
-    logoutUser();
-    setCurrentUser(null);
-    setLoginSuccessMessage('Abastecimento registrado com sucesso! O sistema retornou para a tela de login.');
+  const handleAddFuelLog = async (logData: Omit<FuelLog, 'id' | 'createdAt'>) => {
+    try {
+      await addFuelLog(logData);
+      refreshState();
+    } catch (err: any) {
+      console.error('Erro ao salvar abastecimento:', err);
+      throw err;
+    }
   };
 
   // 1. If not authenticated, render Login Screen

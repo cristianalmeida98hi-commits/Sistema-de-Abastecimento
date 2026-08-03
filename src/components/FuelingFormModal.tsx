@@ -117,46 +117,56 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   const selectedDriver = users.find(u => u.id === driverOrOperatorId);
   const selectedAttendant = users.find(u => u.id === attendantId);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEquipment || !selectedStation || !selectedDriver) return;
 
-    onSubmit({
-      dateTime,
-      equipmentId: selectedEquipment.id,
-      equipmentName: selectedEquipment.model,
-      equipmentCategory: selectedEquipment.category,
-      equipmentPlateOrCode: selectedEquipment.licensePlate || selectedEquipment.patrimonyCode || 'S/PLACA',
-      driverOrOperatorId: selectedDriver.id,
-      driverOrOperatorName: selectedDriver.name,
-      attendantId: selectedAttendant?.id || currentUser.id,
-      attendantName: selectedAttendant?.name || currentUser.name,
-      gasStationId: selectedStation.id,
-      gasStationName: selectedStation.name,
-      fuelType,
-      liters,
-      pricePerLiter,
-      totalValue: metrics.totalValue,
-      operationType,
-      activityType,
-      kmAtFueling: isKmBased ? currentKmOrHour : undefined,
-      hourmeterAtFueling: !isKmBased ? currentKmOrHour : undefined,
-      previousKmOrHour: metrics.previousKmOrHour,
-      calculatedAverageKmPerLiter: metrics.calculatedAverageKmPerLiter,
-      calculatedAverageLitersPerHour: metrics.calculatedAverageLitersPerHour,
-      costPerKm: metrics.costPerKm,
-      costPerHour: metrics.costPerHour,
-      estimatedAutonomyKmOrHours: metrics.estimatedAutonomyKmOrHours,
-      dashboardPhotoUrl: dashboardPhotoUrl || undefined,
-      invoicePhotoUrl: invoicePhotoUrl || undefined,
-      observations: observations || undefined,
-      flaggedSuspicious: metrics.flaggedSuspicious,
-      suspiciousReason: metrics.suspiciousReason,
-      createdById: currentUser.id,
-      createdByName: currentUser.name
-    });
+    setIsSubmitting(true);
+    try {
+      await onSubmit({
+        dateTime,
+        equipmentId: selectedEquipment.id,
+        equipmentName: selectedEquipment.model,
+        equipmentCategory: selectedEquipment.category,
+        equipmentPlateOrCode: selectedEquipment.licensePlate || selectedEquipment.patrimonyCode || 'S/PLACA',
+        driverOrOperatorId: selectedDriver.id,
+        driverOrOperatorName: selectedDriver.name,
+        attendantId: selectedAttendant?.id || currentUser.id,
+        attendantName: selectedAttendant?.name || currentUser.name,
+        gasStationId: selectedStation.id,
+        gasStationName: selectedStation.name,
+        fuelType,
+        liters,
+        pricePerLiter,
+        totalValue: metrics.totalValue,
+        operationType,
+        activityType,
+        kmAtFueling: isKmBased ? currentKmOrHour : undefined,
+        hourmeterAtFueling: !isKmBased ? currentKmOrHour : undefined,
+        previousKmOrHour: metrics.previousKmOrHour,
+        calculatedAverageKmPerLiter: metrics.calculatedAverageKmPerLiter,
+        calculatedAverageLitersPerHour: metrics.calculatedAverageLitersPerHour,
+        costPerKm: metrics.costPerKm,
+        costPerHour: metrics.costPerHour,
+        estimatedAutonomyKmOrHours: metrics.estimatedAutonomyKmOrHours,
+        dashboardPhotoUrl: dashboardPhotoUrl || undefined,
+        invoicePhotoUrl: invoicePhotoUrl || undefined,
+        observations: observations || undefined,
+        flaggedSuspicious: metrics.flaggedSuspicious,
+        suspiciousReason: metrics.suspiciousReason,
+        createdById: currentUser.id,
+        createdByName: currentUser.name
+      });
 
-    onClose();
+      onClose();
+    } catch (err: any) {
+      console.error('Erro ao salvar no modal de abastecimento:', err);
+      alert(`Erro ao salvar abastecimento: ${err?.message || 'Falha de comunicação com o Firestore.'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -584,10 +594,22 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-800 to-emerald-700 hover:from-emerald-700 hover:to-emerald-600 text-white shadow-lg shadow-emerald-900/20 flex items-center gap-2"
+              disabled={isSubmitting}
+              className={`px-5 py-2.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-800 to-emerald-700 hover:from-emerald-700 hover:to-emerald-600 text-white shadow-lg shadow-emerald-900/20 flex items-center gap-2 ${
+                isSubmitting ? 'opacity-70 cursor-wait' : ''
+              }`}
             >
-              <CheckCircle2 className="w-4 h-4 text-amber-400" />
-              <span>Salvar Registro de Abastecimento</span>
+              {isSubmitting ? (
+                <>
+                  <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                  <span>Salvando no Firestore...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-amber-400" />
+                  <span>Salvar Registro de Abastecimento</span>
+                </>
+              )}
             </button>
           </div>
 

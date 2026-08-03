@@ -1,7 +1,7 @@
 import { 
-  collection, doc, getDocs, setDoc, updateDoc, deleteDoc 
+  collection, doc, getDocs, deleteDoc 
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, safeSetDoc, safeUpdateDoc } from '../lib/firebase';
 import { 
   User, Vehicle, GasStation, FuelLog, MaintenanceLog 
 } from '../types';
@@ -26,7 +26,7 @@ export const databaseService = {
 
   async addMachine(machine: Vehicle): Promise<boolean> {
     try {
-      await setDoc(doc(db, 'vehicles', machine.id), machine);
+      await safeSetDoc(doc(db, 'vehicles', machine.id), machine);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding machine:', e);
@@ -36,7 +36,7 @@ export const databaseService = {
 
   async updateMachine(id: string, fields: Partial<Vehicle>): Promise<boolean> {
     try {
-      await updateDoc(doc(db, 'vehicles', id), fields);
+      await safeUpdateDoc(doc(db, 'vehicles', id), fields);
       return true;
     } catch (e) {
       console.error('[databaseService] Error updating machine:', e);
@@ -69,7 +69,7 @@ export const databaseService = {
 
   async addEmployee(user: User): Promise<boolean> {
     try {
-      await setDoc(doc(db, 'users', user.id), user);
+      await safeSetDoc(doc(db, 'users', user.id), user);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding employee:', e);
@@ -79,7 +79,7 @@ export const databaseService = {
 
   async updateEmployee(id: string, fields: Partial<User>): Promise<boolean> {
     try {
-      await updateDoc(doc(db, 'users', id), fields);
+      await safeUpdateDoc(doc(db, 'users', id), fields);
       return true;
     } catch (e) {
       console.error('[databaseService] Error updating employee:', e);
@@ -112,7 +112,7 @@ export const databaseService = {
 
   async addFuelRecord(log: FuelLog): Promise<boolean> {
     try {
-      await setDoc(doc(db, 'fuel_logs', log.id), log);
+      await safeSetDoc(doc(db, 'fuel_logs', log.id), log);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding fuel record:', e);
@@ -145,7 +145,7 @@ export const databaseService = {
 
   async addMaintenanceRecord(log: MaintenanceLog): Promise<boolean> {
     try {
-      await setDoc(doc(db, 'maintenance_logs', log.id), log);
+      await safeSetDoc(doc(db, 'maintenance_logs', log.id), log);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding maintenance record:', e);
@@ -155,7 +155,7 @@ export const databaseService = {
 
   async updateMaintenanceRecord(id: string, fields: Partial<MaintenanceLog>): Promise<boolean> {
     try {
-      await updateDoc(doc(db, 'maintenance_logs', id), fields);
+      await safeUpdateDoc(doc(db, 'maintenance_logs', id), fields);
       return true;
     } catch (e) {
       console.error('[databaseService] Error updating maintenance record:', e);
@@ -188,7 +188,7 @@ export const databaseService = {
 
   async addGasStation(station: GasStation): Promise<boolean> {
     try {
-      await setDoc(doc(db, 'gas_stations', station.id), station);
+      await safeSetDoc(doc(db, 'gas_stations', station.id), station);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding gas station:', e);
@@ -198,7 +198,7 @@ export const databaseService = {
 
   async updateGasStation(id: string, fields: Partial<GasStation>): Promise<boolean> {
     try {
-      await updateDoc(doc(db, 'gas_stations', id), fields);
+      await safeUpdateDoc(doc(db, 'gas_stations', id), fields);
       return true;
     } catch (e) {
       console.error('[databaseService] Error updating gas station:', e);

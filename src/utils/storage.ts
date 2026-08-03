@@ -1,5 +1,5 @@
 import { 
-  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDocs, writeBatch 
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch 
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { 
@@ -15,6 +15,22 @@ const SESSION_KEYS = {
   REMEMBERED_USER: 'andradeagro_remembered_user_v1',
   SESSION_USER: 'andradeagro_session_user_v1'
 };
+
+// Helper to remove any undefined fields before saving to Firestore (Firestore rejects undefined)
+export function cleanUndefined<T extends Record<string, any>>(obj: T): T {
+  if (!obj || typeof obj !== 'object') return obj;
+  const cleaned: any = Array.isArray(obj) ? [] : {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined) {
+      if (val !== null && typeof val === 'object' && !(val instanceof Date)) {
+        cleaned[key] = cleanUndefined(val);
+      } else {
+        cleaned[key] = val;
+      }
+    }
+  }
+  return cleaned as T;
+}
 
 // In-Memory Live Cache synced directly with Firestore in real-time
 let cache = {
@@ -145,7 +161,7 @@ export function initStorage() {
     // 10. System Settings Subscription
     onSnapshot(collection(db, 'settings'), (snapshot) => {
       if (snapshot.empty) {
-        setDoc(doc(db, 'settings', 'config'), INITIAL_SETTINGS).catch(console.error);
+        setDoc(doc(db, 'settings', 'config'), cleanUndefined(INITIAL_SETTINGS)).catch(console.error);
       } else {
         const configDoc = snapshot.docs.find(d => d.id === 'config') || snapshot.docs[0];
         if (configDoc) {
@@ -171,7 +187,7 @@ async function seedCollection(colName: string, items: any[]) {
     const batch = writeBatch(db);
     for (const item of items) {
       if (item.id) {
-        batch.set(doc(db, colName, String(item.id)), item);
+        batch.set(doc(db, colName, String(item.id)), cleanUndefined(item));
       }
     }
     await batch.commit();
@@ -248,9 +264,14 @@ export function logoutUser(): void {
   }
 }
 
-export function setCurrentUser(user: User): void {
+export function setCurrentUser(user: User | null): void {
   try {
-    sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
+    if (user) {
+      sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
+    } else {
+      sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
+      localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
+    }
     notifyDataUpdated();
   } catch (err) {
     console.error('Error setting current user:', err);
@@ -324,7 +345,7 @@ export function getPreventiveItems(equipmentId?: string): PreventiveMaintenanceI
 
   // Save generated directly to Firestore
   generated.forEach(item => {
-    setDoc(doc(db, 'preventive_items', item.id), item).catch(console.error);
+    setDoc(doc(db, 'preventive_items', item.id), cleanUndefined(item)).catch(console.error);
   });
 
   return generated;
@@ -342,123 +363,172 @@ export function logAuditEvent(action: AuditLog['action'], entity: string, detail
     entity,
     details
   };
-  setDoc(doc(db, 'audit_logs', newLog.id), newLog).catch(console.error);
+  setDoc(doc(db, 'audit_logs', newLog.id), cleanUndefined(newLog)).catch(console.error);
 }
 
 // Mutators - All updating Firebase Firestore directly
-export function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): FuelLog {
+export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promise<FuelLog> {
   const newLog: FuelLog = {
     ...log,
     id: `log-${Date.now()}`,
     createdAt: new Date().toISOString()
   };
 
-  // Write fuel log to Firestore
-  setDoc(doc(db, 'fuel_logs', newLog.id), newLog).catch(console.error);
+  const cleanedLog = cleanUndefined(newLog);
 
-  // Update Equipment current KM / Hourmeter in Firestore
-  const vehicles = getVehicles();
-  const targetVehicle = vehicles.find(v => v.id === log.equipmentId);
-  if (targetVehicle) {
-    const isKm = targetVehicle.category === 'VEICULO';
-    const updatedKm = isKm ? Math.max(targetVehicle.currentKm, log.kmAtFueling || targetVehicle.currentKm) : targetVehicle.currentKm;
-    const updatedHour = !isKm ? Math.max(targetVehicle.currentHourmeter || 0, log.hourmeterAtFueling || targetVehicle.currentHourmeter || 0) : targetVehicle.currentHourmeter;
-    
-    updateDoc(doc(db, 'vehicles', targetVehicle.id), {
-      currentKm: updatedKm,
-      currentHourmeter: updatedHour,
-      lastFuelingDate: log.dateTime.slice(0, 10)
-    }).catch(console.error);
+  // Optimistically update local memory cache
+  cache.fuelLogs = [cleanedLog, ...cache.fuelLogs.filter(l => l.id !== cleanedLog.id)];
+  notifyDataUpdated();
+
+  try {
+    // Write fuel log to Firestore
+    await setDoc(doc(db, 'fuel_logs', cleanedLog.id), cleanedLog);
+
+    // Update Equipment current KM / Hourmeter in Firestore
+    const vehicles = getVehicles();
+    const targetVehicle = vehicles.find(v => v.id === log.equipmentId);
+    if (targetVehicle) {
+      const isKm = targetVehicle.category === 'VEICULO';
+      const updatedKm = isKm ? Math.max(targetVehicle.currentKm || 0, log.kmAtFueling || targetVehicle.currentKm || 0) : targetVehicle.currentKm;
+      const updatedHour = !isKm ? Math.max(targetVehicle.currentHourmeter || 0, log.hourmeterAtFueling || targetVehicle.currentHourmeter || 0) : targetVehicle.currentHourmeter;
+      
+      const vehicleUpdates = cleanUndefined({
+        currentKm: updatedKm,
+        currentHourmeter: updatedHour,
+        lastFuelingDate: log.dateTime.slice(0, 10)
+      });
+
+      // Update in local memory cache
+      const updatedVehicleObj = { ...targetVehicle, ...vehicleUpdates };
+      cache.vehicles = cache.vehicles.map(v => v.id === targetVehicle.id ? updatedVehicleObj : v);
+
+      await updateDoc(doc(db, 'vehicles', targetVehicle.id), vehicleUpdates);
+    }
+
+    // If flagged suspicious, create automated Alert in Firestore
+    if (log.flaggedSuspicious) {
+      const newAlert: SmartAlert = cleanUndefined({
+        id: `alt-${Date.now()}`,
+        type: 'SUSPICIOUS_FUEL',
+        severity: 'ALTA',
+        title: 'Consumo Anômalo no Abastecimento',
+        description: `${log.equipmentName} (${log.equipmentPlateOrCode}): ${log.suspiciousReason || 'Consumo fora do padrão registrado.'}`,
+        equipmentId: log.equipmentId,
+        equipmentName: log.equipmentName,
+        fuelLogId: newLog.id,
+        date: log.dateTime.slice(0, 10),
+        resolved: false
+      });
+      cache.alerts = [newAlert, ...cache.alerts];
+      await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
+    }
+
+    logAuditEvent('CRIAR', 'Abastecimento', `Registrou ${newLog.liters}L em ${newLog.equipmentName} (${newLog.equipmentPlateOrCode}).`);
+    notifyDataUpdated();
+    return cleanedLog;
+  } catch (err) {
+    console.error('[addFuelLog Firestore Error]', err);
+    throw err;
   }
-
-  // If flagged suspicious, create automated Alert in Firestore
-  if (log.flaggedSuspicious) {
-    const newAlert: SmartAlert = {
-      id: `alt-${Date.now()}`,
-      type: 'SUSPICIOUS_FUEL',
-      severity: 'ALTA',
-      title: 'Consumo Anômalo no Abastecimento',
-      description: `${log.equipmentName} (${log.equipmentPlateOrCode}): ${log.suspiciousReason || 'Consumo fora do padrão registrado.'}`,
-      equipmentId: log.equipmentId,
-      equipmentName: log.equipmentName,
-      fuelLogId: newLog.id,
-      date: log.dateTime.slice(0, 10),
-      resolved: false
-    };
-    setDoc(doc(db, 'alerts', newAlert.id), newAlert).catch(console.error);
-  }
-
-  logAuditEvent('CRIAR', 'Abastecimento', `Registrou ${newLog.liters}L em ${newLog.equipmentName} (${newLog.equipmentPlateOrCode}).`);
-  return newLog;
 }
 
-export function updateFuelLog(id: string, updatedFields: Partial<FuelLog>): void {
-  updateDoc(doc(db, 'fuel_logs', id), {
+export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>): Promise<void> {
+  const cleaned = cleanUndefined({
     ...updatedFields,
     updatedAt: new Date().toISOString()
-  }).catch(console.error);
+  });
+
+  cache.fuelLogs = cache.fuelLogs.map(l => l.id === id ? { ...l, ...cleaned } : l);
+  notifyDataUpdated();
+
+  await updateDoc(doc(db, 'fuel_logs', id), cleaned);
   logAuditEvent('EDITAR', 'Abastecimento', `Atualizou o registro de abastecimento ID ${id}.`);
 }
 
-export function deleteFuelLog(id: string): void {
-  deleteDoc(doc(db, 'fuel_logs', id)).catch(console.error);
+export async function deleteFuelLog(id: string): Promise<void> {
+  cache.fuelLogs = cache.fuelLogs.filter(l => l.id !== id);
+  notifyDataUpdated();
+
+  await deleteDoc(doc(db, 'fuel_logs', id));
   logAuditEvent('EXCLUIR', 'Abastecimento', `Removeu o abastecimento ID ${id}.`);
 }
 
 // Vehicle / Machine Mutators
-export function addVehicle(v: Omit<Vehicle, 'id'>): Vehicle {
+export async function addVehicle(v: Omit<Vehicle, 'id'>): Promise<Vehicle> {
   const newVehicle: Vehicle = {
     ...v,
     id: `veh-${Date.now()}`
   };
-  setDoc(doc(db, 'vehicles', newVehicle.id), newVehicle).catch(console.error);
-  logAuditEvent('CRIAR', 'Equipamento', `Cadastrou ${newVehicle.model} (${newVehicle.licensePlate || newVehicle.patrimonyCode}).`);
-  return newVehicle;
+  const cleaned = cleanUndefined(newVehicle);
+  cache.vehicles = [...cache.vehicles, cleaned];
+  notifyDataUpdated();
+
+  await setDoc(doc(db, 'vehicles', cleaned.id), cleaned);
+  logAuditEvent('CRIAR', 'Equipamento', `Cadastrou ${cleaned.model} (${cleaned.licensePlate || cleaned.patrimonyCode}).`);
+  return cleaned;
 }
 
-export function updateVehicle(id: string, updatedFields: Partial<Vehicle>): void {
-  updateDoc(doc(db, 'vehicles', id), updatedFields).catch(console.error);
+export async function updateVehicle(id: string, updatedFields: Partial<Vehicle>): Promise<void> {
+  const cleaned = cleanUndefined(updatedFields);
+  cache.vehicles = cache.vehicles.map(v => v.id === id ? { ...v, ...cleaned } : v);
+  notifyDataUpdated();
+
+  await updateDoc(doc(db, 'vehicles', id), cleaned);
   logAuditEvent('EDITAR', 'Equipamento', `Atualizou equipamento ID ${id}.`);
 }
 
-export function deleteVehicle(id: string): void {
-  deleteDoc(doc(db, 'vehicles', id)).catch(console.error);
+export async function deleteVehicle(id: string): Promise<void> {
+  cache.vehicles = cache.vehicles.filter(v => v.id !== id);
+  notifyDataUpdated();
+
+  await deleteDoc(doc(db, 'vehicles', id));
   logAuditEvent('EXCLUIR', 'Equipamento', `Excluiu equipamento ID ${id}.`);
 }
 
 // Maintenance Mutators
-export function addMaintenance(m: Omit<MaintenanceLog, 'id'>): MaintenanceLog {
+export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<MaintenanceLog> {
   const newMnt: MaintenanceLog = {
     ...m,
     id: `mnt-${Date.now()}`
   };
-  setDoc(doc(db, 'maintenance_logs', newMnt.id), newMnt).catch(console.error);
+  const cleaned = cleanUndefined(newMnt);
+  cache.maintenanceLogs = [cleaned, ...cache.maintenanceLogs];
+  notifyDataUpdated();
+
+  await setDoc(doc(db, 'maintenance_logs', cleaned.id), cleaned);
   logAuditEvent('CRIAR', 'Manutenção', `Agendou/Registrou manutenção "${m.title}" em ${m.equipmentName}.`);
-  return newMnt;
+  return cleaned;
 }
 
-export function updateMaintenance(id: string, fields: Partial<MaintenanceLog>): void {
-  updateDoc(doc(db, 'maintenance_logs', id), fields).catch(console.error);
+export async function updateMaintenance(id: string, fields: Partial<MaintenanceLog>): Promise<void> {
+  const cleaned = cleanUndefined(fields);
+  cache.maintenanceLogs = cache.maintenanceLogs.map(m => m.id === id ? { ...m, ...cleaned } : m);
+  notifyDataUpdated();
+
+  await updateDoc(doc(db, 'maintenance_logs', id), cleaned);
   logAuditEvent('EDITAR', 'Manutenção', `Atualizou registro de manutenção ID ${id}.`);
 }
 
-export function deleteMaintenance(id: string): void {
-  deleteDoc(doc(db, 'maintenance_logs', id)).catch(console.error);
+export async function deleteMaintenance(id: string): Promise<void> {
+  cache.maintenanceLogs = cache.maintenanceLogs.filter(m => m.id !== id);
+  notifyDataUpdated();
+
+  await deleteDoc(doc(db, 'maintenance_logs', id));
   logAuditEvent('EXCLUIR', 'Manutenção', `Excluiu o registro de manutenção ID ${id}.`);
 }
 
 // Machine Issue Mutators
-export function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' | 'status'>): MachineIssue {
+export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' | 'status'>): Promise<MachineIssue> {
   const newIssue: MachineIssue = {
     ...issueData,
     id: `iss-${Date.now()}`,
     dateTime: new Date().toISOString(),
     status: 'ABERTO'
   };
-  setDoc(doc(db, 'machine_issues', newIssue.id), newIssue).catch(console.error);
+  const cleaned = cleanUndefined(newIssue);
+  cache.machineIssues = [cleaned, ...cache.machineIssues];
 
-  // Also create smart alert for admins
-  const newAlert: SmartAlert = {
+  const newAlert: SmartAlert = cleanUndefined({
     id: `alt-iss-${Date.now()}`,
     type: 'MACHINE_ISSUE',
     severity: 'ALTA',
@@ -468,47 +538,59 @@ export function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' 
     equipmentName: newIssue.equipmentName,
     date: newIssue.dateTime.slice(0, 10),
     resolved: false
-  };
-  setDoc(doc(db, 'alerts', newAlert.id), newAlert).catch(console.error);
+  });
+  cache.alerts = [newAlert, ...cache.alerts];
+  notifyDataUpdated();
+
+  await setDoc(doc(db, 'machine_issues', cleaned.id), cleaned);
+  await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
 
   logAuditEvent('CRIAR', 'Problema', `Relatou problema em ${newIssue.equipmentName}: ${newIssue.description}`);
-  return newIssue;
+  return cleaned;
 }
 
-export function resolveMachineIssue(issueId: string, notes?: string): void {
+export async function resolveMachineIssue(issueId: string, notes?: string): Promise<void> {
   const user = getCurrentUser();
-  updateDoc(doc(db, 'machine_issues', issueId), {
+  const fields = cleanUndefined({
     status: 'RESOLVIDO',
     resolvedAt: new Date().toISOString(),
     resolvedBy: user?.name || 'Administrador',
     notes: notes || ''
-  }).catch(console.error);
+  });
+
+  cache.machineIssues = cache.machineIssues.map(i => i.id === issueId ? { ...i, ...fields } as MachineIssue : i);
+  notifyDataUpdated();
+
+  await updateDoc(doc(db, 'machine_issues', issueId), fields);
   logAuditEvent('EDITAR', 'Problema', `Resolveu o problema relatado ID ${issueId}`);
 }
 
 // Preventive Maintenance Mutators
-export function recordPreventiveService(
+export async function recordPreventiveService(
   equipmentId: string, 
   itemKey: PreventiveItemKey, 
   currentHourmeter: number, 
   notes?: string
-): void {
+): Promise<void> {
   const all = getPreventiveItems();
   const target = all.find(item => item.equipmentId === equipmentId && item.itemKey === itemKey);
   
   if (target) {
-    const updatedItem: PreventiveMaintenanceItem = {
+    const updatedItem: PreventiveMaintenanceItem = cleanUndefined({
       ...target,
       lastServiceDate: new Date().toISOString().slice(0, 10),
       lastServiceHourmeter: currentHourmeter,
       nextScheduledHourmeter: currentHourmeter + target.intervalHours,
       notes: notes || target.notes
-    };
+    });
     
-    setDoc(doc(db, 'preventive_items', target.id), updatedItem).catch(console.error);
+    cache.preventiveItems = cache.preventiveItems.map(p => p.id === target.id ? updatedItem : p);
+    notifyDataUpdated();
+
+    await setDoc(doc(db, 'preventive_items', target.id), updatedItem);
 
     // Create a maintenance log entry in Firestore
-    addMaintenance({
+    await addMaintenance({
       equipmentId,
       equipmentName: target.itemName,
       equipmentPlateOrCode: equipmentId,
@@ -530,61 +612,92 @@ export function recordPreventiveService(
 }
 
 // Gas Stations Mutators
-export function addGasStation(stn: Omit<GasStation, 'id'>): GasStation {
+export async function addGasStation(stn: Omit<GasStation, 'id'>): Promise<GasStation> {
   const newStn: GasStation = {
     ...stn,
     id: `stn-${Date.now()}`
   };
-  setDoc(doc(db, 'gas_stations', newStn.id), newStn).catch(console.error);
-  logAuditEvent('CRIAR', 'Posto', `Cadastrou posto ${newStn.name}.`);
-  return newStn;
+  const cleaned = cleanUndefined(newStn);
+  cache.gasStations = [...cache.gasStations, cleaned];
+  notifyDataUpdated();
+
+  await setDoc(doc(db, 'gas_stations', cleaned.id), cleaned);
+  logAuditEvent('CRIAR', 'Posto', `Cadastrou posto ${cleaned.name}.`);
+  return cleaned;
 }
 
-export function updateGasStation(id: string, fields: Partial<GasStation>): void {
-  updateDoc(doc(db, 'gas_stations', id), fields).catch(console.error);
+export async function updateGasStation(id: string, fields: Partial<GasStation>): Promise<void> {
+  const cleaned = cleanUndefined(fields);
+  cache.gasStations = cache.gasStations.map(s => s.id === id ? { ...s, ...cleaned } : s);
+  notifyDataUpdated();
+
+  await updateDoc(doc(db, 'gas_stations', id), cleaned);
   logAuditEvent('EDITAR', 'Posto', `Atualizou tabela de preços/dados do posto ID ${id}.`);
 }
 
-export function deleteGasStation(id: string): void {
-  deleteDoc(doc(db, 'gas_stations', id)).catch(console.error);
+export async function deleteGasStation(id: string): Promise<void> {
+  cache.gasStations = cache.gasStations.filter(s => s.id !== id);
+  notifyDataUpdated();
+
+  await deleteDoc(doc(db, 'gas_stations', id));
   logAuditEvent('EXCLUIR', 'Posto', `Excluiu o posto ID ${id}.`);
 }
 
 // User Mutators
-export function addUser(user: Omit<User, 'id'>): User {
+export async function addUser(user: Omit<User, 'id'>): Promise<User> {
   const newUser: User = {
     ...user,
     id: `usr-${Date.now()}`
   };
-  setDoc(doc(db, 'users', newUser.id), newUser).catch(console.error);
-  logAuditEvent('CRIAR', 'Usuário', `Cadastrou funcionário/usuário ${newUser.name}.`);
-  return newUser;
+  const cleaned = cleanUndefined(newUser);
+  cache.users = [...cache.users, cleaned];
+  notifyDataUpdated();
+
+  await setDoc(doc(db, 'users', cleaned.id), cleaned);
+  logAuditEvent('CRIAR', 'Usuário', `Cadastrou funcionário/usuário ${cleaned.name}.`);
+  return cleaned;
 }
 
-export function updateUser(id: string, fields: Partial<User>): void {
-  updateDoc(doc(db, 'users', id), fields).catch(console.error);
+export async function updateUser(id: string, fields: Partial<User>): Promise<void> {
+  const cleaned = cleanUndefined(fields);
+  cache.users = cache.users.map(u => u.id === id ? { ...u, ...cleaned } : u);
+  notifyDataUpdated();
+
+  await updateDoc(doc(db, 'users', id), cleaned);
   logAuditEvent('EDITAR', 'Usuário', `Atualizou dados do usuário ID ${id}.`);
 }
 
-export function deleteUser(id: string): void {
-  deleteDoc(doc(db, 'users', id)).catch(console.error);
+export async function deleteUser(id: string): Promise<void> {
+  cache.users = cache.users.filter(u => u.id !== id);
+  notifyDataUpdated();
+
+  await deleteDoc(doc(db, 'users', id));
   logAuditEvent('EXCLUIR', 'Usuário', `Excluiu o usuário ID ${id}.`);
 }
 
 // Alerts Mutator
-export function resolveAlert(id: string): void {
+export async function resolveAlert(id: string): Promise<void> {
   const user = getCurrentUser();
-  updateDoc(doc(db, 'alerts', id), {
+  const fields = cleanUndefined({
     resolved: true,
     resolvedAt: new Date().toISOString(),
     resolvedBy: user?.name || 'Administrador'
-  }).catch(console.error);
+  });
+
+  cache.alerts = cache.alerts.map(a => a.id === id ? { ...a, ...fields } as SmartAlert : a);
+  notifyDataUpdated();
+
+  await updateDoc(doc(db, 'alerts', id), fields);
   logAuditEvent('EDITAR', 'Alerta', `Marcou alerta ID ${id} como resolvido.`);
 }
 
 // Settings Mutator
-export function updateSettings(newSettings: Partial<SystemSettings>): void {
-  updateDoc(doc(db, 'settings', 'config'), newSettings).catch(console.error);
+export async function updateSettings(newSettings: Partial<SystemSettings>): Promise<void> {
+  const cleaned = cleanUndefined(newSettings);
+  cache.settings = { ...cache.settings, ...cleaned };
+  notifyDataUpdated();
+
+  await updateDoc(doc(db, 'settings', 'config'), cleaned);
   logAuditEvent('CONFIGURACAO', 'Sistema', 'Atualizou as configurações gerais do AndradeAgro.');
 }
 
@@ -600,7 +713,7 @@ export async function resetSystemData(): Promise<void> {
     await seedCollection('preventive_items', INITIAL_PREVENTIVE_ITEMS);
     await seedCollection('alerts', INITIAL_ALERTS);
     await seedCollection('audit_logs', INITIAL_AUDIT_LOGS);
-    await setDoc(doc(db, 'settings', 'config'), INITIAL_SETTINGS);
+    await setDoc(doc(db, 'settings', 'config'), cleanUndefined(INITIAL_SETTINGS));
     notifyDataUpdated();
   } catch (err) {
     console.error('Error resetting system data in Firestore:', err);

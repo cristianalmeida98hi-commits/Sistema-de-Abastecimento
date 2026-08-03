@@ -1,5 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { 
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar,
+  XAxis, YAxis, Tooltip, CartesianGrid 
+} from 'recharts';
+import { 
   X, Truck, Fuel, Wrench, AlertTriangle, CheckCircle2, Clock, 
   Calendar, FileText, User as UserIcon, BarChart3, Shield, Filter, 
   PlusCircle, RefreshCw, AlertCircle, Camera, Check, ChevronRight,
@@ -151,6 +155,31 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
 
   const lastFueling = machineFuelLogs[0] || null;
   const lastMaintenance = machineMaintenanceLogs[0] || null;
+
+  // Chart Data for Recharts
+  const fuelChartData = useMemo(() => {
+    return [...machineFuelLogs]
+      .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime())
+      .slice(-10)
+      .map(f => ({
+        date: new Date(f.dateTime).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        litros: f.liters,
+        horimetro: f.hourmeterAtFueling || f.odometerAtFueling || 0,
+        custo: f.totalValue
+      }));
+  }, [machineFuelLogs]);
+
+  const maintenanceChartData = useMemo(() => {
+    return [...machineMaintenanceLogs]
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      .slice(-10)
+      .map(m => ({
+        date: new Date(m.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        custo: m.cost,
+        horimetro: m.kmOrHourAtService,
+        title: m.title
+      }));
+  }, [machineMaintenanceLogs]);
 
   // Preventive Maintenance Status Analyzer
   const currentMeter = vehicle.currentHourmeter || vehicle.currentKm || 0;
@@ -1024,6 +1053,99 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                     </div>
                   ) : (
                     <p className="text-slate-400">Nenhuma manutenção gravada.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* RECHARTS GRAPHS FOR TECHNICAL ANALYSIS */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs pt-2">
+                {/* Chart 1: Abastecimentos e Litros Consumidos */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-emerald-950/40 border border-slate-200 dark:border-emerald-900/60 space-y-3">
+                  <div className="flex items-center justify-between border-b pb-2 border-slate-200 dark:border-emerald-900/60">
+                    <span className="font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                      <Fuel className="w-4 h-4 text-[#064E3B] dark:text-[#FACC15]" />
+                      <span>Histórico de Consumo (Litros)</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-bold">Volume por abastecimento</span>
+                  </div>
+
+                  {fuelChartData.length === 0 ? (
+                    <div className="h-44 flex items-center justify-center text-slate-400 text-xs italic">
+                      Sem dados de abastecimento suficientes para o gráfico.
+                    </div>
+                  ) : (
+                    <div className="h-48 w-full pt-1">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={fuelChartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                          <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: darkMode ? '#042d23' : '#ffffff', 
+                              borderColor: '#059669', 
+                              borderRadius: '12px',
+                              fontSize: '11px',
+                              color: darkMode ? '#ffffff' : '#000000'
+                            }}
+                            formatter={(value: any) => [`${value} Litros`, 'Volume']}
+                          />
+                          <Bar dataKey="litros" fill="#059669" radius={[6, 6, 0, 0]} name="Litros" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+
+                {/* Chart 2: Evolução do Horímetro / KM */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-emerald-950/40 border border-slate-200 dark:border-emerald-900/60 space-y-3">
+                  <div className="flex items-center justify-between border-b pb-2 border-slate-200 dark:border-emerald-900/60">
+                    <span className="font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                      <TrendingUp className="w-4 h-4 text-[#FACC15]" />
+                      <span>Evolução do Horímetro / KM</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-bold">
+                      {vehicle.category === 'VEICULO' ? 'Quilometragem' : 'Horas Operacionais'}
+                    </span>
+                  </div>
+
+                  {fuelChartData.length === 0 && maintenanceChartData.length === 0 ? (
+                    <div className="h-44 flex items-center justify-center text-slate-400 text-xs italic">
+                      Sem histórico de horímetro registrado.
+                    </div>
+                  ) : (
+                    <div className="h-48 w-full pt-1">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart 
+                          data={fuelChartData.length > 0 ? fuelChartData : maintenanceChartData} 
+                          margin={{ top: 5, right: 10, left: -20, bottom: 0 }}
+                        >
+                          <defs>
+                            <linearGradient id="colorMeter" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#FACC15" stopOpacity={0.8}/>
+                              <stop offset="95%" stopColor="#FACC15" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                          <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                          <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} domain={['auto', 'auto']} />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: darkMode ? '#042d23' : '#ffffff', 
+                              borderColor: '#eab308', 
+                              borderRadius: '12px',
+                              fontSize: '11px',
+                              color: darkMode ? '#ffffff' : '#000000'
+                            }}
+                            formatter={(value: any) => [
+                              `${value} ${vehicle.category === 'VEICULO' ? 'km' : 'h'}`,
+                              'Horímetro / KM'
+                            ]}
+                          />
+                          <Area type="monotone" dataKey="horimetro" stroke="#FACC15" fillOpacity={1} fill="url(#colorMeter)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
                   )}
                 </div>
               </div>

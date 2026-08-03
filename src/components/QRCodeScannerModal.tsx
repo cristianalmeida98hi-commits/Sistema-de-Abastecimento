@@ -155,7 +155,7 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
             <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-2">
               <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
               <p>
-                <strong>📌 Ficha Digital & Manutenção:</strong> O QR Code direciona para a ficha do equipamento com controle de trocas de óleo, preventiva e histórico de manutenção. Registros de abastecimento são realizados no tablet operacional.
+                <strong>📌 Ficha Digital da Máquina:</strong> O QR Code direciona para a Ficha Digital técnica do equipamento, com controle de trocas de óleo, preventivas e histórico de manutenção.
               </p>
             </div>
 
@@ -172,7 +172,7 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
                   className="w-full py-3.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.99]"
                 >
                   <FileText className="w-4 h-4 text-[#FACC15]" />
-                  <span>📄 ABRIR FICHA DIGITAL & ABA DE MANUTENÇÃO</span>
+                  <span>📄 ABRIR FICHA DIGITAL DA MÁQUINA</span>
                 </button>
               )}
             </div>

@@ -34,14 +34,15 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
       ? [
           { id: 'operator-fueling', label: 'Lançamento de Campo', icon: Fuel, badge: 'Rápido' },
           { id: 'my-fuel-logs', label: 'Meus Lançamentos', icon: GasPump, badge: null },
-          { id: 'maintenance', label: 'Manutenções', icon: Wrench, badge: null }
+          { id: 'digital-sheets', label: 'Fichas Digitais das Máquinas', icon: FileSpreadsheet, badge: 'Máquinas' }
         ]
       : [
           { id: 'dashboard', label: 'Visão Geral', icon: LayoutDashboard, badge: null },
           { id: 'fuel-logs', label: 'Abastecimentos', icon: Fuel, badge: null },
           { id: 'fleet', label: 'Veículos & Máquinas', icon: Truck, badge: '160' },
+          { id: 'digital-sheets', label: 'Fichas Digitais', icon: FileSpreadsheet, badge: null },
           { id: 'qr-codes', label: 'Módulo QR Code', icon: QrCode, badge: 'QR' },
-          { id: 'maintenance', label: 'Manutenções', icon: Wrench, badge: null },
+          { id: 'maintenance', label: 'Manutenções Gerais', icon: Wrench, badge: null },
           { id: 'stations', label: 'Postos & Preços', icon: GasPump, badge: null },
           { id: 'staff', label: 'Equipe & Motoristas', icon: Users, badge: null },
           { id: 'reports', label: 'Relatórios', icon: FileSpreadsheet, badge: 'PDF' },

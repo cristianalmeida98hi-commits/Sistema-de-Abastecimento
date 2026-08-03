@@ -32,6 +32,7 @@ const FuelingFormModal = React.lazy(() => import('./components/FuelingFormModal'
 const QRCodeScannerModal = React.lazy(() => import('./components/QRCodeScannerModal').then(m => ({ default: m.QRCodeScannerModal })));
 const QRCodeModuleView = React.lazy(() => import('./components/QRCodeModuleView').then(m => ({ default: m.QRCodeModuleView })));
 const MachineDigitalSheetModal = React.lazy(() => import('./components/MachineDigitalSheetModal').then(m => ({ default: m.MachineDigitalSheetModal })));
+const OperatorDigitalSheetsView = React.lazy(() => import('./components/OperatorDigitalSheetsView').then(m => ({ default: m.OperatorDigitalSheetsView })));
 const LoginView = React.lazy(() => import('./components/LoginView').then(m => ({ default: m.LoginView })));
 
 const ViewLoader = () => (
@@ -70,6 +71,7 @@ export default function App() {
         if (
           activeTab !== 'operator-fueling' && 
           activeTab !== 'my-fuel-logs' && 
+          activeTab !== 'digital-sheets' && 
           activeTab !== 'qr-codes' && 
           activeTab !== 'maintenance'
         ) {
@@ -289,6 +291,20 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'digital-sheets' && (
+              <OperatorDigitalSheetsView
+                vehicles={vehicles}
+                users={users}
+                currentUser={currentUser}
+                maintenanceLogs={maintenanceLogs}
+                fuelLogs={fuelLogs}
+                onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
+                onOpenQRScanner={() => setIsQRScannerModalOpen(true)}
+                darkMode={darkMode}
+                searchQuery={searchQuery}
+              />
+            )}
+
             {activeTab === 'qr-codes' && (
               <QRCodeModuleView
                 vehicles={vehicles}
@@ -409,7 +425,7 @@ export default function App() {
             machineIssues={machineIssues}
             preventiveItems={preventiveItems}
             currentUser={currentUser}
-            initialTab="HISTORY"
+            initialTab="OVERVIEW"
             onAddMaintenance={(m) => addMaintenance(m)}
             onUpdateMaintenance={(id, fields) => updateMaintenance(id, fields)}
             onDeleteMaintenance={(id) => deleteMaintenance(id)}

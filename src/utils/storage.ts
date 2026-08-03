@@ -146,48 +146,40 @@ if (typeof window !== 'undefined') {
 
 // Initializer
 export function initStorage() {
-  const CLEAN_KEY = 'andradeagro_zero_state_v4';
-  if (!localStorage.getItem(CLEAN_KEY)) {
-    localStorage.removeItem(STORAGE_KEYS.FUEL_LOGS);
-    localStorage.removeItem(STORAGE_KEYS.MAINTENANCE_LOGS);
-    localStorage.removeItem(STORAGE_KEYS.ALERTS);
-    localStorage.removeItem(STORAGE_KEYS.AUDIT_LOGS);
-    localStorage.setItem(CLEAN_KEY, 'true');
-  }
-
-  if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
-    setStored(STORAGE_KEYS.USERS, INITIAL_USERS);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.VEHICLES)) {
-    setStored(STORAGE_KEYS.VEHICLES, INITIAL_VEHICLES);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.GAS_STATIONS)) {
-    setStored(STORAGE_KEYS.GAS_STATIONS, INITIAL_GAS_STATIONS);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.FUEL_LOGS)) {
-    setStored(STORAGE_KEYS.FUEL_LOGS, INITIAL_FUEL_LOGS);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.MAINTENANCE_LOGS)) {
-    setStored(STORAGE_KEYS.MAINTENANCE_LOGS, INITIAL_MAINTENANCE_LOGS);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.ALERTS)) {
-    setStored(STORAGE_KEYS.ALERTS, INITIAL_ALERTS);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
-    setStored(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
-    setStored(STORAGE_KEYS.SETTINGS, INITIAL_SETTINGS);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.MACHINE_ISSUES)) {
-    setStored(STORAGE_KEYS.MACHINE_ISSUES, INITIAL_MACHINE_ISSUES);
-  }
-  if (!localStorage.getItem(STORAGE_KEYS.PREVENTIVE_ITEMS)) {
-    setStored(STORAGE_KEYS.PREVENTIVE_ITEMS, INITIAL_PREVENTIVE_ITEMS);
-  }
-
-  // Trigger immediate initial sync with central database
-  syncWithServer();
+  // Sync immediately with central server database on load
+  syncWithServer().then(() => {
+    // If still missing local keys after sync, populate fallback seeds without overwriting server
+    if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.VEHICLES)) {
+      localStorage.setItem(STORAGE_KEYS.VEHICLES, JSON.stringify(INITIAL_VEHICLES));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.GAS_STATIONS)) {
+      localStorage.setItem(STORAGE_KEYS.GAS_STATIONS, JSON.stringify(INITIAL_GAS_STATIONS));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.FUEL_LOGS)) {
+      localStorage.setItem(STORAGE_KEYS.FUEL_LOGS, JSON.stringify(INITIAL_FUEL_LOGS));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.MAINTENANCE_LOGS)) {
+      localStorage.setItem(STORAGE_KEYS.MAINTENANCE_LOGS, JSON.stringify(INITIAL_MAINTENANCE_LOGS));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.ALERTS)) {
+      localStorage.setItem(STORAGE_KEYS.ALERTS, JSON.stringify(INITIAL_ALERTS));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
+      localStorage.setItem(STORAGE_KEYS.AUDIT_LOGS, JSON.stringify(INITIAL_AUDIT_LOGS));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
+      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(INITIAL_SETTINGS));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.MACHINE_ISSUES)) {
+      localStorage.setItem(STORAGE_KEYS.MACHINE_ISSUES, JSON.stringify(INITIAL_MACHINE_ISSUES));
+    }
+    if (!localStorage.getItem(STORAGE_KEYS.PREVENTIVE_ITEMS)) {
+      localStorage.setItem(STORAGE_KEYS.PREVENTIVE_ITEMS, JSON.stringify(INITIAL_PREVENTIVE_ITEMS));
+    }
+  });
 }
 
 // Getters

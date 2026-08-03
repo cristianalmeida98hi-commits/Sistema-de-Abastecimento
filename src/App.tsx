@@ -67,7 +67,12 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       if (currentUser.role === 'FUNCIONARIO') {
-        if (activeTab !== 'operator-fueling' && activeTab !== 'my-fuel-logs' && activeTab !== 'qr-codes') {
+        if (
+          activeTab !== 'operator-fueling' && 
+          activeTab !== 'my-fuel-logs' && 
+          activeTab !== 'qr-codes' && 
+          activeTab !== 'maintenance'
+        ) {
           setActiveTab('operator-fueling');
         }
       }

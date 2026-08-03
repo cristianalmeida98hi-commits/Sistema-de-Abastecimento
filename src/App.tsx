@@ -9,8 +9,8 @@ import {
   getFuelLogs, getMaintenanceLogs, getAlerts, getAuditLogs, getSettings,
   getMachineIssues, getPreventiveItems, addMachineIssue, resolveMachineIssue, recordPreventiveService,
   addFuelLog, updateFuelLog, deleteFuelLog, addVehicle, updateVehicle, deleteVehicle,
-  addMaintenance, updateMaintenance, deleteMaintenance, addGasStation, updateGasStation, addUser,
-  updateUser, resolveAlert, updateSettings, logoutUser
+  addMaintenance, updateMaintenance, deleteMaintenance, addGasStation, updateGasStation, deleteGasStation, addUser,
+  updateUser, deleteUser, resolveAlert, updateSettings, logoutUser
 } from './utils/storage';
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
 import { Header } from './components/Header';
@@ -68,13 +68,8 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       if (currentUser.role === 'FUNCIONARIO') {
-        if (
-          activeTab !== 'operator-fueling' && 
-          activeTab !== 'my-fuel-logs' && 
-          activeTab !== 'digital-sheets' && 
-          activeTab !== 'qr-codes' && 
-          activeTab !== 'maintenance'
-        ) {
+        const allowedFuncionarioTabs = ['operator-fueling', 'digital-sheets'];
+        if (!allowedFuncionarioTabs.includes(activeTab)) {
           setActiveTab('operator-fueling');
         }
       }
@@ -120,7 +115,7 @@ export default function App() {
 
       let matchedVehicleId: string | null = null;
 
-      if (hash.includes('vehicle/') || hash.includes('maintenance/')) {
+      if (hash.includes('vehicle/') || hash.includes('maintenance/') || hash.includes('ficha-maquina/')) {
         const parts = hash.split('/');
         matchedVehicleId = parts[parts.length - 1];
       } else if (hash.includes('ANDRADEAGRO:')) {
@@ -333,6 +328,7 @@ export default function App() {
                 gasStations={gasStations}
                 onAddStation={(stn) => addGasStation(stn)}
                 onUpdateStation={(id, fields) => updateGasStation(id, fields)}
+                onDeleteStation={(id) => deleteGasStation(id)}
                 darkMode={darkMode}
               />
             )}
@@ -343,6 +339,7 @@ export default function App() {
                 currentUser={currentUser}
                 onAddUser={(u) => addUser(u)}
                 onUpdateUser={(id, fields) => updateUser(id, fields)}
+                onDeleteUser={(id) => deleteUser(id)}
                 darkMode={darkMode}
               />
             )}

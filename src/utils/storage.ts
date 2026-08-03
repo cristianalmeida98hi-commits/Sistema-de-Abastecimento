@@ -23,6 +23,26 @@ const STORAGE_KEYS = {
   THEME: 'andradeagro_theme_v1'
 };
 
+let syncChannel: BroadcastChannel | null = null;
+if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+  try {
+    syncChannel = new BroadcastChannel('andradeagro_realtime_sync');
+    syncChannel.onmessage = () => {
+      window.dispatchEvent(new Event('andradeagro_data_updated'));
+    };
+  } catch (e) {
+    console.error('BroadcastChannel sync init error:', e);
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key && e.key.startsWith('andradeagro_')) {
+      window.dispatchEvent(new Event('andradeagro_data_updated'));
+    }
+  });
+}
+
 function getStored<T>(key: string, defaultValue: T): T {
   try {
     const item = localStorage.getItem(key);
@@ -37,6 +57,9 @@ function setStored<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
     window.dispatchEvent(new Event('andradeagro_data_updated'));
+    if (syncChannel) {
+      syncChannel.postMessage({ key, timestamp: Date.now() });
+    }
   } catch (err) {
     console.error(`Error writing ${key} to localStorage:`, err);
   }
@@ -473,6 +496,12 @@ export function updateGasStation(id: string, fields: Partial<GasStation>): void 
   logAuditEvent('EDITAR', 'Posto', `Atualizou tabela de preços/dados do posto ID ${id}.`);
 }
 
+export function deleteGasStation(id: string): void {
+  const stations = getGasStations();
+  setStored(STORAGE_KEYS.GAS_STATIONS, stations.filter(s => s.id !== id));
+  logAuditEvent('EXCLUIR', 'Posto', `Excluiu o posto ID ${id}.`);
+}
+
 // User Mutators
 export function addUser(user: Omit<User, 'id'>): User {
   const users = getUsers();
@@ -489,6 +518,12 @@ export function updateUser(id: string, fields: Partial<User>): void {
   const users = getUsers();
   setStored(STORAGE_KEYS.USERS, users.map(u => u.id === id ? { ...u, ...fields } : u));
   logAuditEvent('EDITAR', 'Usuário', `Atualizou dados do usuário ID ${id}.`);
+}
+
+export function deleteUser(id: string): void {
+  const users = getUsers();
+  setStored(STORAGE_KEYS.USERS, users.filter(u => u.id !== id));
+  logAuditEvent('EXCLUIR', 'Usuário', `Excluiu o usuário ID ${id}.`);
 }
 
 // Alerts Mutator

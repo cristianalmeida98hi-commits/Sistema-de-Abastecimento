@@ -145,86 +145,19 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
               </div>
             )}
 
-            {/* User Profile / Role Switcher Button */}
-            <div className="relative">
-              <button
-                onClick={() => setShowRoleModal(!showRoleModal)}
-                className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border bg-emerald-900/40 border-emerald-800 hover:border-[#C5A059]/50 transition-all"
-              >
-                <img
-                  src={currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
-                  alt={currentUser.name}
-                  className="w-7 h-7 rounded-full object-cover ring-2 ring-[#C5A059]/60"
-                />
-                <div className="text-left hidden sm:block">
-                  <p className="text-xs font-bold leading-none text-slate-100">{currentUser.name}</p>
-                  <p className="text-[9px] font-bold text-[#C5A059] flex items-center gap-1 mt-0.5 uppercase tracking-wider">
-                    {currentUser.role === 'ADMIN' ? 'Administrador' : 'Operador'}
-                    <ChevronDown className="w-3 h-3 opacity-70" />
-                  </p>
-                </div>
-              </button>
-
-              {/* Role / User Switcher Popover */}
-              {showRoleModal && (
-                <div className="absolute right-0 mt-3 w-72 rounded-3xl shadow-2xl border p-4 z-50 bg-[#042d23] border-emerald-800 text-emerald-100">
-                  <div className="pb-2 mb-2 border-b border-emerald-900/40">
-                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-300">
-                      Alternar Perfil Ativo
-                    </p>
-                    <p className="text-[10px] text-emerald-200 font-medium">
-                      Escolha o usuário ativo para simular permissões:
-                    </p>
-                  </div>
-
-                  <div className="space-y-1.5 max-h-56 overflow-y-auto">
-                    {allUsers.map(user => (
-                      <button
-                        key={user.id}
-                        onClick={() => {
-                          setCurrentUser(user);
-                          onUserChanged(user);
-                          setShowRoleModal(false);
-                        }}
-                        className={`w-full flex items-center gap-2.5 p-2 rounded-2xl text-left transition-all ${
-                          user.id === currentUser.id 
-                            ? 'bg-emerald-900/60 border border-emerald-700 text-[#C5A059] font-bold' 
-                            : 'hover:bg-emerald-900/40 text-emerald-200'
-                        }`}
-                      >
-                        <img
-                          src={user.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
-                          alt={user.name}
-                          className="w-8 h-8 rounded-full object-cover"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-bold truncate">{user.name}</p>
-                          <p className="text-[10px] opacity-75">{user.department} • <span className="font-semibold text-[#C5A059]">{user.role}</span></p>
-                        </div>
-                        {user.id === currentUser.id && (
-                          <CheckCircle2 className="w-4 h-4 text-[#C5A059] shrink-0" />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 pt-2 border-t border-emerald-900/40 text-center space-y-2">
-                    <button
-                      onClick={() => { setShowRoleModal(false); onNavigate('settings'); }}
-                      className="text-[11px] text-[#C5A059] font-bold hover:underline flex items-center justify-center gap-1 w-full"
-                    >
-                      <UserIcon className="w-3.5 h-3.5" /> Configurações de Perfil
-                    </button>
-
-                    <button
-                      onClick={() => { setShowRoleModal(false); onLogout(); }}
-                      className="text-[11px] text-red-400 font-bold hover:bg-red-950/40 py-1.5 px-2 rounded-xl flex items-center justify-center gap-1.5 w-full transition-colors"
-                    >
-                      <LogOut className="w-3.5 h-3.5" /> Sair da Conta (Logout)
-                    </button>
-                  </div>
-                </div>
-              )}
+            {/* User Profile Info Badge */}
+            <div className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border bg-emerald-900/40 border-emerald-800">
+              <img
+                src={currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
+                alt={currentUser.name}
+                className="w-7 h-7 rounded-full object-cover ring-2 ring-[#C5A059]/60"
+              />
+              <div className="text-left hidden sm:block">
+                <p className="text-xs font-bold leading-none text-slate-100">{currentUser.name}</p>
+                <p className="text-[9px] font-bold text-[#C5A059] mt-0.5 uppercase tracking-wider">
+                  {currentUser.role === 'ADMIN' ? 'Administrador' : 'Operador'}
+                </p>
+              </div>
             </div>
 
             {/* Logout Quick Button */}

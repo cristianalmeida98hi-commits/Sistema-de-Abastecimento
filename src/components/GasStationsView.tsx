@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Fuel, Plus, Edit3, CheckCircle2, DollarSign, MapPin, Building, X } from 'lucide-react';
+import { Fuel, Plus, Edit3, CheckCircle2, DollarSign, MapPin, Building, X, Trash2 } from 'lucide-react';
 import { GasStation, FuelType } from '../types';
 import { formatCurrency, getFuelTypeName } from '../utils/calculations';
 
@@ -7,6 +7,7 @@ interface GasStationsViewProps {
   gasStations: GasStation[];
   onAddStation: (station: Omit<GasStation, 'id'>) => void;
   onUpdateStation: (id: string, fields: Partial<GasStation>) => void;
+  onDeleteStation?: (id: string) => void;
   darkMode: boolean;
 }
 
@@ -14,12 +15,13 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
   gasStations,
   onAddStation,
   onUpdateStation,
+  onDeleteStation,
   darkMode
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [editingStation, setEditingStation] = useState<GasStation | null>(null);
 
-  // New Station form
+  // Form states
   const [name, setName] = useState('');
   const [type, setType] = useState<'INTERNO' | 'EXTERNO'>('INTERNO');
   const [supplierName, setSupplierName] = useState('');
@@ -29,24 +31,54 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
   const [gasolinaPrice, setGasolinaPrice] = useState(6.09);
   const [etanolPrice, setEtanolPrice] = useState(3.89);
 
+  const handleOpenEdit = (stn: GasStation) => {
+    setEditingStation(stn);
+    setName(stn.name);
+    setType(stn.type);
+    setSupplierName(stn.supplierName);
+    setLocation(stn.location);
+    setDieselS10Price(stn.pricePerLiter.DIESEL_S10 || 5.79);
+    setDieselS500Price(stn.pricePerLiter.DIESEL_S500 || 5.59);
+    setGasolinaPrice(stn.pricePerLiter.GASOLINA_COMUM || 6.09);
+    setEtanolPrice(stn.pricePerLiter.ETANOL || 3.89);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onAddStation({
-      name,
-      type,
-      supplierName,
-      location,
-      pricePerLiter: {
-        DIESEL_S10: dieselS10Price,
-        DIESEL_S500: dieselS500Price,
-        GASOLINA_COMUM: gasolinaPrice,
-        GASOLINA_GRID: gasolinaPrice + 0.30,
-        ETANOL: etanolPrice,
-        ARLA_32: 2.50
-      },
-      active: true
-    });
-    setShowModal(false);
+    if (editingStation) {
+      onUpdateStation(editingStation.id, {
+        name,
+        type,
+        supplierName,
+        location,
+        pricePerLiter: {
+          DIESEL_S10: dieselS10Price,
+          DIESEL_S500: dieselS500Price,
+          GASOLINA_COMUM: gasolinaPrice,
+          GASOLINA_GRID: gasolinaPrice + 0.30,
+          ETANOL: etanolPrice,
+          ARLA_32: 2.50
+        }
+      });
+      setEditingStation(null);
+    } else {
+      onAddStation({
+        name,
+        type,
+        supplierName,
+        location,
+        pricePerLiter: {
+          DIESEL_S10: dieselS10Price,
+          DIESEL_S500: dieselS500Price,
+          GASOLINA_COMUM: gasolinaPrice,
+          GASOLINA_GRID: gasolinaPrice + 0.30,
+          ETANOL: etanolPrice,
+          ARLA_32: 2.50
+        },
+        active: true
+      });
+      setShowModal(false);
+    }
   };
 
   return (
@@ -99,13 +131,28 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
                 </p>
               </div>
 
-              <button
-                onClick={() => setEditingStation(stn)}
-                className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20"
-                title="Editar Tabela de Preços"
-              >
-                <Edit3 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => handleOpenEdit(stn)}
+                  className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                  title="Editar Posto e Preços"
+                >
+                  <Edit3 className="w-4 h-4" />
+                </button>
+                {onDeleteStation && (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Tem certeza que deseja excluir o posto "${stn.name}"? Esta ação não pode ser desfeita.`)) {
+                        onDeleteStation(stn.id);
+                      }
+                    }}
+                    className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                    title="Excluir Posto"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Price Table */}

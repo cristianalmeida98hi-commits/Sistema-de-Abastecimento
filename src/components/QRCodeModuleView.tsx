@@ -81,7 +81,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
   // Generate unique URL/ID link stored in QR Code
   const getVehicleQRCodeValue = (v: Vehicle) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app';
-    return `${origin}/#maintenance/${v.id}`;
+    return `${origin}/#ficha-maquina/${v.id}`;
   };
 
   // Print Badge for single machine

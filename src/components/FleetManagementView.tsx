@@ -116,7 +116,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     if (!printWin) return;
 
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app';
-    const qrValue = `${origin}/#maintenance/${v.id}`;
+    const qrValue = `${origin}/#ficha-maquina/${v.id}`;
 
     printWin.document.write(`
       <html>
@@ -312,7 +312,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
               </div>
 
               {/* Card Actions */}
-              <div className="pt-2 border-t border-emerald-800/20 flex items-center justify-between gap-1">
+              <div className="pt-2 border-t border-emerald-800/20 flex items-center justify-between gap-1 flex-wrap">
                 <button
                   onClick={() => {
                     if (onOpenDigitalSheet) {
@@ -340,6 +340,20 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 >
                   <QrCode className="w-4 h-4 text-amber-500" />
                 </button>
+
+                {currentUser.role === 'ADMIN' && (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Tem certeza que deseja excluir o equipamento "${v.model}" (${v.licensePlate || v.patrimonyCode})? Esta ação não pode ser desfeita.`)) {
+                        onDeleteVehicle(v.id);
+                      }
+                    }}
+                    className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400"
+                    title="Excluir Equipamento"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
             </div>
@@ -367,7 +381,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
               {/* QR Code & Badge */}
               <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center flex flex-col items-center justify-center">
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(`${typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app'}/#maintenance/${passportVehicle.id}`)}`}
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(`${typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app'}/#ficha-maquina/${passportVehicle.id}`)}`}
                   alt="QR Code"
                   className="w-36 h-36 border rounded-xl p-1 bg-white"
                 />

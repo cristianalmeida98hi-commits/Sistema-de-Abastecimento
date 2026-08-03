@@ -33,7 +33,8 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
     return currentUser.role === 'FUNCIONARIO' 
       ? [
           { id: 'operator-fueling', label: 'Lançamento de Campo', icon: Fuel, badge: 'Rápido' },
-          { id: 'my-fuel-logs', label: 'Meus Lançamentos', icon: GasPump, badge: null }
+          { id: 'my-fuel-logs', label: 'Meus Lançamentos', icon: GasPump, badge: null },
+          { id: 'maintenance', label: 'Manutenções', icon: Wrench, badge: null }
         ]
       : [
           { id: 'dashboard', label: 'Visão Geral', icon: LayoutDashboard, badge: null },

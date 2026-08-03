@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Wrench, Plus, Search, Filter, Calendar, CheckCircle2, 
-  Clock, AlertTriangle, DollarSign, X, FileText, ChevronRight 
+  Clock, AlertTriangle, DollarSign, X, FileText, ChevronRight,
+  Edit, Trash2, Droplets
 } from 'lucide-react';
 import { MaintenanceLog, MaintenanceType, Vehicle, User } from '../types';
 import { formatCurrency, formatDateBR } from '../utils/calculations';
@@ -13,6 +14,7 @@ interface MaintenanceViewProps {
   currentUser: User;
   onAddMaintenance: (m: Omit<MaintenanceLog, 'id'>) => void;
   onUpdateMaintenance: (id: string, fields: Partial<MaintenanceLog>) => void;
+  onDeleteMaintenance?: (id: string) => void;
   darkMode: boolean;
 }
 
@@ -23,23 +25,84 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
   currentUser,
   onAddMaintenance,
   onUpdateMaintenance,
+  onDeleteMaintenance,
   darkMode
 }) => {
+  const isAdmin = currentUser.role === 'ADMIN';
+
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
 
-  // New Maintenance Form
+  // Form State
   const [equipmentId, setEquipmentId] = useState(vehicles[0]?.id || '');
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [type, setType] = useState<MaintenanceType>('REVISAO');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [kmOrHourAtService, setKmOrHourAtService] = useState(0);
-  const [nextServiceKmOrHour, setNextServiceKmOrHour] = useState(0);
-  const [cost, setCost] = useState(0);
-  const [supplierOrWorkshop, setSupplierOrWorkshop] = useState('Oficina Interna Fazenda Andrade');
-  const [performedBy, setPerformedBy] = useState(users[0]?.name || 'Técnico Responsável');
+  const [kmOrHourAtService, setKmOrHourAtService] = useState<number>(0);
+  const [nextServiceKmOrHour, setNextServiceKmOrHour] = useState<number>(0);
+  const [cost, setCost] = useState<number>(0);
+  const [supplierOrWorkshop, setSupplierOrWorkshop] = useState('Oficina Interna AndradeAgro');
+  const [performedBy, setPerformedBy] = useState(currentUser.name || users[0]?.name || 'Técnico Responsável');
+  const [notes, setNotes] = useState('');
+
+  // Sync hourmeter/km whenever selected equipment changes in form
+  useEffect(() => {
+    if (!editingId && equipmentId) {
+      const eq = vehicles.find(v => v.id === equipmentId);
+      if (eq) {
+        const val = eq.currentHourmeter || eq.currentKm || 0;
+        setKmOrHourAtService(val);
+        setNextServiceKmOrHour(val + 250);
+      }
+    }
+  }, [equipmentId, editingId, vehicles]);
+
+  const handleOpenAdd = () => {
+    setEditingId(null);
+    const firstEq = vehicles[0];
+    const initialMeter = firstEq ? (firstEq.currentHourmeter || firstEq.currentKm || 0) : 0;
+    setEquipmentId(firstEq?.id || '');
+    setDate(new Date().toISOString().slice(0, 10));
+    setType('REVISAO');
+    setTitle('');
+    setDescription('');
+    setKmOrHourAtService(initialMeter);
+    setNextServiceKmOrHour(initialMeter + 250);
+    setCost(0);
+    setSupplierOrWorkshop('Oficina Interna AndradeAgro');
+    setPerformedBy(currentUser.name || 'Técnico Responsável');
+    setNotes('');
+    setShowModal(true);
+  };
+
+  const handleOpenEdit = (m: MaintenanceLog) => {
+    if (!isAdmin) return;
+    setEditingId(m.id);
+    setEquipmentId(m.equipmentId);
+    setDate(m.date);
+    setType(m.type);
+    setTitle(m.title);
+    setDescription(m.description);
+    setKmOrHourAtService(m.kmOrHourAtService);
+    setNextServiceKmOrHour(m.nextServiceKmOrHour || m.kmOrHourAtService + 250);
+    setCost(m.cost);
+    setSupplierOrWorkshop(m.supplierOrWorkshop || 'Oficina Interna');
+    setPerformedBy(m.performedBy || currentUser.name);
+    setNotes(m.notes || '');
+    setShowModal(true);
+  };
+
+  const handleDelete = (id: string) => {
+    if (!isAdmin) return;
+    if (confirm('Tem certeza que deseja excluir esta manutenção?')) {
+      if (onDeleteMaintenance) {
+        onDeleteMaintenance(id);
+      }
+    }
+  };
 
   const filteredLogs = useMemo(() => {
     return maintenanceLogs.filter(m => {
@@ -50,7 +113,15 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
         const matchPlate = m.equipmentPlateOrCode.toLowerCase().includes(q);
         if (!matchTitle && !matchEquip && !matchPlate) return false;
       }
-      if (typeFilter !== 'ALL' && m.type !== typeFilter) return false;
+      if (typeFilter !== 'ALL') {
+        if (typeFilter === 'OIL_CHANGE') {
+          const isOil = m.type === 'TROCA_OLEO' || m.type === 'TROCA_FILTROS' || 
+                        m.title.toLowerCase().includes('óleo') || m.title.toLowerCase().includes('oleo');
+          if (!isOil) return false;
+        } else if (m.type !== typeFilter) {
+          return false;
+        }
+      }
       return true;
     });
   }, [maintenanceLogs, search, typeFilter]);
@@ -62,26 +133,42 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
     const eq = vehicles.find(v => v.id === equipmentId);
     if (!eq) return;
 
-    onAddMaintenance({
-      equipmentId: eq.id,
-      equipmentName: eq.model,
-      equipmentPlateOrCode: eq.licensePlate || eq.patrimonyCode || 'S/PLACA',
-      date,
-      type,
-      title,
-      description,
-      kmOrHourAtService,
-      nextServiceKmOrHour: nextServiceKmOrHour || undefined,
-      cost,
-      supplierOrWorkshop,
-      performedBy,
-      status: 'CONCLUIDO'
-    });
+    if (editingId) {
+      onUpdateMaintenance(editingId, {
+        equipmentId: eq.id,
+        equipmentName: eq.model,
+        equipmentPlateOrCode: eq.licensePlate || eq.patrimonyCode || 'S/PLACA',
+        date,
+        type,
+        title,
+        description,
+        kmOrHourAtService,
+        nextServiceKmOrHour: nextServiceKmOrHour || undefined,
+        cost,
+        supplierOrWorkshop,
+        performedBy,
+        notes
+      });
+    } else {
+      onAddMaintenance({
+        equipmentId: eq.id,
+        equipmentName: eq.model,
+        equipmentPlateOrCode: eq.licensePlate || eq.patrimonyCode || 'S/PLACA',
+        date,
+        type,
+        title,
+        description,
+        kmOrHourAtService,
+        nextServiceKmOrHour: nextServiceKmOrHour || undefined,
+        cost,
+        supplierOrWorkshop,
+        performedBy,
+        status: 'CONCLUIDO',
+        notes
+      });
+    }
 
     setShowModal(false);
-    setTitle('');
-    setDescription('');
-    setCost(0);
   };
 
   return (
@@ -95,15 +182,15 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
             Controle de Manutenções & Revisões
           </h1>
           <p className="text-xs text-gray-500 dark:text-emerald-400">
-            Revisões preventivas, trocas de óleo, filtros, pneus e reparos corretivos das frotas.
+            Histórico de serviços, trocas de óleo, preventivas e registros de manutenção das máquinas.
           </p>
         </div>
 
         <button
-          onClick={() => setShowModal(true)}
-          className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto"
+          onClick={handleOpenAdd}
+          className="bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto transition-transform active:scale-95"
         >
-          <Plus className="w-4 h-4 text-amber-400" />
+          <Plus className="w-4 h-4 text-[#FACC15]" />
           <span>Cadastrar Manutenção</span>
         </button>
       </div>
@@ -115,13 +202,15 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
           <p className="text-xl font-black text-gray-900 dark:text-emerald-100">{filteredLogs.length}</p>
         </div>
         <div className={`p-4 rounded-xl border ${darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100'}`}>
-          <span className="text-[10px] font-bold text-gray-500 uppercase">Custo Acumulado</span>
-          <p className="text-xl font-black text-amber-600 dark:text-amber-400">{formatCurrency(totalMaintenanceCost)}</p>
+          <span className="text-[10px] font-bold text-gray-500 uppercase font-mono">Últimas Trocas de Óleo</span>
+          <p className="text-xl font-black text-amber-600 dark:text-amber-400">
+            {maintenanceLogs.filter(m => m.type === 'TROCA_OLEO' || m.title.toLowerCase().includes('óleo')).length}
+          </p>
         </div>
         <div className={`p-4 rounded-xl border ${darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100'}`}>
-          <span className="text-[10px] font-bold text-gray-500 uppercase">Concluídas</span>
+          <span className="text-[10px] font-bold text-gray-500 uppercase">Custo Total Registrado</span>
           <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">
-            {filteredLogs.filter(l => l.status === 'CONCLUIDO').length}
+            {formatCurrency(totalMaintenanceCost)}
           </p>
         </div>
       </div>
@@ -131,111 +220,163 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
         darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100'
       }`}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-          <input
-            type="text"
-            placeholder="Buscar por título ou equipamento..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className={`px-3 py-2 rounded-xl border outline-none ${
-              darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
-            }`}
-          />
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Buscar por título, máquina ou código..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className={`w-full pl-9 pr-3 py-2 rounded-xl border outline-none ${
+                darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
+              }`}
+            />
+          </div>
 
-          <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className={`px-3 py-2 rounded-xl border outline-none ${
-              darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
-            }`}
-          >
-            <option value="ALL">Todos os Tipos</option>
-            <option value="REVISAO">Revisões Preventivas</option>
-            <option value="TROCA_OLEO">Troca de Óleo</option>
-            <option value="TROCA_FILTROS">Troca de Filtros</option>
-            <option value="PNEUS">Pneus / Esteiras</option>
-            <option value="SERVICO_CORRETIVO">Serviços Corretivos</option>
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className={`w-full px-3 py-2 rounded-xl border outline-none font-bold text-xs ${
+                darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
+              }`}
+            >
+              <option value="ALL">Todos os Tipos de Serviços</option>
+              <option value="OIL_CHANGE">🛢️ Apenas Trocas de Óleo & Filtros</option>
+              <option value="REVISAO">🔧 Revisões Preventivas</option>
+              <option value="TROCA_OLEO">Troca de Óleo</option>
+              <option value="TROCA_FILTROS">Troca de Filtros</option>
+              <option value="PNEUS">Pneus / Esteiras</option>
+              <option value="SERVICO_CORRETIVO">Serviços Corretivos</option>
+            </select>
+          </div>
         </div>
       </div>
 
       {/* Maintenance Logs List */}
       <div className="space-y-3">
-        {filteredLogs.map(m => (
-          <div
-            key={m.id}
-            className={`p-4 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all ${
-              darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100 shadow-sm'
-            }`}
-          >
-            <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-                <Wrench className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-300">
-                    {m.type}
-                  </span>
-                  <span className="text-xs text-gray-500 dark:text-emerald-400 font-medium">
-                    Data: {formatDateBR(m.date)}
-                  </span>
-                </div>
-                <h3 className="font-extrabold text-sm text-gray-900 dark:text-emerald-100 mt-0.5">
-                  {m.title}
-                </h3>
-                <p className="text-xs text-amber-600 dark:text-amber-400 font-bold">
-                  {m.equipmentName} ({m.equipmentPlateOrCode})
-                </p>
-                <p className="text-xs text-gray-500 dark:text-emerald-300/80 mt-1">
-                  {m.description}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 shrink-0 justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-emerald-800/10">
-              <div className="text-right">
-                <span className="text-[10px] text-gray-500 dark:text-emerald-400 block">Custo Total</span>
-                <span className="font-black text-sm text-gray-900 dark:text-emerald-100">{formatCurrency(m.cost)}</span>
-              </div>
-
-              <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
-                m.status === 'CONCLUIDO' 
-                  ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300' 
-                  : m.status === 'EM_ANDAMENTO' 
-                  ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300' 
-                  : 'bg-gray-200 text-gray-700'
-              }`}>
-                {m.status}
-              </span>
-            </div>
+        {filteredLogs.length === 0 ? (
+          <div className="p-8 text-center text-gray-500 border border-dashed rounded-2xl">
+            Nenhum registro de manutenção encontrado.
           </div>
-        ))}
+        ) : (
+          filteredLogs.map(m => (
+            <div
+              key={m.id}
+              className={`p-4 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all ${
+                darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100 shadow-sm'
+              }`}
+            >
+              <div className="flex items-start gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                  {m.type === 'TROCA_OLEO' ? <Droplets className="w-5 h-5" /> : <Wrench className="w-5 h-5" />}
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 uppercase">
+                      {m.type.replace('_', ' ')}
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-emerald-400 font-medium">
+                      🗓️ {formatDateBR(m.date)}
+                    </span>
+                    <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                      ⏱️ {m.kmOrHourAtService} h/km
+                    </span>
+                  </div>
+                  <h3 className="font-extrabold text-sm text-gray-900 dark:text-emerald-100">
+                    {m.title}
+                  </h3>
+                  <p className="text-xs text-emerald-800 dark:text-emerald-300 font-bold">
+                    🚜 {m.equipmentName} ({m.equipmentPlateOrCode})
+                  </p>
+                  <p className="text-xs text-gray-600 dark:text-emerald-200/90">
+                    {m.description}
+                  </p>
+                  {m.notes && (
+                    <p className="text-[11px] italic text-slate-500 dark:text-emerald-300">
+                      Obs: {m.notes}
+                    </p>
+                  )}
+                  <div className="text-[10px] text-gray-400 pt-0.5">
+                    Mecânico: <strong>{m.performedBy || 'Não informado'}</strong> | Oficina: <strong>{m.supplierOrWorkshop || 'Interna'}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 shrink-0 justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-emerald-800/10">
+                <div className="text-right">
+                  <span className="text-[10px] text-gray-500 dark:text-emerald-400 block">Custo</span>
+                  <span className="font-black text-sm text-gray-900 dark:text-emerald-100">{formatCurrency(m.cost)}</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
+                    m.status === 'CONCLUIDO' 
+                      ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300' 
+                      : m.status === 'EM_ANDAMENTO' 
+                      ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300' 
+                      : 'bg-gray-200 text-gray-700'
+                  }`}>
+                    {m.status}
+                  </span>
+
+                  {/* Admin Only Controls */}
+                  {isAdmin && (
+                    <div className="flex items-center gap-1 pl-2 border-l border-emerald-800/20">
+                      <button
+                        onClick={() => handleOpenEdit(m)}
+                        className="p-1.5 rounded-lg bg-emerald-800/20 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-800/40 transition-colors"
+                        title="Editar Manutenção"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
+                      {onDeleteMaintenance && (
+                        <button
+                          onClick={() => handleDelete(m.id)}
+                          className="p-1.5 rounded-lg bg-red-500/20 text-red-700 dark:text-red-300 hover:bg-red-500/40 transition-colors"
+                          title="Excluir Manutenção"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
-      {/* New Maintenance Modal */}
+      {/* New/Edit Maintenance Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-          <div className={`w-full max-w-lg rounded-2xl shadow-2xl border p-5 space-y-4 max-h-[90vh] overflow-y-auto ${
-            darkMode ? 'bg-emerald-950 border-emerald-800 text-emerald-100' : 'bg-white border-emerald-100 text-gray-900'
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
+          <div className={`w-full max-w-lg rounded-3xl shadow-2xl border p-6 space-y-4 max-h-[90vh] overflow-y-auto ${
+            darkMode ? 'bg-[#042d23] border-emerald-900 text-slate-100' : 'bg-white border-slate-200 text-gray-900'
           }`}>
             <div className="flex items-center justify-between border-b pb-3 border-emerald-800/20">
-              <span className="font-bold text-sm">Registrar Manutenção / Serviço</span>
-              <button onClick={() => setShowModal(false)} className="p-1 rounded-lg hover:bg-emerald-500/10">
-                <X className="w-5 h-5" />
+              <span className="font-extrabold text-sm text-[#FACC15] flex items-center gap-2">
+                <Wrench className="w-4 h-4" />
+                <span>{editingId ? 'Editar Registro de Manutenção' : 'Registrar Manutenção / Serviço'}</span>
+              </span>
+              <button onClick={() => setShowModal(false)} className="p-1.5 rounded-xl hover:bg-emerald-500/10">
+                <X className="w-5 h-5 text-gray-400" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-3 text-xs">
               <div>
-                <label className="block font-bold mb-1">Equipamento</label>
+                <label className="block font-bold mb-1">Máquina / Equipamento *</label>
                 <select
                   value={equipmentId}
                   onChange={(e) => setEquipmentId(e.target.value)}
-                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  className={`w-full p-2.5 rounded-xl border font-bold text-xs outline-none ${
+                    darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                  }`}
                 >
                   {vehicles.map(v => (
                     <option key={v.id} value={v.id}>
-                      {v.model} ({v.licensePlate || v.patrimonyCode})
+                      [{v.category}] {v.model} ({v.licensePlate || v.patrimonyCode})
                     </option>
                   ))}
                 </select>
@@ -243,20 +384,26 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-bold mb-1">Data</label>
+                  <label className="block font-bold mb-1">Data do Serviço *</label>
                   <input
                     type="date"
+                    required
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    className={`w-full p-2.5 rounded-xl border outline-none ${
+                      darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                    }`}
                   />
                 </div>
+
                 <div>
-                  <label className="block font-bold mb-1">Tipo de Manutenção</label>
+                  <label className="block font-bold mb-1">Tipo de Serviço *</label>
                   <select
                     value={type}
                     onChange={(e) => setType(e.target.value as MaintenanceType)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    className={`w-full p-2.5 rounded-xl border font-bold text-xs outline-none ${
+                      darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                    }`}
                   >
                     <option value="REVISAO">Revisão Preventiva</option>
                     <option value="TROCA_OLEO">Troca de Óleo</option>
@@ -268,63 +415,112 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold mb-1">Título do Serviço</label>
+                <label className="block font-bold mb-1">Título do Serviço / Resumo *</label>
                 <input
                   type="text"
                   required
-                  placeholder="Ex: Troca de óleo 15W40 e filtro separador..."
+                  placeholder="Ex: Troca de óleo 15W40 e filtro separador"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  className={`w-full p-2.5 rounded-xl border outline-none ${
+                    darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                  }`}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-bold mb-1">Custo Total (R$)</label>
+                  <label className="block font-bold mb-1">Horímetro / KM Atual *</label>
+                  <input
+                    type="number"
+                    required
+                    value={kmOrHourAtService}
+                    onChange={(e) => setKmOrHourAtService(parseFloat(e.target.value) || 0)}
+                    className={`w-full p-2.5 rounded-xl border outline-none ${
+                      darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">Próxima Revisão (KM/Horas)</label>
+                  <input
+                    type="number"
+                    value={nextServiceKmOrHour}
+                    onChange={(e) => setNextServiceKmOrHour(parseFloat(e.target.value) || 0)}
+                    className={`w-full p-2.5 rounded-xl border outline-none ${
+                      darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold mb-1">Mecânico / Responsável</label>
+                  <input
+                    type="text"
+                    value={performedBy}
+                    onChange={(e) => setPerformedBy(e.target.value)}
+                    className={`w-full p-2.5 rounded-xl border outline-none ${
+                      darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">Custo do Serviço (R$)</label>
                   <input
                     type="number"
                     step="0.01"
-                    required
                     value={cost}
                     onChange={(e) => setCost(parseFloat(e.target.value) || 0)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold mb-1">Oficina / Fornecedor</label>
-                  <input
-                    type="text"
-                    value={supplierOrWorkshop}
-                    onChange={(e) => setSupplierOrWorkshop(e.target.value)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    className={`w-full p-2.5 rounded-xl border outline-none ${
+                      darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                    }`}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1">Descrição detalhada</label>
+                <label className="block font-bold mb-1">Descrição Detalhada do Serviço</label>
                 <textarea
                   rows={2}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  placeholder="Detalhamento das peças substituídas, óleo utilizado, etc..."
+                  className={`w-full p-2.5 rounded-xl border outline-none ${
+                    darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                  }`}
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              <div>
+                <label className="block font-bold mb-1">Observações Adicionais</label>
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Ex: Verificar reaperto após 50 horas de operação..."
+                  className={`w-full p-2.5 rounded-xl border outline-none ${
+                    darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-gray-50 border-gray-300'
+                  }`}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-emerald-800/20">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-3 py-1.5 rounded-xl hover:bg-emerald-500/10"
+                  className="px-4 py-2 rounded-xl text-gray-400 hover:bg-emerald-500/10 font-bold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-amber-500 text-gray-950 font-bold"
+                  className="px-5 py-2.5 rounded-xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-extrabold shadow-md"
                 >
-                  Salvar Manutenção
+                  {editingId ? 'Atualizar Registro' : 'Gravar Manutenção'}
                 </button>
               </div>
             </form>
@@ -337,3 +533,4 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
 };
 
 export const MaintenanceView = React.memo(MaintenanceViewComponent);
+

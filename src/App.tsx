@@ -302,6 +302,7 @@ export default function App() {
                 currentUser={currentUser}
                 onAddMaintenance={(m) => addMaintenance(m)}
                 onUpdateMaintenance={(id, fields) => updateMaintenance(id, fields)}
+                onDeleteMaintenance={(id) => deleteMaintenance(id)}
                 darkMode={darkMode}
               />
             )}

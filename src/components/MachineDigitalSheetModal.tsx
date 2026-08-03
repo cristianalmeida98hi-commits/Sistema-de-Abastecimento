@@ -8,7 +8,7 @@ import {
   Calendar, FileText, User as UserIcon, BarChart3, Shield, Filter, 
   PlusCircle, RefreshCw, AlertCircle, Camera, Check, ChevronRight,
   TrendingUp, Award, Layers, Sparkles, Edit, Trash2, Info, DollarSign,
-  Plus, CheckSquare
+  Plus, CheckSquare, ArrowLeft
 } from 'lucide-react';
 import { 
   Vehicle, FuelLog, MaintenanceLog, MachineIssue, 
@@ -418,12 +418,33 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="w-9 h-9 rounded-2xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-transform active:scale-95 shrink-0"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined' && window.location.hash) {
+                  history.pushState("", document.title, window.location.pathname + window.location.search);
+                }
+                onClose();
+              }}
+              className="px-3 py-1.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-1.5 transition-transform active:scale-95 shrink-0"
+              title="Voltar"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Voltar</span>
+            </button>
+            <button
+              onClick={() => {
+                if (typeof window !== 'undefined' && window.location.hash) {
+                  history.pushState("", document.title, window.location.pathname + window.location.search);
+                }
+                onClose();
+              }}
+              className="w-9 h-9 rounded-2xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-transform active:scale-95 shrink-0"
+              title="Fechar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content Body - Scrollable */}

@@ -152,6 +152,29 @@ export default function App() {
     } else {
       setActiveTab('dashboard');
     }
+
+    // Check if there is a pending vehicle deep link in the URL hash
+    if (typeof window !== 'undefined' && window.location.hash) {
+      const hash = window.location.hash;
+      let matchedVehicleId: string | null = null;
+      if (hash.includes('vehicle/') || hash.includes('maintenance/') || hash.includes('ficha-maquina/')) {
+        const parts = hash.split('/');
+        matchedVehicleId = parts[parts.length - 1];
+      } else if (hash.includes('ANDRADEAGRO:')) {
+        const parts = hash.split(':');
+        matchedVehicleId = parts[1];
+      }
+
+      if (matchedVehicleId) {
+        const currentVehicles = getVehicles();
+        const found = currentVehicles.find(v => v.id === matchedVehicleId || v.licensePlate === matchedVehicleId || v.patrimonyCode === matchedVehicleId);
+        if (found) {
+          setSelectedDigitalSheetVehicle(found);
+          setIsFuelingModalOpen(false);
+          setIsQRScannerModalOpen(false);
+        }
+      }
+    }
   };
 
   const handleOpenFuelingModalWithEquipment = (equipmentId: string) => {
@@ -415,21 +438,26 @@ export default function App() {
         {selectedDigitalSheetVehicle && (
           <MachineDigitalSheetModal
             isOpen={!!selectedDigitalSheetVehicle}
-            onClose={() => setSelectedDigitalSheetVehicle(null)}
-            vehicle={selectedDigitalSheetVehicle}
+            onClose={() => {
+              setSelectedDigitalSheetVehicle(null);
+              if (typeof window !== 'undefined' && window.location.hash) {
+                history.pushState("", document.title, window.location.pathname + window.location.search);
+              }
+            }}
+            vehicle={vehicles.find(v => v.id === selectedDigitalSheetVehicle.id) || selectedDigitalSheetVehicle}
             fuelLogs={fuelLogs}
             maintenanceLogs={maintenanceLogs}
             machineIssues={machineIssues}
             preventiveItems={preventiveItems}
             currentUser={currentUser}
             initialTab="OVERVIEW"
-            onAddMaintenance={(m) => addMaintenance(m)}
-            onUpdateMaintenance={(id, fields) => updateMaintenance(id, fields)}
-            onDeleteMaintenance={(id) => deleteMaintenance(id)}
-            onReportProblemSubmit={(issueData) => addMachineIssue(issueData)}
-            onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes)}
-            onResolveIssue={(issueId) => resolveMachineIssue(issueId)}
-            onUpdateVehicleStatus={(vehicleId, newStatus) => updateVehicle(vehicleId, { status: newStatus })}
+            onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
+            onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}
+            onDeleteMaintenance={(id) => { deleteMaintenance(id); refreshState(); }}
+            onReportProblemSubmit={(issueData) => { addMachineIssue(issueData); refreshState(); }}
+            onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => { recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes); refreshState(); }}
+            onResolveIssue={(issueId) => { resolveMachineIssue(issueId); refreshState(); }}
+            onUpdateVehicleStatus={(vehicleId, newStatus) => { updateVehicle(vehicleId, { status: newStatus }); refreshState(); }}
             darkMode={darkMode}
           />
         )}

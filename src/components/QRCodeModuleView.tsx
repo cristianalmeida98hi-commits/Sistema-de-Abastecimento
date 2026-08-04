@@ -8,6 +8,7 @@ import { QRCodeCanvas } from 'qrcode.react';
 import { Vehicle, User, FuelLog, EquipmentCategory, Sector } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
 import { generateQRCodeDataUrl } from '../utils/qrcode';
+import { openPrintWindow } from '../utils/printWindow';
 
 interface QRCodeModuleViewProps {
   vehicles: Vehicle[];
@@ -90,13 +91,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
     const qrValue = getVehicleQRCodeValue(v);
     const qrDataUrl = await generateQRCodeDataUrl(qrValue, 300);
 
-    const printWin = window.open('', '_blank');
-    if (!printWin) {
-      alert('Por favor, permita popups para abrir a janela de impressão do QR Code.');
-      return;
-    }
-
-    printWin.document.write(`
+    const htmlContent = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -166,9 +161,9 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
           </script>
         </body>
       </html>
-    `);
-    printWin.document.close();
-    printWin.focus();
+    `;
+
+    openPrintWindow(htmlContent);
   };
 
   // Batch Print for all filtered machines
@@ -193,13 +188,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
     const cardsHtmlList = await Promise.all(cardsHtmlPromises);
     const cardsHtml = cardsHtmlList.join('');
 
-    const printWin = window.open('', '_blank');
-    if (!printWin) {
-      alert('Por favor, permita popups para abrir a janela de impressão.');
-      return;
-    }
-
-    printWin.document.write(`
+    const htmlContent = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -245,9 +234,9 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
           </script>
         </body>
       </html>
-    `);
-    printWin.document.close();
-    printWin.focus();
+    `;
+
+    openPrintWindow(htmlContent);
   };
 
   return (

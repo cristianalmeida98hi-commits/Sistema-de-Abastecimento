@@ -7,6 +7,7 @@ import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, Fue
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
 import { QRCodeCanvas } from 'qrcode.react';
 import { generateQRCodeDataUrl } from '../utils/qrcode';
+import { openPrintWindow } from '../utils/printWindow';
 
 interface FleetManagementViewProps {
   vehicles: Vehicle[];
@@ -118,13 +119,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     const qrValue = `${origin}/#ficha-maquina/${v.id}`;
     const qrDataUrl = await generateQRCodeDataUrl(qrValue, 300);
 
-    const printWin = window.open('', '_blank');
-    if (!printWin) {
-      alert('Por favor, permita popups para abrir a janela de impressão do QR Code.');
-      return;
-    }
-
-    printWin.document.write(`
+    const htmlContent = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -184,9 +179,9 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
           </script>
         </body>
       </html>
-    `);
-    printWin.document.close();
-    printWin.focus();
+    `;
+
+    openPrintWindow(htmlContent);
   };
 
   return (

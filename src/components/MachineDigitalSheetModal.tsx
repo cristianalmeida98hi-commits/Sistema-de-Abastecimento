@@ -396,9 +396,40 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
     }
   };
 
+  const handleDismiss = () => {
+    if (typeof window !== 'undefined' && window.location.hash) {
+      history.pushState("", document.title, window.location.pathname + window.location.search);
+    }
+    onClose();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
-      <div className={`relative w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col ${
+      
+      {/* Mobile Floating Action Bar for Touch/Small Screens */}
+      <div className="fixed top-2 left-2 right-2 z-[100] flex sm:hidden items-center justify-between bg-[#064E3B] text-white p-2 rounded-2xl shadow-2xl border border-[#FACC15]/40 backdrop-blur-md">
+        <button
+          onClick={handleDismiss}
+          className="px-3 py-2 rounded-xl bg-[#FACC15] text-[#064E3B] font-black text-xs flex items-center gap-1.5 shadow-md active:scale-95"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Voltar</span>
+        </button>
+
+        <span className="text-[11px] font-black text-[#FACC15] truncate max-w-[150px] px-2">
+          {vehicle.model}
+        </span>
+
+        <button
+          onClick={handleDismiss}
+          className="px-3 py-2 rounded-xl bg-red-600 text-white font-black text-xs flex items-center gap-1 shadow-md active:scale-95"
+        >
+          <span>Sair</span>
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className={`relative w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col mt-12 sm:mt-0 ${
         darkMode ? 'bg-slate-900 text-slate-100 border border-emerald-900/60' : 'bg-white text-slate-900'
       }`}>
 
@@ -420,12 +451,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                if (typeof window !== 'undefined' && window.location.hash) {
-                  history.pushState("", document.title, window.location.pathname + window.location.search);
-                }
-                onClose();
-              }}
+              onClick={handleDismiss}
               className="px-3 py-1.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-1.5 transition-transform active:scale-95 shrink-0"
               title="Voltar"
             >
@@ -433,12 +459,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
               <span>Voltar</span>
             </button>
             <button
-              onClick={() => {
-                if (typeof window !== 'undefined' && window.location.hash) {
-                  history.pushState("", document.title, window.location.pathname + window.location.search);
-                }
-                onClose();
-              }}
+              onClick={handleDismiss}
               className="w-9 h-9 rounded-2xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-transform active:scale-95 shrink-0"
               title="Fechar"
             >

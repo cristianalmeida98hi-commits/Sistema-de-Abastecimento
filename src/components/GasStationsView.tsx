@@ -31,6 +31,19 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
   const [gasolinaPrice, setGasolinaPrice] = useState(6.09);
   const [etanolPrice, setEtanolPrice] = useState(3.89);
 
+  const handleOpenAdd = () => {
+    setEditingStation(null);
+    setName('');
+    setType('INTERNO');
+    setSupplierName('');
+    setLocation('');
+    setDieselS10Price(5.79);
+    setDieselS500Price(5.59);
+    setGasolinaPrice(6.09);
+    setEtanolPrice(3.89);
+    setShowModal(true);
+  };
+
   const handleOpenEdit = (stn: GasStation) => {
     setEditingStation(stn);
     setName(stn.name);
@@ -41,6 +54,7 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
     setDieselS500Price(stn.pricePerLiter.DIESEL_S500 || 5.59);
     setGasolinaPrice(stn.pricePerLiter.GASOLINA_COMUM || 6.09);
     setEtanolPrice(stn.pricePerLiter.ETANOL || 3.89);
+    setShowModal(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -60,7 +74,6 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
           ARLA_32: 2.50
         }
       });
-      setEditingStation(null);
     } else {
       onAddStation({
         name,
@@ -77,8 +90,9 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
         },
         active: true
       });
-      setShowModal(false);
     }
+    setShowModal(false);
+    setEditingStation(null);
   };
 
   return (
@@ -97,7 +111,7 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
         </div>
 
         <button
-          onClick={() => setShowModal(true)}
+          onClick={handleOpenAdd}
           className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto"
         >
           <Plus className="w-4 h-4 text-amber-400" />
@@ -185,15 +199,17 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
         ))}
       </div>
 
-      {/* New Station Modal */}
+      {/* New/Edit Station Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
           <div className={`w-full max-w-md rounded-2xl shadow-2xl border p-5 space-y-4 ${
             darkMode ? 'bg-emerald-950 border-emerald-800 text-emerald-100' : 'bg-white border-emerald-100 text-gray-900'
           }`}>
             <div className="flex items-center justify-between border-b pb-3 border-emerald-800/20">
-              <span className="font-bold text-sm">Cadastrar Novo Posto</span>
-              <button onClick={() => setShowModal(false)} className="p-1 rounded-lg hover:bg-emerald-500/10">
+              <span className="font-bold text-sm">
+                {editingStation ? 'Editar Posto e Preços' : 'Cadastrar Novo Posto'}
+              </span>
+              <button onClick={() => { setShowModal(false); setEditingStation(null); }} className="p-1 rounded-lg hover:bg-emerald-500/10">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -258,6 +274,26 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
                   />
                 </div>
                 <div>
+                  <label className="block font-bold mb-1">Preço Diesel S500 (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={dieselS500Price}
+                    onChange={(e) => setDieselS500Price(parseFloat(e.target.value) || 0)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Preço Gasolina (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={gasolinaPrice}
+                    onChange={(e) => setGasolinaPrice(parseFloat(e.target.value) || 0)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  />
+                </div>
+                <div>
                   <label className="block font-bold mb-1">Preço Etanol (R$)</label>
                   <input
                     type="number"
@@ -272,7 +308,7 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => { setShowModal(false); setEditingStation(null); }}
                   className="px-3 py-1.5 rounded-xl hover:bg-emerald-500/10"
                 >
                   Cancelar
@@ -281,7 +317,7 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
                   type="submit"
                   className="px-4 py-2 rounded-xl bg-amber-500 text-gray-950 font-bold"
                 >
-                  Salvar Posto
+                  {editingStation ? 'Salvar Alterações' : 'Salvar Posto'}
                 </button>
               </div>
             </form>

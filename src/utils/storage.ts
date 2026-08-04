@@ -1,7 +1,7 @@
 import { 
   collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch 
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, safeSetDoc, safeUpdateDoc } from '../lib/firebase';
 import { 
   User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem, PreventiveItemKey 
 } from '../types';
@@ -621,7 +621,7 @@ export async function addGasStation(stn: Omit<GasStation, 'id'>): Promise<GasSta
   cache.gasStations = [...cache.gasStations, cleaned];
   notifyDataUpdated();
 
-  await setDoc(doc(db, 'gas_stations', cleaned.id), cleaned);
+  await safeSetDoc(doc(db, 'gas_stations', cleaned.id), cleaned);
   logAuditEvent('CRIAR', 'Posto', `Cadastrou posto ${cleaned.name}.`);
   return cleaned;
 }
@@ -631,7 +631,7 @@ export async function updateGasStation(id: string, fields: Partial<GasStation>):
   cache.gasStations = cache.gasStations.map(s => s.id === id ? { ...s, ...cleaned } : s);
   notifyDataUpdated();
 
-  await updateDoc(doc(db, 'gas_stations', id), cleaned);
+  await safeUpdateDoc(doc(db, 'gas_stations', id), cleaned);
   logAuditEvent('EDITAR', 'Posto', `Atualizou tabela de preços/dados do posto ID ${id}.`);
 }
 

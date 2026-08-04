@@ -7,6 +7,7 @@ import {
 import { QRCodeCanvas } from 'qrcode.react';
 import { Vehicle, User, FuelLog, EquipmentCategory, Sector } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
+import { generateQRCodeDataUrl } from '../utils/qrcode';
 
 interface QRCodeModuleViewProps {
   vehicles: Vehicle[];
@@ -85,11 +86,12 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
   };
 
   // Print Badge for single machine
-  const handlePrintBadge = (v: Vehicle) => {
+  const handlePrintBadge = async (v: Vehicle) => {
+    const qrValue = getVehicleQRCodeValue(v);
+    const qrDataUrl = await generateQRCodeDataUrl(qrValue, 300);
+
     const printWin = window.open('', '_blank');
     if (!printWin) return;
-
-    const qrValue = getVehicleQRCodeValue(v);
 
     printWin.document.write(`
       <!DOCTYPE html>
@@ -115,7 +117,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
             <div class="code-badge">${v.licensePlate || v.patrimonyCode}</div>
             
             <div class="qr-box">
-              <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrValue)}" width="180" height="180" alt="QR Code" />
+              <img src="${qrDataUrl}" width="200" height="200" alt="QR Code" onload="window.print()" />
             </div>
 
             <div class="meta">
@@ -125,7 +127,9 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
             </div>
           </div>
           <script>
-            setTimeout(() => { window.print(); }, 500);
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 200);
+            };
           </script>
         </body>
       </html>
@@ -134,12 +138,10 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
   };
 
   // Batch Print for all filtered machines
-  const handleBatchPrint = () => {
-    const printWin = window.open('', '_blank');
-    if (!printWin) return;
-
-    const cardsHtml = filteredVehicles.map(v => {
+  const handleBatchPrint = async () => {
+    const cardsHtmlPromises = filteredVehicles.map(async v => {
       const qrValue = getVehicleQRCodeValue(v);
+      const qrDataUrl = await generateQRCodeDataUrl(qrValue, 250);
       return `
         <div class="card">
           <div class="header">ANDRADEAGRO</div>
@@ -147,12 +149,18 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
           <div class="model">${v.model}</div>
           <div class="code-badge">${v.licensePlate || v.patrimonyCode}</div>
           <div class="qr-box">
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(qrValue)}" width="140" height="140" alt="QR" />
+            <img src="${qrDataUrl}" width="160" height="160" alt="QR" />
           </div>
           <div class="meta">Setor: ${getSectorName(v.sector)} • Cap: ${v.tankCapacityLiters}L</div>
         </div>
       `;
-    }).join('');
+    });
+
+    const cardsHtmlList = await Promise.all(cardsHtmlPromises);
+    const cardsHtml = cardsHtmlList.join('');
+
+    const printWin = window.open('', '_blank');
+    if (!printWin) return;
 
     printWin.document.write(`
       <!DOCTYPE html>
@@ -178,7 +186,9 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
           <h1 style="text-align: center; color: #064E3B; font-size: 20px;">Catálogo de QR Codes de Frota & Máquinas (${filteredVehicles.length})</h1>
           <div class="grid">${cardsHtml}</div>
           <script>
-            setTimeout(() => { window.print(); }, 800);
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 300);
+            };
           </script>
         </body>
       </html>

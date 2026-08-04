@@ -5,6 +5,8 @@ import {
 } from 'lucide-react';
 import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, FuelLog } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
+import { QRCodeCanvas } from 'qrcode.react';
+import { generateQRCodeDataUrl } from '../utils/qrcode';
 
 interface FleetManagementViewProps {
   vehicles: Vehicle[];
@@ -111,20 +113,22 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     setPatrimonyCode('');
   };
 
-  const handlePrintBadge = (v: Vehicle) => {
+  const handlePrintBadge = async (v: Vehicle) => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app';
+    const qrValue = `${origin}/#ficha-maquina/${v.id}`;
+    const qrDataUrl = await generateQRCodeDataUrl(qrValue, 300);
+
     const printWin = window.open('', '_blank');
     if (!printWin) return;
 
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app';
-    const qrValue = `${origin}/#ficha-maquina/${v.id}`;
-
     printWin.document.write(`
+      <!DOCTYPE html>
       <html>
         <head>
           <title>Ficha do Equipamento QR - ${v.model}</title>
           <style>
             body { font-family: sans-serif; padding: 20px; text-align: center; }
-            .card { border: 3px solid #0f3822; padding: 20px; border-radius: 16px; max-w: 400px; margin: 0 auto; }
+            .card { border: 3px solid #0f3822; padding: 20px; border-radius: 16px; max-width: 400px; margin: 0 auto; }
             h1 { color: #0f3822; font-size: 22px; margin-bottom: 4px; }
             .tag { background: #d4af37; color: #000; font-weight: bold; padding: 4px 8px; border-radius: 6px; display: inline-block; }
             .qr { margin: 20px 0; }
@@ -134,14 +138,18 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
           <div class="card">
             <h1>AndradeAgro</h1>
             <p><strong>${v.model}</strong></p>
-            <p className="tag">${v.licensePlate || v.patrimonyCode}</p>
+            <p class="tag">${v.licensePlate || v.patrimonyCode}</p>
             <div class="qr">
-              <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(qrValue)}" alt="QR Code" />
+              <img src="${qrDataUrl}" width="200" height="200" alt="QR Code" onload="window.print()" />
             </div>
             <p>Setor: ${getSectorName(v.sector)}</p>
             <p>Tanque: ${v.tankCapacityLiters} Litros (${getFuelTypeName(v.fuelType)})</p>
           </div>
-          <script>window.print();</script>
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 200);
+            };
+          </script>
         </body>
       </html>
     `);
@@ -380,11 +388,12 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* QR Code & Badge */}
               <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center flex flex-col items-center justify-center">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(`${typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app'}/#ficha-maquina/${passportVehicle.id}`)}`}
-                  alt="QR Code"
-                  className="w-36 h-36 border rounded-xl p-1 bg-white"
-                />
+                <div className="p-2 bg-white rounded-xl border border-gray-200 shadow-sm flex items-center justify-center">
+                  <QRCodeCanvas
+                    value={`${typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app'}/#ficha-maquina/${passportVehicle.id}`}
+                    size={140}
+                  />
+                </div>
                 <span className="mt-2 text-xs font-black text-amber-600 dark:text-amber-400 uppercase">
                   {passportVehicle.licensePlate || passportVehicle.patrimonyCode}
                 </span>

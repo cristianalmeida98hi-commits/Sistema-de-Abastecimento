@@ -43,8 +43,9 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   // Modal Passport
   const [passportVehicle, setPassportVehicle] = useState<Vehicle | null>(null);
 
-  // New Equipment Modal
+  // New & Edit Equipment Modal State
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [model, setModel] = useState('');
   const [manufacturer, setManufacturer] = useState('');
   const [year, setYear] = useState(2024);
@@ -110,8 +111,57 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     // Reset
     setModel('');
     setManufacturer('');
+    setYear(2024);
     setLicensePlate('');
     setPatrimonyCode('');
+    setSector('AGRICOLA');
+    setFuelType('DIESEL_S10');
+    setTankCapacityLiters(100);
+    setCurrentKm(0);
+    setCurrentHourmeter(0);
+    setAssignedOperatorId('');
+    setPhotoUrl('');
+  };
+
+  const handleOpenEditModal = (v: Vehicle) => {
+    setEditingVehicle(v);
+    setModel(v.model || '');
+    setManufacturer(v.manufacturer || '');
+    setYear(v.year || 2024);
+    setLicensePlate(v.licensePlate || '');
+    setPatrimonyCode(v.patrimonyCode || '');
+    setSector(v.sector || 'AGRICOLA');
+    setFuelType(v.fuelType || 'DIESEL_S10');
+    setTankCapacityLiters(v.tankCapacityLiters || 100);
+    setCurrentKm(v.currentKm || 0);
+    setCurrentHourmeter(v.currentHourmeter || 0);
+    setAssignedOperatorId(v.assignedOperatorId || '');
+    setPhotoUrl(v.photoUrl || '');
+  };
+
+  const handleUpdateEquipment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingVehicle) return;
+
+    const operator = users.find(u => u.id === assignedOperatorId);
+
+    onUpdateVehicle(editingVehicle.id, {
+      model,
+      manufacturer,
+      year,
+      licensePlate: editingVehicle.category === 'VEICULO' ? licensePlate : editingVehicle.licensePlate,
+      patrimonyCode: editingVehicle.category !== 'VEICULO' ? patrimonyCode : editingVehicle.patrimonyCode,
+      sector,
+      fuelType,
+      tankCapacityLiters,
+      currentKm: editingVehicle.category === 'VEICULO' ? currentKm : editingVehicle.currentKm,
+      currentHourmeter: editingVehicle.category !== 'VEICULO' ? currentHourmeter : editingVehicle.currentHourmeter,
+      assignedOperatorId: assignedOperatorId || undefined,
+      assignedOperatorName: operator?.name,
+      photoUrl: photoUrl || undefined,
+    });
+
+    setEditingVehicle(null);
   };
 
   const handlePrintBadge = async (v: Vehicle) => {
@@ -378,17 +428,26 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 </button>
 
                 {currentUser.role === 'ADMIN' && (
-                  <button
-                    onClick={() => {
-                      if (confirm(`Tem certeza que deseja excluir o equipamento "${v.model}" (${v.licensePlate || v.patrimonyCode})? Esta ação não pode ser desfeita.`)) {
-                        onDeleteVehicle(v.id);
-                      }
-                    }}
-                    className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400"
-                    title="Excluir Equipamento"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <>
+                    <button
+                      onClick={() => handleOpenEditModal(v)}
+                      className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-500"
+                      title="Editar Equipamento"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Tem certeza que deseja excluir o equipamento "${v.model}" (${v.licensePlate || v.patrimonyCode})? Esta ação não pode ser desfeita.`)) {
+                          onDeleteVehicle(v.id);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400"
+                      title="Excluir Equipamento"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </>
                 )}
               </div>
 
@@ -489,7 +548,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   placeholder="Ex: John Deere 8370R / Hilux SRX..."
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
                 />
               </div>
 
@@ -502,7 +561,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                     placeholder="Ex: Toyota, John Deere..."
                     value={manufacturer}
                     onChange={(e) => setManufacturer(e.target.value)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
                   />
                 </div>
                 <div>
@@ -511,7 +570,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                     type="number"
                     value={year}
                     onChange={(e) => setYear(parseInt(e.target.value) || 2024)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
                   />
                 </div>
               </div>
@@ -525,7 +584,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                     placeholder="Ex: QAA-8J90"
                     value={licensePlate}
                     onChange={(e) => setLicensePlate(e.target.value)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
                   />
                 </div>
               ) : (
@@ -537,7 +596,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                     placeholder="Ex: TRAT-003 ou MAQ-005"
                     value={patrimonyCode}
                     onChange={(e) => setPatrimonyCode(e.target.value)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
                   />
                 </div>
               )}
@@ -548,7 +607,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   <select
                     value={sector}
                     onChange={(e) => setSector(e.target.value as Sector)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
                   >
                     <option value="PREPARO_SOLO">Preparo de Solo</option>
                     <option value="COLHEITA">Colheita</option>
@@ -561,14 +620,73 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 </div>
 
                 <div>
+                  <label className="block font-bold mb-1">Tipo de Combustível</label>
+                  <select
+                    value={fuelType}
+                    onChange={(e) => setFuelType(e.target.value as FuelType)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  >
+                    <option value="DIESEL_S10">Diesel S10</option>
+                    <option value="DIESEL_S500">Diesel S500</option>
+                    <option value="GASOLINA_COMUM">Gasolina Comum</option>
+                    <option value="GASOLINA_GRID">Gasolina Aditivada</option>
+                    <option value="ETANOL">Etanol Hidratado</option>
+                    <option value="ARLA_32">Arla 32</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
                   <label className="block font-bold mb-1">Capacidade Tanque (L)</label>
                   <input
                     type="number"
                     value={tankCapacityLiters}
                     onChange={(e) => setTankCapacityLiters(parseInt(e.target.value) || 0)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
                   />
                 </div>
+
+                <div>
+                  <label className="block font-bold mb-1">
+                    {activeTab === 'VEICULO' ? 'Quilometragem Inicial (KM)' : 'Horímetro Inicial (Horas)'}
+                  </label>
+                  <input
+                    type="number"
+                    value={activeTab === 'VEICULO' ? currentKm : currentHourmeter}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      if (activeTab === 'VEICULO') setCurrentKm(val);
+                      else setCurrentHourmeter(val);
+                    }}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Operador Atribuído (Opcional)</label>
+                <select
+                  value={assignedOperatorId}
+                  onChange={(e) => setAssignedOperatorId(e.target.value)}
+                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                >
+                  <option value="">Nenhum operador atribuído</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>{u.name} ({u.department || u.role})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">URL da Foto (Opcional)</label>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={photoUrl}
+                  onChange={(e) => setPhotoUrl(e.target.value)}
+                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
@@ -584,6 +702,185 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   className="px-4 py-2 rounded-xl bg-amber-500 text-gray-950 font-bold"
                 >
                   Cadastrar Equipamento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Equipment Modal */}
+      {editingVehicle && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className={`w-full max-w-lg rounded-2xl shadow-2xl border p-5 space-y-4 max-h-[90vh] overflow-y-auto ${
+            darkMode ? 'bg-emerald-950 border-emerald-800 text-emerald-100' : 'bg-white border-emerald-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between border-b pb-3 border-emerald-800/20">
+              <span className="font-bold text-sm">Editar Equipamento: {editingVehicle.model}</span>
+              <button onClick={() => setEditingVehicle(null)} className="p-1 rounded-lg hover:bg-emerald-500/10">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateEquipment} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold mb-1">Modelo do Equipamento</label>
+                <input
+                  type="text"
+                  required
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold mb-1">Fabricante</label>
+                  <input
+                    type="text"
+                    required
+                    value={manufacturer}
+                    onChange={(e) => setManufacturer(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Ano</label>
+                  <input
+                    type="number"
+                    value={year}
+                    onChange={(e) => setYear(parseInt(e.target.value) || 2024)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  />
+                </div>
+              </div>
+
+              {editingVehicle.category === 'VEICULO' ? (
+                <div>
+                  <label className="block font-bold mb-1">Placa do Veículo</label>
+                  <input
+                    type="text"
+                    required
+                    value={licensePlate}
+                    onChange={(e) => setLicensePlate(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block font-bold mb-1">Código de Patrimônio</label>
+                  <input
+                    type="text"
+                    required
+                    value={patrimonyCode}
+                    onChange={(e) => setPatrimonyCode(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold mb-1">Setor Operacional</label>
+                  <select
+                    value={sector}
+                    onChange={(e) => setSector(e.target.value as Sector)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  >
+                    <option value="PREPARO_SOLO">Preparo de Solo</option>
+                    <option value="COLHEITA">Colheita</option>
+                    <option value="PULVERIZACAO">Pulverização</option>
+                    <option value="AGRICOLA">Agrícola</option>
+                    <option value="LOGISTICA">Logística / Transporte</option>
+                    <option value="DIRETORIA">Diretoria</option>
+                    <option value="OFICINA_MANUTENCAO">Oficina</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">Tipo de Combustível</label>
+                  <select
+                    value={fuelType}
+                    onChange={(e) => setFuelType(e.target.value as FuelType)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  >
+                    <option value="DIESEL_S10">Diesel S10</option>
+                    <option value="DIESEL_S500">Diesel S500</option>
+                    <option value="GASOLINA_COMUM">Gasolina Comum</option>
+                    <option value="GASOLINA_GRID">Gasolina Aditivada</option>
+                    <option value="ETANOL">Etanol Hidratado</option>
+                    <option value="ARLA_32">Arla 32</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold mb-1">Capacidade Tanque (L)</label>
+                  <input
+                    type="number"
+                    value={tankCapacityLiters}
+                    onChange={(e) => setTankCapacityLiters(parseInt(e.target.value) || 0)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">
+                    {editingVehicle.category === 'VEICULO' ? 'Quilometragem (KM)' : 'Horímetro (Horas)'}
+                  </label>
+                  <input
+                    type="number"
+                    value={editingVehicle.category === 'VEICULO' ? currentKm : currentHourmeter}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      if (editingVehicle.category === 'VEICULO') setCurrentKm(val);
+                      else setCurrentHourmeter(val);
+                    }}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Operador Atribuído (Opcional)</label>
+                <select
+                  value={assignedOperatorId}
+                  onChange={(e) => setAssignedOperatorId(e.target.value)}
+                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                >
+                  <option value="">Nenhum operador atribuído</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>{u.name} ({u.department || u.role})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">URL da Foto (Opcional)</label>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={photoUrl}
+                  onChange={(e) => setPhotoUrl(e.target.value)}
+                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingVehicle(null)}
+                  className="px-3 py-1.5 rounded-xl hover:bg-emerald-500/10"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-amber-500 text-gray-950 font-bold"
+                >
+                  Salvar Alterações
                 </button>
               </div>
             </form>

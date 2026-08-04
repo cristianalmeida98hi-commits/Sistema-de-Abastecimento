@@ -52,8 +52,6 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
     selectedEquipment?.assignedOperatorId || users[2]?.id || users[0]?.id || ''
   );
 
-  const [attendantId, setAttendantId] = useState<string>(currentUser.id);
-
   const [gasStationId, setGasStationId] = useState<string>(gasStations[0]?.id || '');
 
   const selectedStation = gasStations.find(s => s.id === gasStationId);
@@ -266,49 +264,25 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
             </div>
           )}
 
-          {/* Row 2: Driver & Attendant */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            
-            <div>
-              <label className="block text-xs font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                Motorista / Operador Responsável
-              </label>
-              <select
-                value={driverOrOperatorId}
-                onChange={(e) => setDriverOrOperatorId(e.target.value)}
-                required
-                className={`w-full px-3 py-2 rounded-xl border text-xs outline-none ${
-                  darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'
-                }`}
-              >
-                {users.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.department})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                Atendente / Frentista
-              </label>
-              <select
-                value={attendantId}
-                onChange={(e) => setAttendantId(e.target.value)}
-                required
-                className={`w-full px-3 py-2 rounded-xl border text-xs outline-none ${
-                  darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'
-                }`}
-              >
-                {users.map(u => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.role})
-                  </option>
-                ))}
-              </select>
-            </div>
-
+          {/* Row 2: Driver / Operator */}
+          <div>
+            <label className="block text-xs font-bold mb-1 text-gray-700 dark:text-emerald-200">
+              Motorista / Operador Responsável
+            </label>
+            <select
+              value={driverOrOperatorId}
+              onChange={(e) => setDriverOrOperatorId(e.target.value)}
+              required
+              className={`w-full px-3 py-2 rounded-xl border text-xs outline-none ${
+                darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'
+              }`}
+            >
+              {users.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.name} ({u.department})
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Row 2.5: Operation Type & Activity */}

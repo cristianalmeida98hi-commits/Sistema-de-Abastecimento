@@ -113,7 +113,6 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   };
 
   const selectedDriver = users.find(u => u.id === driverOrOperatorId);
-  const selectedAttendant = users.find(u => u.id === attendantId);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -131,8 +130,8 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
         equipmentPlateOrCode: selectedEquipment.licensePlate || selectedEquipment.patrimonyCode || 'S/PLACA',
         driverOrOperatorId: selectedDriver.id,
         driverOrOperatorName: selectedDriver.name,
-        attendantId: selectedAttendant?.id || currentUser.id,
-        attendantName: selectedAttendant?.name || currentUser.name,
+        attendantId: currentUser.id,
+        attendantName: currentUser.name,
         gasStationId: selectedStation.id,
         gasStationName: selectedStation.name,
         fuelType,

@@ -91,22 +91,36 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
     const qrDataUrl = await generateQRCodeDataUrl(qrValue, 300);
 
     const printWin = window.open('', '_blank');
-    if (!printWin) return;
+    if (!printWin) {
+      alert('Por favor, permita popups para abrir a janela de impressão do QR Code.');
+      return;
+    }
 
     printWin.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Etiqueta QR Code - ${v.model}</title>
           <style>
-            body { font-family: 'Segoe UI', system-ui, sans-serif; padding: 20px; background: #f8fafc; text-align: center; }
-            .card { background: #ffffff; border: 3px solid #064E3B; border-radius: 16px; padding: 24px; max-width: 380px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+            body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; padding: 20px; background: #ffffff; text-align: center; color: #0f172a; }
+            .card { background: #ffffff; border: 3px solid #064E3B; border-radius: 16px; padding: 24px; max-width: 380px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
             .header { color: #064E3B; font-size: 20px; font-weight: 900; letter-spacing: -0.5px; margin-bottom: 2px; }
             .sub { color: #d97706; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
             .qr-box { background: #ffffff; border: 2px solid #e2e8f0; border-radius: 12px; padding: 12px; display: inline-block; margin: 10px 0; }
             .code-badge { background: #064E3B; color: #FACC15; font-size: 16px; font-weight: 900; padding: 6px 14px; border-radius: 8px; display: inline-block; margin-top: 8px; }
             .meta { font-size: 12px; color: #334155; margin-top: 12px; text-align: left; background: #f1f5f9; padding: 10px; border-radius: 8px; }
             .meta p { margin: 4px 0; font-weight: 600; }
+            .no-print { margin-top: 20px; display: flex; justify-content: center; gap: 10px; }
+            .btn { padding: 10px 18px; font-size: 14px; font-weight: 700; border-radius: 8px; cursor: pointer; border: none; }
+            .btn-print { background: #064E3B; color: #ffffff; }
+            .btn-close { background: #e2e8f0; color: #0f172a; }
+            @media print {
+              body { background: none; padding: 0; }
+              .card { box-shadow: none; border-width: 2px; }
+              .no-print { display: none !important; }
+            }
           </style>
         </head>
         <body>
@@ -117,7 +131,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
             <div class="code-badge">${v.licensePlate || v.patrimonyCode}</div>
             
             <div class="qr-box">
-              <img src="${qrDataUrl}" width="200" height="200" alt="QR Code" onload="window.print()" />
+              <img id="qr-img" src="${qrDataUrl}" width="200" height="200" alt="QR Code" />
             </div>
 
             <div class="meta">
@@ -126,15 +140,35 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
               <p>🔑 ID Máquina: ${v.id}</p>
             </div>
           </div>
+
+          <div class="no-print">
+            <button class="btn btn-print" onclick="window.print()">🖨️ Imprimir</button>
+            <button class="btn btn-close" onclick="window.close()">✕ Fechar</button>
+          </div>
+
           <script>
-            window.onload = function() {
-              setTimeout(function() { window.print(); }, 200);
-            };
+            let hasPrinted = false;
+            function triggerPrint() {
+              if (hasPrinted) return;
+              hasPrinted = true;
+              setTimeout(function() {
+                window.print();
+              }, 300);
+            }
+            const img = document.getElementById('qr-img');
+            if (img && img.complete) {
+              triggerPrint();
+            } else if (img) {
+              img.onload = triggerPrint;
+            } else {
+              triggerPrint();
+            }
           </script>
         </body>
       </html>
     `);
     printWin.document.close();
+    printWin.focus();
   };
 
   // Batch Print for all filtered machines
@@ -160,15 +194,20 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
     const cardsHtml = cardsHtmlList.join('');
 
     const printWin = window.open('', '_blank');
-    if (!printWin) return;
+    if (!printWin) {
+      alert('Por favor, permita popups para abrir a janela de impressão.');
+      return;
+    }
 
     printWin.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Impressão em Lote - QR Codes AndradeAgro</title>
           <style>
-            body { font-family: sans-serif; padding: 20px; background: #fff; }
+            body { font-family: sans-serif; padding: 20px; background: #fff; color: #000; }
             .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
             .card { border: 2px solid #064E3B; border-radius: 12px; padding: 16px; text-align: center; page-break-inside: avoid; }
             .header { color: #064E3B; font-weight: 900; font-size: 16px; }
@@ -177,16 +216,30 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
             .code-badge { background: #064E3B; color: #FACC15; font-weight: 900; font-size: 14px; padding: 4px 8px; border-radius: 6px; display: inline-block; margin: 4px 0; }
             .qr-box { margin: 8px 0; }
             .meta { font-size: 11px; color: #475569; font-weight: 600; }
+            .no-print { margin-bottom: 20px; text-align: center; display: flex; justify-content: center; gap: 10px; }
+            .btn { padding: 10px 18px; font-size: 14px; font-weight: 700; border-radius: 8px; cursor: pointer; border: none; }
+            .btn-print { background: #064E3B; color: #ffffff; }
+            .btn-close { background: #e2e8f0; color: #0f172a; }
             @media print {
               body { padding: 0; }
+              .no-print { display: none !important; }
             }
           </style>
         </head>
         <body>
-          <h1 style="text-align: center; color: #064E3B; font-size: 20px;">Catálogo de QR Codes de Frota & Máquinas (${filteredVehicles.length})</h1>
+          <div class="no-print">
+            <button class="btn btn-print" onclick="window.print()">🖨️ Imprimir Todos (${filteredVehicles.length})</button>
+            <button class="btn btn-close" onclick="window.close()">✕ Fechar</button>
+          </div>
+
+          <h1 style="text-align: center; color: #064E3B; font-size: 20px; margin-bottom: 16px;">Catálogo de QR Codes de Frota & Máquinas (${filteredVehicles.length})</h1>
           <div class="grid">${cardsHtml}</div>
+
           <script>
+            let hasPrinted = false;
             window.onload = function() {
+              if (hasPrinted) return;
+              hasPrinted = true;
               setTimeout(function() { window.print(); }, 300);
             };
           </script>
@@ -194,6 +247,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
       </html>
     `);
     printWin.document.close();
+    printWin.focus();
   };
 
   return (

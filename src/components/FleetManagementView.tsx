@@ -119,19 +119,32 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     const qrDataUrl = await generateQRCodeDataUrl(qrValue, 300);
 
     const printWin = window.open('', '_blank');
-    if (!printWin) return;
+    if (!printWin) {
+      alert('Por favor, permita popups para abrir a janela de impressão do QR Code.');
+      return;
+    }
 
     printWin.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Ficha do Equipamento QR - ${v.model}</title>
           <style>
-            body { font-family: sans-serif; padding: 20px; text-align: center; }
-            .card { border: 3px solid #0f3822; padding: 20px; border-radius: 16px; max-width: 400px; margin: 0 auto; }
-            h1 { color: #0f3822; font-size: 22px; margin-bottom: 4px; }
-            .tag { background: #d4af37; color: #000; font-weight: bold; padding: 4px 8px; border-radius: 6px; display: inline-block; }
-            .qr { margin: 20px 0; }
+            body { font-family: sans-serif; padding: 20px; text-align: center; background: #ffffff; color: #0f172a; }
+            .card { border: 3px solid #0f3822; padding: 20px; border-radius: 16px; max-width: 400px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+            h1 { color: #0f3822; font-size: 22px; margin-bottom: 4px; font-weight: 900; }
+            .tag { background: #d4af37; color: #000; font-weight: bold; padding: 4px 10px; border-radius: 6px; display: inline-block; margin: 8px 0; }
+            .qr { margin: 16px 0; }
+            .no-print { margin-top: 20px; display: flex; justify-content: center; gap: 10px; }
+            .btn { padding: 10px 18px; font-size: 14px; font-weight: 700; border-radius: 8px; cursor: pointer; border: none; }
+            .btn-print { background: #0f3822; color: #ffffff; }
+            .btn-close { background: #e2e8f0; color: #0f172a; }
+            @media print {
+              body { padding: 0; }
+              .no-print { display: none !important; }
+            }
           </style>
         </head>
         <body>
@@ -140,20 +153,40 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
             <p><strong>${v.model}</strong></p>
             <p class="tag">${v.licensePlate || v.patrimonyCode}</p>
             <div class="qr">
-              <img src="${qrDataUrl}" width="200" height="200" alt="QR Code" onload="window.print()" />
+              <img id="qr-img" src="${qrDataUrl}" width="200" height="200" alt="QR Code" />
             </div>
             <p>Setor: ${getSectorName(v.sector)}</p>
             <p>Tanque: ${v.tankCapacityLiters} Litros (${getFuelTypeName(v.fuelType)})</p>
           </div>
+
+          <div class="no-print">
+            <button class="btn btn-print" onclick="window.print()">🖨️ Imprimir</button>
+            <button class="btn btn-close" onclick="window.close()">✕ Fechar</button>
+          </div>
+
           <script>
-            window.onload = function() {
-              setTimeout(function() { window.print(); }, 200);
-            };
+            let hasPrinted = false;
+            function triggerPrint() {
+              if (hasPrinted) return;
+              hasPrinted = true;
+              setTimeout(function() {
+                window.print();
+              }, 300);
+            }
+            const img = document.getElementById('qr-img');
+            if (img && img.complete) {
+              triggerPrint();
+            } else if (img) {
+              img.onload = triggerPrint;
+            } else {
+              triggerPrint();
+            }
           </script>
         </body>
       </html>
     `);
     printWin.document.close();
+    printWin.focus();
   };
 
   return (

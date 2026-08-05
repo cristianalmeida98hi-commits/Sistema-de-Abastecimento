@@ -186,6 +186,13 @@ export default function App() {
     try {
       await addFuelLog(logData);
       refreshState();
+
+      if (currentUser && currentUser.role === 'FUNCIONARIO') {
+        setIsFuelingModalOpen(false);
+        logoutUser();
+        setCurrentUser(null);
+        setLoginSuccessMessage('Abastecimento registrado com sucesso!');
+      }
     } catch (err: any) {
       console.error('Erro ao salvar abastecimento:', err);
       throw err;

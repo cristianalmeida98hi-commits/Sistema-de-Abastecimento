@@ -145,7 +145,7 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
               <div className="grid grid-cols-2 gap-2 text-slate-600 dark:text-emerald-300 bg-slate-50 dark:bg-emerald-950/60 p-3 rounded-2xl border">
                 <p><strong>Fabricante:</strong> {liveVehicle?.manufacturer}</p>
                 <p><strong>Setor:</strong> {getSectorName(liveVehicle?.sector || 'AGRICOLA')}</p>
-                <p><strong>Tanque:</strong> {liveVehicle?.tankCapacityLiters}L ({getFuelTypeName(liveVehicle?.fuelType || 'DIESEL_S10')})</p>
+                <p><strong>Combustível / Tanque:</strong> {liveVehicle?.fuelType === 'NENHUM' ? 'Não se aplica' : `${liveVehicle?.tankCapacityLiters}L (${getFuelTypeName(liveVehicle?.fuelType)})`}</p>
                 <p><strong>Uso Atual:</strong> {liveVehicle?.category === 'VEICULO' ? `${liveVehicle?.currentKm} km` : `${liveVehicle?.currentHourmeter || 0} h`}</p>
                 <p className="col-span-2"><strong>Operador Responsável:</strong> {liveVehicle?.assignedOperatorName || 'Não atribuído'}</p>
               </div>

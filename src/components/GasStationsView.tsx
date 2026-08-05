@@ -71,7 +71,8 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
           GASOLINA_COMUM: gasolinaPrice,
           GASOLINA_GRID: gasolinaPrice + 0.30,
           ETANOL: etanolPrice,
-          ARLA_32: 2.50
+          ARLA_32: 2.50,
+          NENHUM: 0
         }
       });
     } else {
@@ -86,7 +87,8 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
           GASOLINA_COMUM: gasolinaPrice,
           GASOLINA_GRID: gasolinaPrice + 0.30,
           ETANOL: etanolPrice,
-          ARLA_32: 2.50
+          ARLA_32: 2.50,
+          NENHUM: 0
         },
         active: true
       });

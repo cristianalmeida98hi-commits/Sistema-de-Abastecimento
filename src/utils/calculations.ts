@@ -48,7 +48,8 @@ export function formatDateTimeBR(dateTimeString: string): string {
   }
 }
 
-export function getFuelTypeName(fuelType: FuelType): string {
+export function getFuelTypeName(fuelType: FuelType | string | undefined | null): string {
+  if (!fuelType || fuelType === 'NENHUM') return 'Nenhum (Não se aplica)';
   switch (fuelType) {
     case 'DIESEL_S10': return 'Diesel S10';
     case 'DIESEL_S500': return 'Diesel S500';

@@ -572,7 +572,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
               <div className="p-2.5 rounded-2xl bg-white dark:bg-emerald-900/60 border">
                 <span className="text-[10px] text-slate-500 block">Tanque / Combustível:</span>
                 <strong className="text-slate-900 dark:text-slate-100">
-                  {vehicle.tankCapacityLiters}L ({getFuelTypeName(vehicle.fuelType)})
+                  {vehicle.fuelType === 'NENHUM' ? 'Não se aplica' : `${vehicle.tankCapacityLiters}L (${getFuelTypeName(vehicle.fuelType)})`}
                 </strong>
               </div>
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   Fuel, Search, Bell, Plus, QrCode, Shield, User as UserIcon, 
-  LogOut, CheckCircle2, AlertTriangle, ChevronDown, Sparkles 
+  LogOut, CheckCircle2, AlertTriangle, ChevronDown, Sparkles, Menu 
 } from 'lucide-react';
 import { User, SmartAlert } from '../types';
 import { getUsers, setCurrentUser } from '../utils/storage';
@@ -17,6 +17,7 @@ interface HeaderProps {
   darkMode?: boolean;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  onToggleMobileMenu?: () => void;
 }
 
 export const HeaderComponent: React.FC<HeaderProps> = ({
@@ -29,6 +30,7 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
   alerts = [],
   searchQuery,
   onSearchChange,
+  onToggleMobileMenu,
 }) => {
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showAlertsDropdown, setShowAlertsDropdown] = useState(false);
@@ -38,12 +40,22 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-30 border-b transition-colors h-16 flex items-center bg-[#04281f]/95 border-emerald-900/60 text-[#f8fafc] backdrop-blur-md">
-      <div className="w-full px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between gap-4">
+      <div className="w-full px-3 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between gap-2 sm:gap-4">
           
-          {/* Section Title */}
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-slate-100">
+          {/* Section Title & Mobile Toggle */}
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            {onToggleMobileMenu && (
+              <button
+                onClick={onToggleMobileMenu}
+                className="p-2 min-h-[44px] min-w-[44px] rounded-xl border border-emerald-800 bg-emerald-900/50 text-emerald-200 hover:bg-emerald-800/60 md:hidden flex items-center justify-center shrink-0"
+                title="Abrir Menu Principal"
+                aria-label="Abrir Menu Principal"
+              >
+                <Menu className="w-5 h-5 text-[#FACC15]" />
+              </button>
+            )}
+            <h1 className="text-base sm:text-xl font-bold text-slate-100 truncate">
               {currentUser.role === 'FUNCIONARIO' ? 'Módulo do Operador' : 'Painel Administrativo'}
             </h1>
           </div>
@@ -63,24 +75,24 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
           </div>
 
           {/* Actions & User Profile */}
-          <div className="flex items-center gap-2 sm:gap-4">
+          <div className="flex items-center gap-1.5 sm:gap-3">
             
             {/* QR Code Scanner Quick Button */}
             <button
               onClick={onOpenQRScanner}
               title="Escanear QR Code de Veículo / Máquina"
-              className="p-2 sm:px-3 sm:py-2 rounded-full border text-xs font-semibold flex items-center gap-1.5 transition-all bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60"
+              className="p-2.5 sm:px-3 sm:py-2 min-h-[44px] rounded-full border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60"
             >
-              <QrCode className="w-4 h-4 text-[#C5A059]" />
+              <QrCode className="w-5 h-5 sm:w-4 sm:h-4 text-[#C5A059]" />
               <span className="hidden lg:inline">Ler QR Code</span>
             </button>
 
             {/* Quick Fuel Log Button */}
             <button
               onClick={onOpenFuelingModal}
-              className="bg-[#064E3B] hover:bg-[#043d2e] text-white font-bold text-xs px-4 py-2 rounded-full shadow-sm flex items-center gap-1.5 transition-all active:scale-95 border border-emerald-700/50"
+              className="bg-[#064E3B] hover:bg-[#043d2e] text-white font-bold text-xs px-3 sm:px-4 py-2 min-h-[44px] rounded-full shadow-sm flex items-center justify-center gap-1.5 transition-all active:scale-95 border border-emerald-700/50"
             >
-              <Plus className="w-4 h-4 text-[#C5A059]" />
+              <Plus className="w-5 h-5 sm:w-4 sm:h-4 text-[#C5A059]" />
               <span className="hidden sm:inline">Novo Abastecimento</span>
             </button>
 
@@ -89,7 +101,7 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
               <div className="relative">
                 <button
                   onClick={() => setShowAlertsDropdown(!showAlertsDropdown)}
-                  className="w-9 h-9 rounded-full border flex items-center justify-center relative transition-colors bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60"
+                  className="w-10 h-10 sm:w-9 sm:h-9 min-h-[44px] sm:min-h-0 rounded-full border flex items-center justify-center relative transition-colors bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60"
                   title="Alertas e Notificações"
                 >
                   <Bell className="w-4.5 h-4.5" />

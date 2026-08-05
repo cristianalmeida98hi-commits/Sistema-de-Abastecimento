@@ -19,7 +19,11 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
   userLogs = [],
   darkMode
 }) => {
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string>(vehicles[0]?.id || '');
+  const fuelableVehicles = React.useMemo(
+    () => vehicles.filter(v => v.fuelType !== 'NENHUM'),
+    [vehicles]
+  );
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string>(fuelableVehicles[0]?.id || '');
   const [operationType, setOperationType] = useState<OperationType>('GRAMA');
   const [activityType, setActivityType] = useState<ActivityType>('CORTE');
   const [liters, setLiters] = useState<string>('80');
@@ -242,7 +246,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
                 : 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white focus:ring-2 focus:ring-[#064E3B]'
             }`}
           >
-            {vehicles.map((veh) => (
+            {fuelableVehicles.map((veh) => (
               <option key={veh.id} value={veh.id}>
                 {veh.category === 'TRATOR' || veh.category === 'MAQUINA_AGRICOLA' ? '🚜 ' : '🚛 '}
                 {veh.model} — {veh.licensePlate || veh.patrimonyCode} ({veh.sector})

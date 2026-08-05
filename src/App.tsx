@@ -78,6 +78,7 @@ export default function App() {
 
   const darkMode = true;
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Modals
@@ -178,6 +179,12 @@ export default function App() {
   };
 
   const handleOpenFuelingModalWithEquipment = (equipmentId: string) => {
+    const currentVehicles = getVehicles();
+    const eq = currentVehicles.find(v => v.id === equipmentId);
+    if (eq && eq.fuelType === 'NENHUM') {
+      alert('Esta máquina/equipamento não possui combustível definido e não pode ser abastecida.');
+      return;
+    }
     setPreSelectedVehicleId(equipmentId);
     setIsFuelingModalOpen(true);
   };
@@ -218,13 +225,15 @@ export default function App() {
       {/* Sidebar Navigation */}
       <Sidebar
         activeTab={activeTab}
-        onNavigate={(tab) => setActiveTab(tab)}
+        onNavigate={(tab) => { setActiveTab(tab); setIsMobileMenuOpen(false); }}
         onLogout={handleLogout}
         currentUser={currentUser}
         alerts={alerts}
         darkMode={darkMode}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        isMobileOpen={isMobileMenuOpen}
+        onCloseMobile={() => setIsMobileMenuOpen(false)}
       />
 
       {/* Main Content Column */}
@@ -237,15 +246,16 @@ export default function App() {
           onLogout={handleLogout}
           onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
           onOpenQRScanner={() => setIsQRScannerModalOpen(true)}
-          onNavigate={(tab) => setActiveTab(tab)}
+          onNavigate={(tab) => { setActiveTab(tab); setIsMobileMenuOpen(false); }}
           alerts={alerts}
           darkMode={darkMode}
           searchQuery={searchQuery}
           onSearchChange={(q) => setSearchQuery(q)}
+          onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         />
 
         {/* Content View Container */}
-        <main className="flex-1 p-6 sm:p-8 overflow-y-auto max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 p-3 sm:p-6 lg:p-8 overflow-y-auto max-w-[1600px] w-full mx-auto">
           <Suspense fallback={<ViewLoader />}>
             {activeTab === 'operator-fueling' && (
               <OperatorFuelingView

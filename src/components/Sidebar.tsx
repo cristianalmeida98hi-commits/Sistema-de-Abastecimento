@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   LayoutDashboard, Fuel, Truck, Wrench, Fuel as GasPump, Users, 
   FileSpreadsheet, AlertTriangle, ShieldCheck, Settings, ChevronRight,
-  Sparkles, Leaf, QrCode, LogOut
+  Sparkles, Leaf, QrCode, LogOut, X
 } from 'lucide-react';
 import { User, SmartAlert } from '../types';
 
@@ -15,6 +15,8 @@ interface SidebarProps {
   darkMode: boolean;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export const SidebarComponent: React.FC<SidebarProps> = ({
@@ -26,6 +28,8 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
   darkMode,
   collapsed,
   onToggleCollapse,
+  isMobileOpen = false,
+  onCloseMobile,
 }) => {
   const unresolvedAlertsCount = React.useMemo(() => (alerts || []).filter(a => !a.resolved).length, [alerts]);
 
@@ -57,41 +61,52 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
         ];
   }, [currentUser.role, unresolvedAlertsCount]);
 
-  return (
-    <aside className={`transition-all duration-300 ease-in-out flex flex-col shrink-0 shadow-xl z-20 ${
-      collapsed ? 'w-20' : 'w-64'
-    } ${
-      darkMode 
-        ? 'bg-[#043327] border-r border-emerald-900/40 text-slate-100' 
-        : 'bg-[#064E3B] text-white'
-    }`}>
-      
+  const handleItemClick = (id: string) => {
+    onNavigate(id);
+    if (onCloseMobile) onCloseMobile();
+  };
+
+  const sidebarContent = (
+    <div className="flex flex-col h-full w-full">
       {/* Brand Header */}
-      <div className="p-5 flex flex-col items-start gap-1 border-b border-white/10 relative">
+      <div className="p-4 sm:p-5 flex flex-col items-start gap-1 border-b border-white/10 relative">
         <div className="flex items-center justify-between w-full">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => onNavigate('dashboard')}>
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => handleItemClick('dashboard')}>
             <div className="w-9 h-9 bg-[#FACC15] rounded-xl flex items-center justify-center text-[#064E3B] shadow-md shrink-0">
               <Leaf className="w-5 h-5 fill-[#064E3B]" />
             </div>
-            {!collapsed && (
+            {(!collapsed || isMobileOpen) && (
               <div className="flex flex-col min-w-0">
                 <span className="text-white font-bold text-lg tracking-tight truncate">Andrade<span className="text-[#FACC15]">Agro</span></span>
                 <span className="text-[10px] text-[#FACC15] uppercase tracking-widest font-bold">Gestão Inteligente</span>
               </div>
             )}
           </div>
-          <button
-            onClick={onToggleCollapse}
-            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
-            title={collapsed ? 'Expandir Menu' : 'Recolher Menu'}
-          >
-            <ChevronRight className={`w-4 h-4 transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`} />
-          </button>
+
+          {/* Desktop collapse button or Mobile Close button */}
+          {isMobileOpen ? (
+            <button
+              onClick={onCloseMobile}
+              className="p-2 min-h-[44px] min-w-[44px] rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors md:hidden"
+              title="Fechar Menu"
+              aria-label="Fechar Menu"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          ) : (
+            <button
+              onClick={onToggleCollapse}
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors hidden md:block"
+              title={collapsed ? 'Expandir Menu' : 'Recolher Menu'}
+            >
+              <ChevronRight className={`w-4 h-4 transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`} />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Nav Items List */}
-      <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
+      <nav className="flex-1 py-4 sm:py-6 px-3 space-y-1.5 overflow-y-auto">
         {navItems.map(item => {
           if ((item as any).adminOnly && currentUser.role !== 'ADMIN') return null;
 
@@ -101,9 +116,9 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
           return (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.id)}
-              title={collapsed ? item.label : undefined}
-              className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl transition-all font-semibold text-xs ${
+              onClick={() => handleItemClick(item.id)}
+              title={collapsed && !isMobileOpen ? item.label : undefined}
+              className={`w-full flex items-center gap-3 px-3.5 py-3 min-h-[44px] rounded-xl transition-all font-semibold text-xs sm:text-sm ${
                 isActive
                   ? 'bg-white/20 text-white font-extrabold border-l-4 border-[#FACC15] shadow-inner'
                   : 'text-emerald-100/90 hover:text-white hover:bg-white/10'
@@ -111,7 +126,7 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
             >
               <Icon className={`w-5 h-5 shrink-0 ${isActive ? 'text-[#FACC15]' : 'text-emerald-100'}`} />
               
-              {!collapsed && (
+              {(!collapsed || isMobileOpen) && (
                 <div className="flex-1 flex items-center justify-between min-w-0">
                   <span className="truncate">{item.label}</span>
                   {item.badge && (
@@ -138,7 +153,7 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
               currentUser.name.split(' ').map(n => n[0]).slice(0, 2).join('')
             )}
           </div>
-          {!collapsed && (
+          {(!collapsed || isMobileOpen) && (
             <div className="overflow-hidden min-w-0">
               <p className="text-white text-xs font-bold truncate">{currentUser.name}</p>
               <p className="text-[#FACC15] text-[10px] uppercase tracking-wider font-extrabold">
@@ -150,13 +165,47 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
 
         <button
           onClick={onLogout}
-          className="p-2 rounded-xl hover:bg-white/10 text-emerald-100 hover:text-red-300 transition-colors shrink-0"
+          className="p-2 min-h-[44px] min-w-[44px] rounded-xl hover:bg-white/10 text-emerald-100 hover:text-red-300 transition-colors shrink-0 flex items-center justify-center"
           title="Sair do Sistema"
         >
           <LogOut className="w-4 h-4" />
         </button>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Mobile Drawer (Visible when isMobileOpen on small screens) */}
+      {isMobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden flex">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
+            onClick={onCloseMobile}
+          />
+          {/* Drawer Body */}
+          <aside className={`relative w-72 max-w-[85vw] h-full flex flex-col shadow-2xl transition-all duration-300 ease-in-out ${
+            darkMode 
+              ? 'bg-[#043327] border-r border-emerald-900/40 text-slate-100' 
+              : 'bg-[#064E3B] text-white'
+          }`}>
+            {sidebarContent}
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop Sidebar (Hidden on mobile) */}
+      <aside className={`hidden md:flex transition-all duration-300 ease-in-out flex-col shrink-0 shadow-xl z-20 ${
+        collapsed ? 'w-20' : 'w-64'
+      } ${
+        darkMode 
+          ? 'bg-[#043327] border-r border-emerald-900/40 text-slate-100' 
+          : 'bg-[#064E3B] text-white'
+      }`}>
+        {sidebarContent}
+      </aside>
+    </>
   );
 };
 

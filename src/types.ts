@@ -16,7 +16,7 @@ export interface User {
   active: boolean;
 }
 
-export type FuelType = 'DIESEL_S10' | 'DIESEL_S500' | 'GASOLINA_COMUM' | 'GASOLINA_GRID' | 'ETANOL' | 'ARLA_32';
+export type FuelType = 'DIESEL_S10' | 'DIESEL_S500' | 'GASOLINA_COMUM' | 'GASOLINA_GRID' | 'ETANOL' | 'ARLA_32' | 'NENHUM';
 
 export type Sector = 'AGRICOLA' | 'LOGISTICA' | 'OFICINA_MANUTENCAO' | 'DIRETORIA' | 'COLHEITA' | 'PULVERIZACAO' | 'PREPARO_SOLO';
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, Fuel, Calendar, Clock, Truck, User as UserIcon, 
   DollarSign, Camera, FileText, AlertTriangle, CheckCircle2, Calculator, Sparkles 
@@ -42,9 +42,17 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
     new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
   );
   
-  const [equipmentId, setEquipmentId] = useState<string>(
-    preSelectedVehicleId || (vehicles[0]?.id || '')
+  const fuelableVehicles = useMemo(
+    () => vehicles.filter(v => v.fuelType !== 'NENHUM'),
+    [vehicles]
   );
+
+  const [equipmentId, setEquipmentId] = useState<string>(() => {
+    if (preSelectedVehicleId && fuelableVehicles.some(v => v.id === preSelectedVehicleId)) {
+      return preSelectedVehicleId;
+    }
+    return fuelableVehicles[0]?.id || '';
+  });
 
   const selectedEquipment = vehicles.find(v => v.id === equipmentId);
 
@@ -235,7 +243,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                   darkMode ? 'bg-emerald-900/40 border-emerald-800 text-amber-400' : 'bg-gray-50 border-gray-200 text-emerald-800'
                 }`}
               >
-                {vehicles.map(v => (
+                {fuelableVehicles.map(v => (
                   <option key={v.id} value={v.id}>
                     [{v.category}] {v.model} ({v.licensePlate || v.patrimonyCode})
                   </option>

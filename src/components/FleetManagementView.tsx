@@ -201,7 +201,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
               <img id="qr-img" src="${qrDataUrl}" width="200" height="200" alt="QR Code" />
             </div>
             <p>Setor: ${getSectorName(v.sector)}</p>
-            <p>Tanque: ${v.tankCapacityLiters} Litros (${getFuelTypeName(v.fuelType)})</p>
+            <p>Combustível: ${v.fuelType === 'NENHUM' ? 'Não se aplica' : `${v.tankCapacityLiters} Litros (${getFuelTypeName(v.fuelType)})`}</p>
           </div>
 
           <div class="no-print">
@@ -386,8 +386,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   </strong>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500 dark:text-emerald-400">Tanque:</span>
-                  <strong className="text-gray-800 dark:text-emerald-200">{v.tankCapacityLiters}L ({getFuelTypeName(v.fuelType)})</strong>
+                  <span className="text-gray-500 dark:text-emerald-400">Combustível / Tanque:</span>
+                  <strong className="text-gray-800 dark:text-emerald-200">{v.fuelType === 'NENHUM' ? 'Não se aplica' : `${v.tankCapacityLiters}L (${getFuelTypeName(v.fuelType)})`}</strong>
                 </div>
                 {v.assignedOperatorName && (
                   <div className="flex justify-between">
@@ -412,12 +412,14 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   <Eye className="w-3.5 h-3.5" /> Ficha Digital
                 </button>
 
-                <button
-                  onClick={() => onOpenFuelingModalWithEquipment(v.id)}
-                  className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-bold flex items-center gap-1 shadow-sm"
-                >
-                  <Fuel className="w-3.5 h-3.5" /> Abastecer
-                </button>
+                {v.fuelType !== 'NENHUM' && (
+                  <button
+                    onClick={() => onOpenFuelingModalWithEquipment(v.id)}
+                    className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-bold flex items-center gap-1 shadow-sm"
+                  >
+                    <Fuel className="w-3.5 h-3.5" /> Abastecer
+                  </button>
+                )}
 
                 <button
                   onClick={() => handlePrintBadge(v)}
@@ -623,7 +625,13 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   <label className="block font-bold mb-1">Tipo de Combustível</label>
                   <select
                     value={fuelType}
-                    onChange={(e) => setFuelType(e.target.value as FuelType)}
+                    onChange={(e) => {
+                      const selected = e.target.value as FuelType;
+                      setFuelType(selected);
+                      if (selected === 'NENHUM') {
+                        setTankCapacityLiters(0);
+                      }
+                    }}
                     className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
                   >
                     <option value="DIESEL_S10">Diesel S10</option>
@@ -632,6 +640,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                     <option value="GASOLINA_GRID">Gasolina Aditivada</option>
                     <option value="ETANOL">Etanol Hidratado</option>
                     <option value="ARLA_32">Arla 32</option>
+                    <option value="NENHUM">Nenhum (Não se aplica)</option>
                   </select>
                 </div>
               </div>
@@ -802,7 +811,13 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   <label className="block font-bold mb-1">Tipo de Combustível</label>
                   <select
                     value={fuelType}
-                    onChange={(e) => setFuelType(e.target.value as FuelType)}
+                    onChange={(e) => {
+                      const selected = e.target.value as FuelType;
+                      setFuelType(selected);
+                      if (selected === 'NENHUM') {
+                        setTankCapacityLiters(0);
+                      }
+                    }}
                     className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
                   >
                     <option value="DIESEL_S10">Diesel S10</option>
@@ -811,6 +826,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                     <option value="GASOLINA_GRID">Gasolina Aditivada</option>
                     <option value="ETANOL">Etanol Hidratado</option>
                     <option value="ARLA_32">Arla 32</option>
+                    <option value="NENHUM">Nenhum (Não se aplica)</option>
                   </select>
                 </div>
               </div>

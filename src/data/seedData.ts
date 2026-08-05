@@ -255,6 +255,28 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     lastFuelingDate: '2026-07-25',
     nextRevisionKmOrHour: 6200,
     notes: 'Abertura de curvas de nível e drenagem de talhões.'
+  },
+  {
+    id: 'veh-009',
+    category: 'IMPLEMENTO',
+    licensePlate: 'AGRO-IMP-32',
+    patrimonyCode: 'IMP-001',
+    machineSubtype: 'IMPLEMENTO',
+    model: 'Grade Aradora Controle Remoto 32 Discos',
+    manufacturer: 'Tatu Marchesan',
+    year: 2023,
+    color: 'Vermelho / Preto',
+    sector: 'PREPARO_SOLO',
+    fuelType: 'NENHUM',
+    tankCapacityLiters: 0,
+    currentKm: 0,
+    currentHourmeter: 850,
+    status: 'ATIVO',
+    assignedOperatorId: 'usr-004',
+    assignedOperatorName: 'Marcos Oliveira',
+    photoUrl: 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80',
+    nextRevisionKmOrHour: 1000,
+    notes: 'Implemento agrícola rebocado sem motor/combustível próprio.'
   }
 ];
 
@@ -272,7 +294,8 @@ export const INITIAL_GAS_STATIONS: GasStation[] = [
       GASOLINA_COMUM: 5.99,
       GASOLINA_GRID: 6.29,
       ETANOL: 3.89,
-      ARLA_32: 2.50
+      ARLA_32: 2.50,
+      NENHUM: 0
     },
     active: true
   },
@@ -289,7 +312,8 @@ export const INITIAL_GAS_STATIONS: GasStation[] = [
       GASOLINA_COMUM: 6.25,
       GASOLINA_GRID: 6.55,
       ETANOL: 4.19,
-      ARLA_32: 2.90
+      ARLA_32: 2.90,
+      NENHUM: 0
     },
     active: true
   },
@@ -306,7 +330,8 @@ export const INITIAL_GAS_STATIONS: GasStation[] = [
       GASOLINA_COMUM: 6.30,
       GASOLINA_GRID: 6.60,
       ETANOL: 4.25,
-      ARLA_32: 3.00
+      ARLA_32: 3.00,
+      NENHUM: 0
     },
     active: true
   }

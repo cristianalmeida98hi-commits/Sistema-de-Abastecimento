@@ -3,11 +3,11 @@ import {
 } from 'firebase/firestore';
 import { db, safeSetDoc, safeUpdateDoc } from '../lib/firebase';
 import { 
-  User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem, PreventiveItemKey 
+  User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem, PreventiveItemKey, FuelRefill 
 } from '../types';
 import { 
   INITIAL_USERS, INITIAL_VEHICLES, INITIAL_GAS_STATIONS, 
-  INITIAL_FUEL_LOGS, INITIAL_MAINTENANCE_LOGS, INITIAL_ALERTS, 
+  INITIAL_FUEL_LOGS, INITIAL_FUEL_REFILLS, INITIAL_MAINTENANCE_LOGS, INITIAL_ALERTS, 
   INITIAL_AUDIT_LOGS, INITIAL_SETTINGS, INITIAL_MACHINE_ISSUES, INITIAL_PREVENTIVE_ITEMS 
 } from '../data/seedData';
 
@@ -38,6 +38,7 @@ let cache = {
   vehicles: INITIAL_VEHICLES as Vehicle[],
   gasStations: INITIAL_GAS_STATIONS as GasStation[],
   fuelLogs: INITIAL_FUEL_LOGS as FuelLog[],
+  fuelRefills: INITIAL_FUEL_REFILLS as FuelRefill[],
   maintenanceLogs: INITIAL_MAINTENANCE_LOGS as MaintenanceLog[],
   machineIssues: INITIAL_MACHINE_ISSUES as MachineIssue[],
   preventiveItems: INITIAL_PREVENTIVE_ITEMS as PreventiveMaintenanceItem[],
@@ -98,6 +99,18 @@ export function initStorage() {
         notifyDataUpdated();
       }
     }, (err) => console.error('[Firestore FuelLogs Error]', err));
+
+    // 4.1 Fuel Refills (Entrada / Reabastecimento do Tanque) Subscription
+    onSnapshot(collection(db, 'fuel_refills'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('fuel_refills', INITIAL_FUEL_REFILLS);
+      } else {
+        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FuelRefill));
+        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+        cache.fuelRefills = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore FuelRefills Error]', err));
 
     // 5. Maintenance Logs Subscription
     onSnapshot(collection(db, 'maintenance_logs'), (snapshot) => {
@@ -179,6 +192,10 @@ export function initStorage() {
 function notifyDataUpdated() {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('andradeagro_data_updated'));
+    // Debounce/run check automated alerts in background
+    setTimeout(() => {
+      checkAutomatedAlerts();
+    }, 100);
   }
 }
 
@@ -201,16 +218,67 @@ export function getUsers(): User[] {
   return cache.users;
 }
 
+export function getRememberedUser(): User | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const rememberedStr = localStorage.getItem(SESSION_KEYS.REMEMBERED_USER) || localStorage.getItem('andradeagro_remembered_user');
+    if (rememberedStr) {
+      const u = JSON.parse(rememberedStr);
+      const live = cache.users.find(usr => usr.id === u.id || usr.email?.toLowerCase() === u.email?.toLowerCase());
+      if (live) {
+        if (live.active === false) {
+          localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
+          localStorage.removeItem('andradeagro_remembered_user');
+          return null;
+        }
+        return live;
+      }
+      return u;
+    }
+  } catch (err) {
+    console.error('Error reading remembered user:', err);
+  }
+  return null;
+}
+
+export function clearRememberedUser(): void {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
+      localStorage.removeItem('andradeagro_remembered_user');
+      notifyDataUpdated();
+    }
+  } catch (err) {
+    console.error('Error clearing remembered user:', err);
+  }
+}
+
 export function getCurrentUser(): User | null {
   try {
     if (typeof window === 'undefined') return null;
+    let foundUser: User | null = null;
     const sessionStr = sessionStorage.getItem(SESSION_KEYS.SESSION_USER);
     if (sessionStr) {
-      return JSON.parse(sessionStr);
+      foundUser = JSON.parse(sessionStr);
+    } else {
+      const rememberedStr = localStorage.getItem(SESSION_KEYS.REMEMBERED_USER) || localStorage.getItem('andradeagro_remembered_user');
+      if (rememberedStr) {
+        foundUser = JSON.parse(rememberedStr);
+      }
     }
-    const rememberedStr = localStorage.getItem(SESSION_KEYS.REMEMBERED_USER);
-    if (rememberedStr) {
-      return JSON.parse(rememberedStr);
+
+    if (foundUser) {
+      const live = cache.users.find(u => u.id === foundUser?.id || u.email?.toLowerCase() === foundUser?.email?.toLowerCase());
+      if (live) {
+        if (live.active === false) {
+          sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
+          localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
+          localStorage.removeItem('andradeagro_remembered_user');
+          return null;
+        }
+        return live;
+      }
+      return foundUser;
     }
   } catch (err) {
     console.error('Error reading current user session:', err);
@@ -228,7 +296,7 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
     return { success: false, error: 'E-mail não cadastrado no sistema AndradeAgro.' };
   }
 
-  if (!user.active) {
+  if (user.active === false) {
     return { success: false, error: 'Este usuário está inativo no sistema. Fale com a administração.' };
   }
 
@@ -241,8 +309,10 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
     sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
     if (rememberMe) {
       localStorage.setItem(SESSION_KEYS.REMEMBERED_USER, JSON.stringify(user));
+      localStorage.setItem('andradeagro_remembered_user', JSON.stringify(user));
     } else {
       localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
+      localStorage.removeItem('andradeagro_remembered_user');
     }
 
     logAuditEvent('LOGIN', 'Acesso', `Login realizado com sucesso (${user.role === 'ADMIN' ? 'Administrador' : 'Funcionário'})`);
@@ -288,6 +358,105 @@ export function getGasStations(): GasStation[] {
 
 export function getFuelLogs(): FuelLog[] {
   return cache.fuelLogs;
+}
+
+export function getFuelRefills(): FuelRefill[] {
+  return cache.fuelRefills;
+}
+
+// Calculate Tank Status (Current Stock, Percentage, Low Tank Alert condition)
+export function getTankStatus(gasStationId?: string) {
+  const settings = getSettings();
+  const capacity = Number(settings.tankCapacityLiters) > 0 ? Number(settings.tankCapacityLiters) : 20000;
+  const initialStock = settings.tankInitialStockLiters !== undefined && Number(settings.tankInitialStockLiters) >= 0
+    ? Number(settings.tankInitialStockLiters) 
+    : capacity;
+  
+  const baseUpdatedAt = settings.tankStockBaseUpdatedAt ? new Date(settings.tankStockBaseUpdatedAt).getTime() : 0;
+
+  // Total refilled into the tank from suppliers (Entrada de combustível)
+  const refills = getFuelRefills();
+  const totalRefilled = refills.reduce((sum, r) => {
+    const rDate = r.dateTime || (r as any).date;
+    if (baseUpdatedAt > 0 && rDate) {
+      const refillTime = new Date(rDate).getTime();
+      if (refillTime < baseUpdatedAt) return sum;
+    }
+    return sum + (Number(r.liters) || 0);
+  }, 0);
+
+  // Total consumed by machines/vehicles from central/internal post
+  const fuelLogs = getFuelLogs();
+  const totalDispensed = fuelLogs.reduce((sum, log) => {
+    // If filtering by specific station or default central tank
+    if (gasStationId && log.gasStationId && log.gasStationId !== gasStationId) {
+      return sum;
+    }
+    if (baseUpdatedAt > 0 && log.dateTime) {
+      const logTime = new Date(log.dateTime).getTime();
+      if (logTime < baseUpdatedAt) return sum;
+    }
+    return sum + (Number(log.liters) || 0);
+  }, 0);
+
+  const currentStock = Math.max(0, initialStock + totalRefilled - totalDispensed);
+  const percentage = capacity > 0 ? Math.min(100, Math.max(0, (currentStock / capacity) * 100)) : 0;
+  
+  // Alerta quando atingir 500L ou menos
+  const isCritical = currentStock <= 500;
+  const isLow = currentStock <= 1000 || currentStock <= Math.max(1000, capacity * 0.1);
+
+  return {
+    capacity,
+    initialStock,
+    totalRefilled,
+    totalDispensed,
+    currentStock,
+    percentage: Math.round(percentage * 10) / 10,
+    isLow,
+    isCritical
+  };
+}
+
+// Quick Access Shortcuts helpers (ADMs e Funcionários na tela de login)
+export function getQuickAccessUserIds(): string[] {
+  try {
+    const settings = getSettings();
+    if (settings.quickAccessUserIds && Array.isArray(settings.quickAccessUserIds) && settings.quickAccessUserIds.length > 0) {
+      return settings.quickAccessUserIds;
+    }
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('andradeagro_quick_access_user_ids');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+    // Default: all active users
+    return cache.users.filter(u => u.active !== false).map(u => u.id);
+  } catch (e) {
+    console.error('Error loading quick access user ids:', e);
+    return cache.users.filter(u => u.active !== false).map(u => u.id);
+  }
+}
+
+export async function setQuickAccessUserIds(userIds: string[]): Promise<void> {
+  try {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('andradeagro_quick_access_user_ids', JSON.stringify(userIds));
+    }
+    await updateSettings({ quickAccessUserIds: userIds });
+  } catch (e) {
+    console.error('Error saving quick access user ids:', e);
+  }
+}
+
+export async function toggleQuickAccessUser(userId: string): Promise<void> {
+  const currentIds = getQuickAccessUserIds();
+  const nextIds = currentIds.includes(userId)
+    ? currentIds.filter(id => id !== userId)
+    : [...currentIds, userId];
+  await setQuickAccessUserIds(nextIds);
 }
 
 export function getMaintenanceLogs(): MaintenanceLog[] {
@@ -691,6 +860,210 @@ export async function resolveAlert(id: string): Promise<void> {
   logAuditEvent('EDITAR', 'Alerta', `Marcou alerta ID ${id} como resolvido.`);
 }
 
+// Fuel Refill (Entrada / Reabastecimento de Tanque) Mutators
+export async function addFuelRefill(refill: Omit<FuelRefill, 'id' | 'createdAt'>): Promise<FuelRefill> {
+  const newRefill: FuelRefill = {
+    ...refill,
+    id: `refill-${Date.now()}`,
+    createdAt: new Date().toISOString()
+  };
+  const cleaned = cleanUndefined(newRefill);
+  cache.fuelRefills = [cleaned, ...cache.fuelRefills];
+  notifyDataUpdated();
+
+  await setDoc(doc(db, 'fuel_refills', cleaned.id), cleaned);
+  logAuditEvent('CRIAR', 'Entrada de Combustível', `Registrou entrada de ${cleaned.liters.toLocaleString('pt-BR')}L (${cleaned.fuelType}) de ${cleaned.supplierName || 'Fornecedor'}.`);
+  
+  checkAutomatedAlerts();
+  return cleaned;
+}
+
+export async function deleteFuelRefill(id: string): Promise<void> {
+  cache.fuelRefills = cache.fuelRefills.filter(r => r.id !== id);
+  notifyDataUpdated();
+
+  await deleteDoc(doc(db, 'fuel_refills', id));
+  logAuditEvent('EXCLUIR', 'Entrada de Combustível', `Removeu o registro de entrada de combustível ID ${id}.`);
+  checkAutomatedAlerts();
+}
+
+// Dedicated Oil Change Recorder
+export async function recordOilChange(
+  equipmentId: string,
+  recordedHourmeter: number,
+  date?: string,
+  cost: number = 0,
+  notes?: string
+): Promise<void> {
+  const serviceDate = date || new Date().toISOString().slice(0, 10);
+  const vehicles = getVehicles();
+  const targetVehicle = vehicles.find(v => v.id === equipmentId);
+  const nextScheduled = recordedHourmeter + 300;
+
+  if (targetVehicle) {
+    const updatedVehicle: Partial<Vehicle> = {
+      lastOilChangeHourmeter: recordedHourmeter,
+      lastOilChangeDate: serviceDate,
+      nextOilChangeHourmeter: nextScheduled,
+      currentHourmeter: Math.max(targetVehicle.currentHourmeter || 0, recordedHourmeter)
+    };
+    await updateVehicle(targetVehicle.id, updatedVehicle);
+  }
+
+  // Update Preventive Item if exists
+  const allPrev = getPreventiveItems();
+  const oilPrevItem = allPrev.find(p => p.equipmentId === equipmentId && p.itemKey === 'TROCA_OLEO_MOTOR');
+  if (oilPrevItem) {
+    const updatedItem = cleanUndefined({
+      ...oilPrevItem,
+      lastServiceDate: serviceDate,
+      lastServiceHourmeter: recordedHourmeter,
+      nextScheduledHourmeter: nextScheduled,
+      intervalHours: 300,
+      notes: notes || oilPrevItem.notes
+    });
+    cache.preventiveItems = cache.preventiveItems.map(p => p.id === oilPrevItem.id ? updatedItem : p);
+    await setDoc(doc(db, 'preventive_items', oilPrevItem.id), updatedItem);
+  }
+
+  // Resolve any existing oil change alert for this machine
+  const existingAlert = cache.alerts.find(a => a.id === `alt-oil-${equipmentId}` || (a.equipmentId === equipmentId && a.type === 'OIL_CHANGE_DUE'));
+  if (existingAlert && !existingAlert.resolved) {
+    await resolveAlert(existingAlert.id);
+  }
+
+  // Add Maintenance Log
+  await addMaintenance({
+    equipmentId,
+    equipmentName: targetVehicle?.model || 'Máquina Agrícola',
+    equipmentPlateOrCode: targetVehicle?.patrimonyCode || targetVehicle?.licensePlate || equipmentId,
+    date: serviceDate,
+    type: 'TROCA_OLEO',
+    title: `Troca de Óleo do Motor (${recordedHourmeter}h)`,
+    description: `Troca de óleo realizada no horímetro ${recordedHourmeter}h. Próxima troca programada com +300h (em ${nextScheduled}h).`,
+    kmOrHourAtService: recordedHourmeter,
+    nextServiceKmOrHour: nextScheduled,
+    cost,
+    supplierOrWorkshop: 'Oficina Interna AndradeAgro',
+    performedBy: getCurrentUser()?.name || 'Oficina',
+    status: 'CONCLUIDO',
+    notes
+  });
+
+  logAuditEvent('CRIAR', 'Troca de Óleo', `Registrou troca de óleo em ${targetVehicle?.model || equipmentId} no horímetro ${recordedHourmeter}h (Próxima: ${nextScheduled}h).`);
+  checkAutomatedAlerts();
+  notifyDataUpdated();
+}
+
+// Automated Intelligence Checker for Alerts
+export function checkAutomatedAlerts() {
+  try {
+    const settings = getSettings();
+    if (!settings.autoAlertsEnabled) return;
+
+    // 1. Check Tank Level (Alert <= 500L or <= 1000L)
+    const tank = getTankStatus();
+    const lowTankAlertId = 'alt-low-tank';
+    const existingLowTank = cache.alerts.find(a => a.id === lowTankAlertId);
+
+    if (tank.isLow || tank.isCritical) {
+      const isCritical = tank.isCritical; // <= 500L
+      const title = isCritical ? '⚠️ Alerta Crítico: Tanque Central ≤ 500L' : 'Nível Baixo de Combustível no Tanque Central';
+      const desc = isCritical 
+        ? `Nível crítico no Tanque Central: restam apenas ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L de combustível (limite de 500 L atingido). Favor providenciar recarga imediata.` 
+        : `Nível baixo no Tanque Central: restam ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L disponíveis (${tank.percentage}% da capacidade de ${tank.capacity.toLocaleString('pt-BR')} L).`;
+
+      if (!existingLowTank) {
+        const alertObj: SmartAlert = cleanUndefined({
+          id: lowTankAlertId,
+          type: 'LOW_TANK_LEVEL',
+          severity: isCritical ? 'ALTA' : 'MEDIA',
+          title,
+          description: desc,
+          date: new Date().toISOString().slice(0, 10),
+          resolved: false
+        });
+        cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== lowTankAlertId)];
+        setDoc(doc(db, 'alerts', lowTankAlertId), alertObj).catch(console.error);
+      } else if (!existingLowTank.resolved && (existingLowTank.description !== desc || (isCritical && existingLowTank.severity !== 'ALTA'))) {
+        const severity: 'ALTA' | 'MEDIA' = isCritical ? 'ALTA' : 'MEDIA';
+        const updated: SmartAlert = cleanUndefined({
+          ...existingLowTank,
+          title,
+          description: desc,
+          severity
+        });
+        cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? updated : a);
+        setDoc(doc(db, 'alerts', lowTankAlertId), updated).catch(console.error);
+      }
+    } else if (existingLowTank && !existingLowTank.resolved) {
+      const resolvedAlert = cleanUndefined({
+        ...existingLowTank,
+        resolved: true,
+        resolvedAt: new Date().toISOString(),
+        resolvedBy: 'Sistema (Tanque Reabastecido)'
+      });
+      cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? resolvedAlert : a);
+      setDoc(doc(db, 'alerts', lowTankAlertId), resolvedAlert).catch(console.error);
+    }
+
+    // 2. Check 300h Oil Change on Tractors, Implements, and Farm Machines
+    const vehicles = getVehicles();
+    vehicles.forEach(v => {
+      if (v.category === 'TRATOR' || v.category === 'MAQUINA_AGRICOLA' || v.category === 'IMPLEMENTO' || (v.currentHourmeter && v.currentHourmeter > 0)) {
+        const curHour = Number(v.currentHourmeter) || 0;
+        const lastChange = Number(v.lastOilChangeHourmeter) || 0;
+        const interval = Number(v.oilChangeIntervalHours) || 300;
+        const nextChange = v.nextOilChangeHourmeter !== undefined 
+          ? Number(v.nextOilChangeHourmeter) 
+          : (lastChange > 0 ? (lastChange + interval) : interval);
+        
+        const oilAlertId = `alt-oil-${v.id}`;
+        const existingOilAlert = cache.alerts.find(a => a.id === oilAlertId || (a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'));
+
+        if (curHour >= nextChange && curHour > 0) {
+          const title = `⚠️ Troca de Óleo Necessária: ${v.model}`;
+          const desc = `Esta máquina atingiu ${curHour}h (intervalo de ${interval}h desde a última troca realizada em ${lastChange}h - limite: ${nextChange}h).`;
+          
+          if (!existingOilAlert || existingOilAlert.cycleTargetHourmeter !== nextChange) {
+            // New cycle or alert not yet created for this specific 300h threshold
+            const oilAlertObj: SmartAlert = cleanUndefined({
+              id: oilAlertId,
+              type: 'OIL_CHANGE_DUE',
+              severity: 'ALTA',
+              title,
+              description: desc,
+              equipmentId: v.id,
+              equipmentName: v.model,
+              date: new Date().toISOString().slice(0, 10),
+              resolved: false,
+              cycleTargetHourmeter: nextChange,
+              lastOilChangeHourmeter: lastChange
+            });
+            cache.alerts = [oilAlertObj, ...cache.alerts.filter(a => a.id !== oilAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'))];
+            setDoc(doc(db, 'alerts', oilAlertId), oilAlertObj).catch(console.error);
+          } else if (!existingOilAlert.resolved) {
+            // Alert exists and is active for this cycle - keep content fresh
+            if (existingOilAlert.description !== desc) {
+              const updated = cleanUndefined({
+                ...existingOilAlert,
+                title,
+                description: desc,
+                severity: 'ALTA' as const
+              }) as SmartAlert;
+              cache.alerts = cache.alerts.map(a => a.id === existingOilAlert.id ? updated : a);
+              setDoc(doc(db, 'alerts', existingOilAlert.id), updated).catch(console.error);
+            }
+          }
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error checking automated alerts:', err);
+  }
+}
+
 // Settings Mutator
 export async function updateSettings(newSettings: Partial<SystemSettings>): Promise<void> {
   const cleaned = cleanUndefined(newSettings);
@@ -699,6 +1072,24 @@ export async function updateSettings(newSettings: Partial<SystemSettings>): Prom
 
   await updateDoc(doc(db, 'settings', 'config'), cleaned);
   logAuditEvent('CONFIGURACAO', 'Sistema', 'Atualizou as configurações gerais do AndradeAgro.');
+  checkAutomatedAlerts();
+}
+
+export async function updateTankCapacity(capacityLiters: number, currentStockLiters?: number): Promise<void> {
+  const validCapacity = Math.max(1000, Number(capacityLiters) || 20000);
+  const current = getSettings();
+  const validStock = currentStockLiters !== undefined 
+    ? Math.max(0, Number(currentStockLiters))
+    : (current.tankInitialStockLiters !== undefined ? current.tankInitialStockLiters : validCapacity);
+
+  const payload: Partial<SystemSettings> = {
+    tankCapacityLiters: validCapacity,
+    tankInitialStockLiters: validStock,
+    tankStockBaseUpdatedAt: new Date().toISOString()
+  };
+
+  await updateSettings(payload);
+  logAuditEvent('CONFIGURACAO', 'Tanque', `Ajustou capacidade para ${validCapacity.toLocaleString('pt-BR')} L e estoque atual para ${validStock.toLocaleString('pt-BR')} L.`);
 }
 
 // Reset system data in Firestore
@@ -708,6 +1099,7 @@ export async function resetSystemData(): Promise<void> {
     await seedCollection('vehicles', INITIAL_VEHICLES);
     await seedCollection('gas_stations', INITIAL_GAS_STATIONS);
     await seedCollection('fuel_logs', INITIAL_FUEL_LOGS);
+    await seedCollection('fuel_refills', INITIAL_FUEL_REFILLS);
     await seedCollection('maintenance_logs', INITIAL_MAINTENANCE_LOGS);
     await seedCollection('machine_issues', INITIAL_MACHINE_ISSUES);
     await seedCollection('preventive_items', INITIAL_PREVENTIVE_ITEMS);

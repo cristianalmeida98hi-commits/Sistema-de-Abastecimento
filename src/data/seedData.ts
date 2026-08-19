@@ -1,4 +1,4 @@
-import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from '../types';
+import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem, FuelRefill } from '../types';
 
 export const INITIAL_USERS: User[] = [
   {
@@ -156,6 +156,10 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     tankCapacityLiters: 680,
     currentKm: 0,
     currentHourmeter: 3420,
+    lastOilChangeHourmeter: 3200,
+    lastOilChangeDate: '2026-06-10',
+    nextOilChangeHourmeter: 3500,
+    oilChangeIntervalHours: 300,
     status: 'ATIVO',
     assignedOperatorId: 'usr-004',
     assignedOperatorName: 'Marcos Oliveira',
@@ -339,6 +343,25 @@ export const INITIAL_GAS_STATIONS: GasStation[] = [
 
 export const INITIAL_FUEL_LOGS: FuelLog[] = [];
 
+export const INITIAL_FUEL_REFILLS: FuelRefill[] = [
+  {
+    id: 'refill-001',
+    dateTime: '2026-07-20T08:30:00.000Z',
+    liters: 10000,
+    fuelType: 'DIESEL_S10',
+    supplierName: 'Distribuidora Rota do Agro Combustíveis',
+    invoiceNumber: 'NF-89211',
+    costPerLiter: 5.45,
+    totalCost: 54500,
+    gasStationId: 'stn-001',
+    gasStationName: 'Posto Fazenda Andrade - Sede',
+    registeredByUserId: 'usr-001',
+    registeredByUserName: 'Carlos Eduardo Andrade',
+    notes: 'Recebimento de caminhão tanque com 10.000 L de Diesel S10 para safra.',
+    createdAt: '2026-07-20T08:35:00.000Z'
+  }
+];
+
 export const INITIAL_MAINTENANCE_LOGS: MaintenanceLog[] = [];
 
 export const INITIAL_ALERTS: SmartAlert[] = [];
@@ -365,7 +388,9 @@ export const INITIAL_SETTINGS: SystemSettings = {
   employeeEditTimeLimitHours: 24,
   suspiciousFuelMarginPercentage: 25,
   autoAlertsEnabled: true,
-  themeMode: 'LIGHT'
+  themeMode: 'LIGHT',
+  tankCapacityLiters: 20000,
+  tankInitialStockLiters: 18500
 };
 
 export const INITIAL_MACHINE_ISSUES: MachineIssue[] = [

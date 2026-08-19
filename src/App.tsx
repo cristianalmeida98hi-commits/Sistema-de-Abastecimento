@@ -288,6 +288,7 @@ export default function App() {
               <DashboardView
                 fuelLogs={fuelLogs}
                 vehicles={vehicles}
+                settings={settings}
                 onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
                 onNavigate={(tab) => setActiveTab(tab)}
                 darkMode={darkMode}

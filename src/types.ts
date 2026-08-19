@@ -45,6 +45,10 @@ export interface Vehicle {
   tankCapacityLiters: number;
   currentKm: number;
   currentHourmeter?: number;
+  lastOilChangeHourmeter?: number; // Horímetro no momento da última troca de óleo
+  lastOilChangeDate?: string;      // Data da última troca de óleo
+  nextOilChangeHourmeter?: number; // Próximo limite (ex: última + 300h)
+  oilChangeIntervalHours?: number; // Intervalo padrão: 300h
   photoUrl?: string;
   status: 'ATIVO' | 'EM_MANUTENCAO' | 'INATIVO';
   assignedOperatorId?: string;
@@ -131,7 +135,24 @@ export interface MaintenanceLog {
   notes?: string;
 }
 
-export type AlertType = 'SUSPICIOUS_FUEL' | 'MAINTENANCE_DUE' | 'IDLE_VEHICLE' | 'DOCUMENT_EXPIRING' | 'LOW_TANK_LEVEL' | 'MACHINE_ISSUE';
+export type AlertType = 'SUSPICIOUS_FUEL' | 'MAINTENANCE_DUE' | 'IDLE_VEHICLE' | 'DOCUMENT_EXPIRING' | 'LOW_TANK_LEVEL' | 'OIL_CHANGE_DUE' | 'MACHINE_ISSUE';
+
+export interface FuelRefill {
+  id: string;
+  dateTime: string;
+  liters: number;
+  fuelType: FuelType;
+  supplierName: string;
+  invoiceNumber?: string;
+  costPerLiter?: number;
+  totalCost?: number;
+  gasStationId?: string; // ID do posto/tanque de destino (ex: stn-001)
+  gasStationName?: string;
+  registeredByUserId: string;
+  registeredByUserName: string;
+  notes?: string;
+  createdAt?: string;
+}
 
 export interface MachineIssue {
   id: string;
@@ -183,6 +204,8 @@ export interface SmartAlert {
   resolved: boolean;
   resolvedAt?: string;
   resolvedBy?: string;
+  cycleTargetHourmeter?: number;
+  lastOilChangeHourmeter?: number;
 }
 
 export interface AuditLog {
@@ -207,6 +230,10 @@ export interface SystemSettings {
   suspiciousFuelMarginPercentage: number; // Ex: 25% acima da media
   autoAlertsEnabled: boolean;
   themeMode: 'LIGHT' | 'DARK' | 'SYSTEM';
+  tankCapacityLiters: number; // Capacidade total do tanque principal (ex: 20000)
+  tankInitialStockLiters?: number; // Saldo base atual configurado (ex: 15000)
+  tankStockBaseUpdatedAt?: string; // Data e hora da última calibração manual de estoque
+  quickAccessUserIds?: string[]; // IDs dos usuários exibidos nos Atalhos de Acesso Rápido na tela de login
 }
 
 export interface ReportFilter {

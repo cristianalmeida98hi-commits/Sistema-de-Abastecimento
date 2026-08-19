@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Truck, Plus, Search, Filter, QrCode, Wrench, Fuel, CheckCircle2, 
-  AlertTriangle, Clock, Calendar, Shield, X, Edit3, Trash2, Printer, Eye
+  AlertTriangle, Clock, Calendar, Shield, X, Edit3, Trash2, Printer, Eye, Droplet
 } from 'lucide-react';
 import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, FuelLog } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
 import { QRCodeCanvas } from 'qrcode.react';
 import { generateQRCodeDataUrl } from '../utils/qrcode';
 import { openPrintWindow } from '../utils/printWindow';
+import { recordOilChange } from '../utils/storage';
 
 interface FleetManagementViewProps {
   vehicles: Vehicle[];
@@ -58,6 +59,42 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   const [currentHourmeter, setCurrentHourmeter] = useState(0);
   const [assignedOperatorId, setAssignedOperatorId] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
+
+  // Quick Oil Change Modal State
+  const [oilChangeVehicle, setOilChangeVehicle] = useState<Vehicle | null>(null);
+  const [oilHourmeter, setOilHourmeter] = useState<number>(0);
+  const [oilDate, setOilDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [oilCost, setOilCost] = useState<number>(0);
+  const [oilNotes, setOilNotes] = useState<string>('');
+  const [isSavingOil, setIsSavingOil] = useState<boolean>(false);
+
+  const handleOpenOilModal = (v: Vehicle) => {
+    setOilChangeVehicle(v);
+    setOilHourmeter(v.currentHourmeter || 0);
+    setOilDate(new Date().toISOString().slice(0, 10));
+    setOilCost(0);
+    setOilNotes('Troca de óleo de motor e substituição de filtros realizada.');
+  };
+
+  const handleSaveOilChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!oilChangeVehicle) return;
+    setIsSavingOil(true);
+    try {
+      await recordOilChange(
+        oilChangeVehicle.id,
+        oilHourmeter,
+        oilDate,
+        oilCost,
+        oilNotes
+      );
+      setOilChangeVehicle(null);
+    } catch (err) {
+      console.error('Error saving oil change:', err);
+    } finally {
+      setIsSavingOil(false);
+    }
+  };
 
   const filteredVehicles = useMemo(() => {
     return vehicles.filter(v => {
@@ -345,6 +382,10 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
               <img
                 src={v.photoUrl || 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80'}
                 alt={v.model}
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80';
+                }}
                 className="w-full h-full object-cover"
               />
               <div className="absolute top-2 right-2 flex gap-1">
@@ -378,7 +419,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
               </div>
 
               {/* Specs Badge */}
-              <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-xs space-y-1">
+              <div className="p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-xs space-y-1.5">
                 <div className="flex justify-between">
                   <span className="text-gray-500 dark:text-emerald-400">Uso Atual:</span>
                   <strong className="text-emerald-800 dark:text-emerald-300">
@@ -395,6 +436,30 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                     <strong className="text-amber-600 dark:text-amber-400 truncate max-w-[110px]">{v.assignedOperatorName}</strong>
                   </div>
                 )}
+
+                {/* 300h Oil Change Tracker on Tractors & Farm Machines */}
+                {v.category !== 'VEICULO' && (
+                  <div className="pt-1.5 border-t border-emerald-800/20">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-gray-600 dark:text-emerald-300 flex items-center gap-1">
+                        <Droplet className="w-3.5 h-3.5 text-amber-500" /> Troca de Óleo:
+                      </span>
+                      {(() => {
+                        const curH = v.currentHourmeter || 0;
+                        const lastH = v.lastOilChangeHourmeter || 0;
+                        const nextH = v.nextOilChangeHourmeter || (lastH + 300);
+                        const rem = nextH - curH;
+                        if (rem <= 0) {
+                          return <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-500 text-white animate-pulse">VENCIDA ({Math.abs(rem)}h)</span>;
+                        } else if (rem <= 30) {
+                          return <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-gray-950">Trocar em {rem}h</span>;
+                        } else {
+                          return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">Em {rem}h ({nextH}h)</span>;
+                        }
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Card Actions */}
@@ -407,15 +472,26 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                       setPassportVehicle(v);
                     }
                   }}
-                  className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-1"
+                  className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 text-xs font-bold flex items-center gap-1 min-h-[36px]"
                 >
                   <Eye className="w-3.5 h-3.5" /> Ficha Digital
                 </button>
 
+                {/* Quick Oil Change Button for Tractors & Machines */}
+                {v.category !== 'VEICULO' && (
+                  <button
+                    onClick={() => handleOpenOilModal(v)}
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-700 text-[#FACC15] text-xs font-bold flex items-center gap-1 min-h-[36px]"
+                    title="Registrar Troca de Óleo (Ciclo 300h)"
+                  >
+                    <Wrench className="w-3.5 h-3.5" /> Trocar Óleo
+                  </button>
+                )}
+
                 {v.fuelType !== 'NENHUM' && (
                   <button
                     onClick={() => onOpenFuelingModalWithEquipment(v.id)}
-                    className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-bold flex items-center gap-1 shadow-sm"
+                    className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-bold flex items-center gap-1 shadow-sm min-h-[36px]"
                   >
                     <Fuel className="w-3.5 h-3.5" /> Abastecer
                   </button>
@@ -423,7 +499,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
 
                 <button
                   onClick={() => handlePrintBadge(v)}
-                  className="p-1.5 rounded-lg bg-gray-100 dark:bg-emerald-900/40 text-gray-600 dark:text-emerald-300"
+                  className="p-1.5 rounded-lg bg-gray-100 dark:bg-emerald-900/40 text-gray-600 dark:text-emerald-300 min-h-[36px] min-w-[36px] flex items-center justify-center"
                   title="Imprimir Emblema com QR Code"
                 >
                   <QrCode className="w-4 h-4 text-amber-500" />
@@ -433,7 +509,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   <>
                     <button
                       onClick={() => handleOpenEditModal(v)}
-                      className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-500"
+                      className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 min-h-[36px] min-w-[36px] flex items-center justify-center"
                       title="Editar Equipamento"
                     >
                       <Edit3 className="w-4 h-4" />
@@ -444,7 +520,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                           onDeleteVehicle(v.id);
                         }
                       }}
-                      className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400"
+                      className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 min-h-[36px] min-w-[36px] flex items-center justify-center"
                       title="Excluir Equipamento"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -897,6 +973,124 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   className="px-4 py-2 rounded-xl bg-amber-500 text-gray-950 font-bold"
                 >
                   Salvar Alterações
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Oil Change Modal */}
+      {oilChangeVehicle && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className={`w-full max-w-md rounded-2xl shadow-2xl border p-5 space-y-4 max-h-[90vh] overflow-y-auto ${
+            darkMode ? 'bg-emerald-950 border-emerald-800 text-emerald-100' : 'bg-white border-emerald-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between border-b pb-3 border-emerald-800/20">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-500 flex items-center justify-center">
+                  <Droplet className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm text-gray-900 dark:text-emerald-100">
+                    Registrar Troca de Óleo
+                  </h3>
+                  <p className="text-[11px] text-gray-500 dark:text-emerald-400">
+                    {oilChangeVehicle.model} ({oilChangeVehicle.patrimonyCode || oilChangeVehicle.licensePlate})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setOilChangeVehicle(null)}
+                className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-gray-500 hover:text-gray-900 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveOilChange} className="space-y-3.5 text-xs">
+              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 space-y-1">
+                <p className="font-bold text-emerald-800 dark:text-emerald-200">
+                  ⚙️ Ciclo de Manutenção Preventiva: 300 Horas
+                </p>
+                <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                  Ao registrar esta troca, o sistema resetará o intervalo de 300 horas para a próxima manutenção e atualizará o horímetro do equipamento.
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Horímetro Atual da Máquina (h) *</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  required
+                  value={oilHourmeter}
+                  onChange={(e) => setOilHourmeter(parseFloat(e.target.value) || 0)}
+                  className={`w-full p-2.5 rounded-xl border font-bold text-sm ${
+                    darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
+                  }`}
+                />
+                <p className="text-[10px] text-gray-500 dark:text-emerald-400 mt-1">
+                  Última troca registrada em: <strong>{oilChangeVehicle.lastOilChangeHourmeter || 0} h</strong>. Próxima será programada para <strong>{oilHourmeter + 300} h</strong>.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold mb-1">Data da Troca *</label>
+                  <input
+                    type="date"
+                    required
+                    value={oilDate}
+                    onChange={(e) => setOilDate(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${
+                      darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Custo Total (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={oilCost}
+                    onChange={(e) => setOilCost(parseFloat(e.target.value) || 0)}
+                    placeholder="0,00"
+                    className={`w-full p-2 rounded-xl border ${
+                      darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Observações / Filtros Trocados</label>
+                <textarea
+                  rows={2}
+                  value={oilNotes}
+                  onChange={(e) => setOilNotes(e.target.value)}
+                  placeholder="Ex: Óleo 15W40 + Filtro do Motor + Filtro de Combustível..."
+                  className={`w-full p-2 rounded-xl border resize-none ${
+                    darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
+                  }`}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-emerald-800/20">
+                <button
+                  type="button"
+                  onClick={() => setOilChangeVehicle(null)}
+                  className="px-3.5 py-2 rounded-xl hover:bg-emerald-500/10 font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingOil}
+                  className="px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-700 text-[#FACC15] font-black flex items-center gap-1.5 shadow-md"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  {isSavingOil ? 'Gravando...' : 'Confirmar Troca de Óleo'}
                 </button>
               </div>
             </form>

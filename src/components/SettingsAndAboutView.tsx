@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Settings, Info, Shield, Clock, AlertTriangle, Building, 
   RotateCcw, CheckCircle2, Fuel, Sparkles, User as UserIcon 
@@ -19,15 +19,26 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
   onUpdateSettings,
   darkMode
 }) => {
-  const [employeeEditTimeLimitHours, setEmployeeEditTimeLimitHours] = useState(settings.employeeEditTimeLimitHours);
-  const [suspiciousFuelMarginPercentage, setSuspiciousFuelMarginPercentage] = useState(settings.suspiciousFuelMarginPercentage);
+  const [employeeEditTimeLimitHours, setEmployeeEditTimeLimitHours] = useState(settings.employeeEditTimeLimitHours || 24);
+  const [suspiciousFuelMarginPercentage, setSuspiciousFuelMarginPercentage] = useState(settings.suspiciousFuelMarginPercentage || 25);
+  const [tankCapacityLiters, setTankCapacityLiters] = useState(settings.tankCapacityLiters || 20000);
+  const [tankInitialStockLiters, setTankInitialStockLiters] = useState(settings.tankInitialStockLiters !== undefined ? settings.tankInitialStockLiters : 20000);
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  useEffect(() => {
+    setEmployeeEditTimeLimitHours(settings.employeeEditTimeLimitHours || 24);
+    setSuspiciousFuelMarginPercentage(settings.suspiciousFuelMarginPercentage || 25);
+    setTankCapacityLiters(settings.tankCapacityLiters || 20000);
+    setTankInitialStockLiters(settings.tankInitialStockLiters !== undefined ? settings.tankInitialStockLiters : 20000);
+  }, [settings]);
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateSettings({
       employeeEditTimeLimitHours,
-      suspiciousFuelMarginPercentage
+      suspiciousFuelMarginPercentage,
+      tankCapacityLiters: Math.max(1000, Number(tankCapacityLiters) || 20000),
+      tankInitialStockLiters: Math.max(0, Number(tankInitialStockLiters) || 0)
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
@@ -50,7 +61,7 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
           Configurações do Sistema & Sobre
         </h1>
         <p className="text-xs text-gray-500 dark:text-emerald-400">
-          Ajustes de regras operacionais, parâmetros de segurança e apresentação da empresa AndradeAgro.
+          Ajustes de regras operacionais, capacidade do tanque, parâmetros de segurança e apresentação da empresa AndradeAgro.
         </p>
       </div>
 
@@ -62,10 +73,63 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
         }`}>
           <div className="flex items-center gap-2 font-bold text-sm text-gray-900 dark:text-emerald-100 border-b pb-3 border-emerald-800/20">
             <Shield className="w-4 h-4 text-amber-500" />
-            <span>Regras Operacionais & Segurança (Admin)</span>
+            <span>Regras Operacionais, Tanque & Segurança (Admin)</span>
           </div>
 
           <form onSubmit={handleSaveSettings} className="space-y-4 text-xs">
+            {/* Tanque Principal */}
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-amber-800 dark:text-amber-300">
+                  <Fuel className="w-4 h-4 text-amber-500" />
+                  <span>Tanque Central / Posto Interno</span>
+                </div>
+                <span className="text-[10px] bg-amber-500/20 text-amber-900 dark:text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                  Alerta automático aos 500L
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold mb-1 text-gray-700 dark:text-emerald-200">
+                    Capacidade Máxima do Tanque (Litros)
+                  </label>
+                  <input
+                    type="number"
+                    min="1000"
+                    step="100"
+                    value={tankCapacityLiters}
+                    onChange={(e) => setTankCapacityLiters(Math.max(1000, parseInt(e.target.value) || 0))}
+                    className={`w-full p-2.5 rounded-xl border font-bold text-xs ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white text-gray-900'}`}
+                  />
+                  <p className="text-[10px] text-gray-500 dark:text-emerald-400 mt-1">
+                    Volume nominal total do tanque (ex: 20.000 L).
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1 text-gray-700 dark:text-emerald-200">
+                    Quantidade Atual em Estoque (Litros)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="50"
+                    value={tankInitialStockLiters}
+                    onChange={(e) => setTankInitialStockLiters(Math.max(0, parseInt(e.target.value) || 0))}
+                    className={`w-full p-2.5 rounded-xl border font-bold text-xs ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-amber-300' : 'bg-white text-emerald-800'}`}
+                  />
+                  <p className="text-[10px] text-gray-500 dark:text-emerald-400 mt-1">
+                    Estoque medido atual no tanque central.
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-amber-800/80 dark:text-amber-300/80 bg-amber-500/10 p-2.5 rounded-xl">
+                💡 <strong>Controle Automático:</strong> A cada abastecimento registrado no sistema a partir do tanque central, a quantidade diminuirá automaticamente. Ao atingir <strong>500 Litros</strong>, um alarme crítico de reabastecimento será emitido imediatamente.
+              </p>
+            </div>
+
             <div>
               <label className="block font-bold mb-1 text-gray-700 dark:text-emerald-200">
                 Janela de Edição Recente para Funcionários (Horas)
@@ -103,7 +167,7 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
             {savedSuccess && (
               <div className="p-3 rounded-xl bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 font-bold flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                <span>Configurações atualizadas com sucesso!</span>
+                <span>Configurações atualizadas com sucesso no banco de dados!</span>
               </div>
             )}
 

@@ -488,7 +488,15 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
               <div className="flex items-center gap-3.5">
                 <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden bg-slate-200 dark:bg-emerald-900 border border-slate-300 dark:border-emerald-700 shrink-0 shadow-sm">
                   {vehicle.photoUrl ? (
-                    <img src={vehicle.photoUrl} alt={vehicle.model} className="w-full h-full object-cover" />
+                    <img 
+                      src={vehicle.photoUrl} 
+                      alt={vehicle.model} 
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80';
+                      }}
+                      className="w-full h-full object-cover" 
+                    />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-400">
                       <Truck className="w-8 h-8" />

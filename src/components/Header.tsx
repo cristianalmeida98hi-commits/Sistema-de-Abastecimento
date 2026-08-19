@@ -77,16 +77,6 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
           {/* Actions & User Profile */}
           <div className="flex items-center gap-1.5 sm:gap-3">
             
-            {/* QR Code Scanner Quick Button */}
-            <button
-              onClick={onOpenQRScanner}
-              title="Escanear QR Code de Veículo / Máquina"
-              className="p-2.5 sm:px-3 sm:py-2 min-h-[44px] rounded-full border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60"
-            >
-              <QrCode className="w-5 h-5 sm:w-4 sm:h-4 text-[#C5A059]" />
-              <span className="hidden lg:inline">Ler QR Code</span>
-            </button>
-
             {/* Quick Fuel Log Button */}
             <button
               onClick={onOpenFuelingModal}
@@ -162,6 +152,10 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
               <img
                 src={currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
                 alt={currentUser.name}
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80';
+                }}
                 className="w-7 h-7 rounded-full object-cover ring-2 ring-[#C5A059]/60"
               />
               <div className="text-left hidden sm:block">

@@ -3,8 +3,9 @@ import {
   Fuel, DollarSign, Calendar, TrendingUp, Truck, Users, 
   BarChart2, PieChart, ArrowUpRight, AlertCircle, Plus, FileText, CheckCircle2, ChevronRight
 } from 'lucide-react';
-import { FuelLog, Vehicle, Sector } from '../types';
+import { FuelLog, Vehicle, Sector, SystemSettings } from '../types';
 import { formatCurrency, formatDateTimeBR, getSectorName, getFuelTypeName } from '../utils/calculations';
+import { getTankStatus } from '../utils/storage';
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, 
   PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar, CartesianGrid, Legend 
@@ -13,6 +14,7 @@ import {
 interface DashboardViewProps {
   fuelLogs: FuelLog[];
   vehicles: Vehicle[];
+  settings?: SystemSettings;
   onOpenFuelingModal: () => void;
   onNavigate: (tab: string) => void;
   darkMode?: boolean;
@@ -31,9 +33,15 @@ const SECTOR_COLORS: Record<string, string> = {
 export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
   fuelLogs = [],
   vehicles = [],
+  settings,
   onOpenFuelingModal,
   onNavigate
 }) => {
+  // Tank status memoized based on settings and fuel logs
+  const tankStatus = useMemo(() => {
+    return getTankStatus();
+  }, [settings, fuelLogs]);
+
   // Date calculations & metrics memoized
   const metrics = useMemo(() => {
     const now = new Date();
@@ -444,23 +452,66 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
         <div className="rounded-3xl border p-6 shadow-sm flex flex-col justify-between bg-[#042d23] border-emerald-900/60">
           <div>
             <div className="flex justify-between items-start mb-3">
-              <h4 className="text-slate-100 font-bold text-sm">Tanque Central (Fazenda)</h4>
-              <span className="text-[#FACC15] font-extrabold text-xs uppercase tracking-wider bg-[#FACC15]/10 px-2.5 py-1 rounded-full border border-[#FACC15]/20">
-                Diesel S10
-              </span>
-            </div>
-            <p className="text-xs text-emerald-200 mb-4 font-medium">Posto interno com medição diária</p>
-            
-            <div className="flex items-end gap-3 mb-2">
-              <div className="flex-1 h-3 bg-emerald-950/80 rounded-full overflow-hidden">
-                <div className="h-full bg-[#FACC15] rounded-full w-[68%]" />
+              <div>
+                <h4 className="text-slate-100 font-bold text-sm">Tanque Central (Fazenda)</h4>
+                <p className="text-xs text-emerald-200 mt-0.5 font-medium">Posto interno com medição em tempo real</p>
               </div>
-              <span className="text-xs font-extrabold text-slate-100 whitespace-nowrap">20.400 L</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {tankStatus.isCritical ? (
+                  <span className="text-red-400 font-extrabold text-[10px] uppercase tracking-wider bg-red-500/20 px-2 py-0.5 rounded-full border border-red-500/30 animate-pulse">
+                    Nível Crítico
+                  </span>
+                ) : tankStatus.isLow ? (
+                  <span className="text-amber-400 font-extrabold text-[10px] uppercase tracking-wider bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
+                    Nível Baixo
+                  </span>
+                ) : null}
+                <span className="text-[#FACC15] font-extrabold text-xs uppercase tracking-wider bg-[#FACC15]/10 px-2.5 py-1 rounded-full border border-[#FACC15]/20">
+                  Diesel S10
+                </span>
+              </div>
+            </div>
+            
+            <div className="space-y-2 mt-4">
+              <div className="flex justify-between items-baseline">
+                <span className="text-xs text-emerald-300 font-bold">Combustível Disponível:</span>
+                <span className="text-base font-black text-slate-100">
+                  {Math.round(tankStatus.currentStock).toLocaleString('pt-BR')} L
+                </span>
+              </div>
+
+              <div className="w-full h-3 bg-emerald-950/80 rounded-full overflow-hidden border border-emerald-800/40">
+                <div 
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    tankStatus.isCritical 
+                      ? 'bg-red-500' 
+                      : tankStatus.isLow 
+                        ? 'bg-amber-500' 
+                        : 'bg-[#FACC15]'
+                  }`} 
+                  style={{ width: `${Math.min(100, Math.max(0, tankStatus.percentage))}%` }} 
+                />
+              </div>
+
+              <div className="flex justify-between text-[11px] text-emerald-200/90 font-semibold pt-1">
+                <span>Capacidade: <strong>{tankStatus.capacity.toLocaleString('pt-BR')} L</strong></span>
+                <span className="text-[#FACC15] font-bold">{tankStatus.percentage}% preenchido</span>
+              </div>
             </div>
           </div>
-          <p className="text-[11px] text-emerald-200 font-semibold">
-            Capacidade total: 30.000 Litros (68% preenchido)
-          </p>
+
+          <div className="pt-4 border-t border-emerald-900/50 mt-4 flex items-center justify-between text-[11px]">
+            <span className="text-emerald-300/80">
+              Total consumido: <strong>{Math.round(tankStatus.totalDispensed).toLocaleString('pt-BR')} L</strong>
+            </span>
+            <button
+              onClick={() => onNavigate('stations')}
+              className="text-[#FACC15] font-bold hover:underline flex items-center gap-1"
+            >
+              Ver Tanques
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* Top Equipment Highlight Bento Box */}

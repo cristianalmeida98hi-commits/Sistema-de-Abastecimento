@@ -12,8 +12,8 @@ import {
 } from '../data/seedData';
 
 const SESSION_KEYS = {
-  REMEMBERED_USER: 'andradeagro_remembered_user_v1',
-  SESSION_USER: 'andradeagro_session_user_v1'
+  SESSION_USER: 'andradeagro_session_user_v1',
+  REMEMBERED_EMAIL: 'andradeagro_remembered_email_v1'
 };
 
 // Helper to remove any undefined fields before saving to Firestore (Firestore rejects undefined)
@@ -55,6 +55,18 @@ let alertCheckDebounceTimer: any = null;
 export function initStorage() {
   if (isInitialized && typeof window !== 'undefined') return;
   isInitialized = true;
+
+  // Purge any legacy auth keys from previous versions to avoid auto-login glitches
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem('andradeagro_remembered_user_v1');
+      localStorage.removeItem('andradeagro_remembered_user');
+      localStorage.removeItem('andradeagro_user');
+      localStorage.removeItem('andradeagro_current_user');
+    } catch (e) {
+      // ignore
+    }
+  }
 
   try {
     // 1. Users Subscription
@@ -226,72 +238,51 @@ export function getUsers(): User[] {
   return cache.users;
 }
 
-export function getRememberedUser(): User | null {
+export function getRememberedEmail(): string {
   try {
-    if (typeof window === 'undefined') return null;
-    const rememberedStr = localStorage.getItem(SESSION_KEYS.REMEMBERED_USER) || localStorage.getItem('andradeagro_remembered_user');
-    if (rememberedStr) {
-      const u = JSON.parse(rememberedStr);
-      const live = cache.users.find(usr => usr.id === u.id || usr.email?.toLowerCase() === u.email?.toLowerCase());
-      if (live) {
-        if (live.active === false) {
-          localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
-          localStorage.removeItem('andradeagro_remembered_user');
-          return null;
-        }
-        return live;
-      }
-      return u;
-    }
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem(SESSION_KEYS.REMEMBERED_EMAIL) || '';
   } catch (err) {
-    console.error('Error reading remembered user:', err);
+    return '';
   }
-  return null;
 }
 
-export function clearRememberedUser(): void {
+export function clearRememberedEmail(): void {
   try {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
+      localStorage.removeItem(SESSION_KEYS.REMEMBERED_EMAIL);
+      localStorage.removeItem('andradeagro_remembered_user_v1');
       localStorage.removeItem('andradeagro_remembered_user');
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }
   } catch (err) {
-    console.error('Error clearing remembered user:', err);
+    console.error('Error clearing remembered email:', err);
   }
 }
 
 export function getCurrentUser(): User | null {
   try {
     if (typeof window === 'undefined') return null;
-    let foundUser: User | null = null;
     const sessionStr = sessionStorage.getItem(SESSION_KEYS.SESSION_USER);
-    if (sessionStr) {
-      foundUser = JSON.parse(sessionStr);
-    } else {
-      const rememberedStr = localStorage.getItem(SESSION_KEYS.REMEMBERED_USER) || localStorage.getItem('andradeagro_remembered_user');
-      if (rememberedStr) {
-        foundUser = JSON.parse(rememberedStr);
-      }
-    }
+    if (!sessionStr) return null;
 
-    if (foundUser) {
-      const live = cache.users.find(u => u.id === foundUser?.id || u.email?.toLowerCase() === foundUser?.email?.toLowerCase());
-      if (live) {
-        if (live.active === false) {
-          sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
-          localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
-          localStorage.removeItem('andradeagro_remembered_user');
-          return null;
-        }
-        return live;
+    const parsedUser: User = JSON.parse(sessionStr);
+    if (!parsedUser || !parsedUser.id) return null;
+
+    // Validate against fresh active cache
+    const live = cache.users.find(u => u.id === parsedUser.id || u.email?.toLowerCase() === parsedUser.email?.toLowerCase());
+    if (live) {
+      if (live.active === false) {
+        logoutUser();
+        return null;
       }
-      return foundUser;
+      return live;
     }
+    return parsedUser;
   } catch (err) {
     console.error('Error reading current user session:', err);
+    return null;
   }
-  return null;
 }
 
 export function loginUser(email: string, password: string, rememberMe: boolean): { success: boolean; user?: User; error?: string } {
@@ -316,16 +307,17 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
   try {
     sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
     if (rememberMe) {
-      localStorage.setItem(SESSION_KEYS.REMEMBERED_USER, JSON.stringify(user));
-      localStorage.setItem('andradeagro_remembered_user', JSON.stringify(user));
+      localStorage.setItem(SESSION_KEYS.REMEMBERED_EMAIL, targetEmail);
     } else {
-      localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
-      localStorage.removeItem('andradeagro_remembered_user');
+      localStorage.removeItem(SESSION_KEYS.REMEMBERED_EMAIL);
     }
+    // Clean up any legacy localStorage keys
+    localStorage.removeItem('andradeagro_remembered_user_v1');
+    localStorage.removeItem('andradeagro_remembered_user');
 
     logAuditEvent('LOGIN', 'Acesso', `Login realizado com sucesso (${user.role === 'ADMIN' ? 'Administrador' : 'Funcionário'})`);
 
-    notifyDataUpdated();
+    notifyDataUpdated(false);
     return { success: true, user };
   } catch (err) {
     return { success: false, error: 'Erro ao salvar sessão de login.' };
@@ -334,9 +326,13 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
 
 export function logoutUser(): void {
   try {
-    sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
-    localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
-    notifyDataUpdated();
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
+      sessionStorage.removeItem('andradeagro_session_user_v1');
+      localStorage.removeItem('andradeagro_remembered_user_v1');
+      localStorage.removeItem('andradeagro_remembered_user');
+      notifyDataUpdated(false);
+    }
   } catch (err) {
     console.error('Error logging out:', err);
   }
@@ -346,11 +342,10 @@ export function setCurrentUser(user: User | null): void {
   try {
     if (user) {
       sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
+      notifyDataUpdated(false);
     } else {
-      sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
-      localStorage.removeItem(SESSION_KEYS.REMEMBERED_USER);
+      logoutUser();
     }
-    notifyDataUpdated();
   } catch (err) {
     console.error('Error setting current user:', err);
   }

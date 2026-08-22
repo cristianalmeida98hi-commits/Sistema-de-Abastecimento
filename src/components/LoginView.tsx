@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Fuel, Lock, Mail, CheckCircle2, AlertCircle, 
-  ArrowRight, Trash2, UserCheck, X, Settings2, RotateCcw
+  ArrowRight, UserCheck, X, Settings2, RotateCcw, Shield, Users
 } from 'lucide-react';
 import { User } from '../types';
 import { 
-  loginUser, getRememberedUser, clearRememberedUser, getUsers, 
+  loginUser, getRememberedEmail, clearRememberedEmail, getUsers, 
   getQuickAccessUserIds, setQuickAccessUserIds, toggleQuickAccessUser 
 } from '../utils/storage';
 
@@ -16,44 +16,24 @@ interface LoginViewProps {
 }
 
 export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, successMessage }) => {
-  const [savedUser, setSavedUser] = useState<User | null>(() => getRememberedUser());
-  const [email, setEmail] = useState(() => {
-    const remembered = getRememberedUser();
-    return remembered ? (remembered.email || '') : '';
-  });
-  const [password, setPassword] = useState(() => {
-    const remembered = getRememberedUser();
-    return remembered?.password || '';
-  });
-  const [rememberMe, setRememberMe] = useState(() => {
-    return !!getRememberedUser();
-  });
+  const [email, setEmail] = useState(() => getRememberedEmail());
+  const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(() => !!getRememberedEmail());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [removedNotice, setRemovedNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [showTabletHelp, setShowTabletHelp] = useState(false);
-  const [showAlternativeForm, setShowAlternativeForm] = useState(false);
   
   // Quick Access Management
   const [allUsers, setAllUsers] = useState<User[]>(() => getUsers());
   const [quickAccessIds, setQuickAccessIds] = useState<string[]>(() => getQuickAccessUserIds());
   const [showManageModal, setShowManageModal] = useState(false);
 
-  // Sync state if savedUser changes or data updates
+  // Sync state if data updates
   useEffect(() => {
     const handleUpdate = () => {
       setAllUsers(getUsers());
       setQuickAccessIds(getQuickAccessUserIds());
     };
     window.addEventListener('andradeagro_data_updated', handleUpdate);
-
-    const u = getRememberedUser();
-    setSavedUser(u);
-    if (u) {
-      setEmail(u.email || '');
-      setPassword(u.password || '');
-      setRememberMe(true);
-    }
 
     return () => {
       window.removeEventListener('andradeagro_data_updated', handleUpdate);
@@ -63,7 +43,6 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    setRemovedNotice(null);
     setIsLoading(true);
 
     setTimeout(() => {
@@ -75,24 +54,13 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
       } else {
         setErrorMessage(res.error || 'Credenciais inválidas.');
       }
-    }, 300);
-  };
-
-  const handleRemoveSavedLogin = () => {
-    clearRememberedUser();
-    setSavedUser(null);
-    setEmail('');
-    setPassword('');
-    setRememberMe(false);
-    setShowAlternativeForm(true);
-    setRemovedNotice('Login salvo desvinculado deste dispositivo com sucesso.');
+    }, 250);
   };
 
   const handleQuickSelect = (userEmail: string, userPass?: string) => {
     setEmail(userEmail);
     setPassword(userPass || '123456');
     setErrorMessage(null);
-    setShowAlternativeForm(true);
   };
 
   const handleRemoveShortcut = async (userId: string, e: React.MouseEvent) => {
@@ -123,7 +91,7 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
       <div className="w-full max-w-xl mx-auto space-y-6">
         
         {/* Card Principal */}
-        <div className="bg-emerald-950/80 backdrop-blur-xl border border-emerald-800 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-emerald-950/80 text-emerald-100">
+        <div className="bg-emerald-950/90 backdrop-blur-xl border border-emerald-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-emerald-950/80 text-emerald-100">
           
           {/* Logo & Header */}
           <div className="text-center space-y-2 mb-6">
@@ -146,13 +114,6 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
             </div>
           )}
 
-          {removedNotice && (
-            <div className="mb-4 p-3 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>{removedNotice}</span>
-            </div>
-          )}
-
           {errorMessage && (
             <div className="mb-4 p-3 rounded-2xl bg-red-500/20 border border-red-500/40 text-red-200 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
@@ -160,137 +121,84 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
             </div>
           )}
 
-          {/* Login Mode: Saved Device Profile OR Direct Form */}
-          <div>
-            {savedUser && !showAlternativeForm ? (
-              <div className="space-y-4">
-                <div className="p-4 rounded-2xl bg-emerald-900/50 border border-emerald-700/60 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <img 
-                      src={savedUser.avatar || 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80'} 
-                      alt={savedUser.name}
-                      referrerPolicy="no-referrer"
-                      className="w-12 h-12 rounded-xl object-cover border border-emerald-600" 
-                    />
-                    <div>
-                      <h3 className="font-bold text-sm text-white">{savedUser.name}</h3>
-                      <p className="text-xs text-emerald-300/80">{savedUser.email}</p>
-                      <span className="inline-block mt-1 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-[#FACC15]/20 text-[#FACC15]">
-                        {savedUser.role} • {savedUser.department || 'Operacional'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsLoading(true);
-                    setTimeout(() => {
-                      const res = loginUser(savedUser.email, savedUser.password || '123456', true);
-                      setIsLoading(false);
-                      if (res.success && res.user) onLoginSuccess(res.user);
-                      else setErrorMessage(res.error || 'Erro ao entrar.');
-                    }, 300);
-                  }}
-                  disabled={isLoading}
-                  className="w-full py-3.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-all min-h-[44px]"
-                >
-                  <UserCheck className="w-4 h-4" />
-                  <span>CONTINUAR COMO {savedUser.name.toUpperCase()}</span>
-                </button>
-
-                <div className="flex items-center justify-between pt-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setShowAlternativeForm(true)}
-                    className="text-emerald-300 hover:text-white underline font-semibold"
-                  >
-                    Entrar com outra conta
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleRemoveSavedLogin}
-                    className="text-red-400 hover:text-red-300 flex items-center gap-1 font-semibold"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" /> Esquecer este perfil
-                  </button>
-                </div>
+          {/* Form de Login */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-emerald-200 mb-1">
+                E-mail do Usuário
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-emerald-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="seu.email@andradeagro.com.br"
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-emerald-900/40 border border-emerald-800 text-white text-xs placeholder:text-emerald-400/50 outline-none focus:border-[#FACC15]"
+                />
               </div>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-emerald-200 mb-1">
-                    E-mail do Usuário
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-emerald-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="seu.email@andradeagro.com.br"
-                      className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-emerald-900/40 border border-emerald-800 text-white text-xs placeholder:text-emerald-400/50 outline-none focus:border-[#FACC15]"
-                    />
-                  </div>
-                </div>
+            </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-emerald-200 mb-1">
-                    Senha de Acesso
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-emerald-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="password"
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-emerald-900/40 border border-emerald-800 text-white text-xs placeholder:text-emerald-400/50 outline-none focus:border-[#FACC15]"
-                    />
-                  </div>
-                </div>
+            <div>
+              <label className="block text-xs font-bold text-emerald-200 mb-1">
+                Senha de Acesso
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-emerald-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-emerald-900/40 border border-emerald-800 text-white text-xs placeholder:text-emerald-400/50 outline-none focus:border-[#FACC15]"
+                />
+              </div>
+            </div>
 
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="w-4 h-4 rounded border-emerald-800 bg-emerald-950 text-[#064E3B] focus:ring-[#064E3B]"
-                    />
-                    <span className="text-xs font-semibold text-emerald-300">
-                      Salvar login neste dispositivo
-                    </span>
-                  </label>
-                </div>
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => {
+                    setRememberMe(e.target.checked);
+                    if (!e.target.checked) {
+                      clearRememberedEmail();
+                    }
+                  }}
+                  className="w-4 h-4 rounded border-emerald-800 bg-emerald-950 text-[#064E3B] focus:ring-[#064E3B]"
+                />
+                <span className="text-xs font-semibold text-emerald-300">
+                  Lembrar e-mail neste navegador
+                </span>
+              </label>
+            </div>
 
-                {/* Submit Button */}
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full py-4 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.99] min-h-[48px]"
-                >
-                  {isLoading ? (
-                    <span>Entrando no sistema...</span>
-                  ) : (
-                    <>
-                      <span>ENTRAR NO SISTEMA</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </>
-                  )}
-                </button>
-              </form>
-            )}
-          </div>
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full py-4 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-[0.99] min-h-[48px]"
+            >
+              {isLoading ? (
+                <span>Entrando no sistema...</span>
+              ) : (
+                <>
+                  <span>ENTRAR NO SISTEMA</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
 
-          {/* Quick Select Cards - Atalhos de Acesso Rápido com Gestão Completa */}
+          {/* Quick Select Cards - Atalhos de Seleção Rápida */}
           <div className="pt-6 border-t border-emerald-900/60 mt-6 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-extrabold uppercase text-emerald-300 tracking-wider">
-                Atalhos de Acesso Rápido ({visibleShortcuts.length}):
+              <p className="text-[11px] font-extrabold uppercase text-emerald-300 tracking-wider flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-[#FACC15]" />
+                Atalhos Rápidos de Acesso ({visibleShortcuts.length}):
               </p>
               <button
                 type="button"
@@ -298,13 +206,13 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                 className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-900/50 hover:bg-emerald-900 border border-emerald-700/60"
               >
                 <Settings2 className="w-3.5 h-3.5" />
-                <span>Gerenciar Atalhos</span>
+                <span>Gerenciar</span>
               </button>
             </div>
 
             {visibleShortcuts.length === 0 ? (
               <div className="p-4 rounded-2xl bg-emerald-950/60 border border-dashed border-emerald-800 text-center space-y-2">
-                <p className="text-xs text-emerald-300/80">Nenhum atalho exibido no momento.</p>
+                <p className="text-xs text-emerald-300/80">Nenhum atalho rápido configurado.</p>
                 <button
                   type="button"
                   onClick={handleRestoreAllShortcuts}
@@ -318,8 +226,9 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                 {/* Seção Administradores */}
                 {adminShortcuts.length > 0 && (
                   <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">
-                      Administradores (Acesso Total)
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-1">
+                      <Shield className="w-3 h-3 text-[#FACC15]" />
+                      Administradores (Painel Completo)
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                       {adminShortcuts.map(user => (
@@ -356,8 +265,9 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                 {/* Seção Funcionários */}
                 {employeeShortcuts.length > 0 && (
                   <div className="space-y-1 pt-1">
-                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">
-                      Funcionários (Campo & Operação)
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest flex items-center gap-1">
+                      <UserCheck className="w-3 h-3 text-amber-400" />
+                      Operadores & Funcionários (Campo)
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                       {employeeShortcuts.map(user => (

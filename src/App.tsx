@@ -334,6 +334,9 @@ export default function App() {
                 currentUser={currentUser}
                 maintenanceLogs={maintenanceLogs}
                 fuelLogs={fuelLogs}
+                preventiveItems={preventiveItems}
+                alerts={alerts}
+                machineIssues={machineIssues}
                 onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
                 onOpenQRScanner={() => setIsQRScannerModalOpen(true)}
                 darkMode={darkMode}

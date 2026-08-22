@@ -343,24 +343,7 @@ export const INITIAL_GAS_STATIONS: GasStation[] = [
 
 export const INITIAL_FUEL_LOGS: FuelLog[] = [];
 
-export const INITIAL_FUEL_REFILLS: FuelRefill[] = [
-  {
-    id: 'refill-001',
-    dateTime: '2026-07-20T08:30:00.000Z',
-    liters: 10000,
-    fuelType: 'DIESEL_S10',
-    supplierName: 'Distribuidora Rota do Agro Combustíveis',
-    invoiceNumber: 'NF-89211',
-    costPerLiter: 5.45,
-    totalCost: 54500,
-    gasStationId: 'stn-001',
-    gasStationName: 'Posto Fazenda Andrade - Sede',
-    registeredByUserId: 'usr-001',
-    registeredByUserName: 'Carlos Eduardo Andrade',
-    notes: 'Recebimento de caminhão tanque com 10.000 L de Diesel S10 para safra.',
-    createdAt: '2026-07-20T08:35:00.000Z'
-  }
-];
+export const INITIAL_FUEL_REFILLS: FuelRefill[] = [];
 
 export const INITIAL_MAINTENANCE_LOGS: MaintenanceLog[] = [];
 
@@ -390,7 +373,8 @@ export const INITIAL_SETTINGS: SystemSettings = {
   autoAlertsEnabled: true,
   themeMode: 'LIGHT',
   tankCapacityLiters: 20000,
-  tankInitialStockLiters: 18500
+  tankInitialStockLiters: 15000,
+  tankStockBaseUpdatedAt: new Date().toISOString()
 };
 
 export const INITIAL_MACHINE_ISSUES: MachineIssue[] = [

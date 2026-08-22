@@ -19,10 +19,10 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
   onUpdateSettings,
   darkMode
 }) => {
-  const [employeeEditTimeLimitHours, setEmployeeEditTimeLimitHours] = useState(settings.employeeEditTimeLimitHours || 24);
-  const [suspiciousFuelMarginPercentage, setSuspiciousFuelMarginPercentage] = useState(settings.suspiciousFuelMarginPercentage || 25);
-  const [tankCapacityLiters, setTankCapacityLiters] = useState(settings.tankCapacityLiters || 20000);
-  const [tankInitialStockLiters, setTankInitialStockLiters] = useState(settings.tankInitialStockLiters !== undefined ? settings.tankInitialStockLiters : 20000);
+  const [employeeEditTimeLimitHours, setEmployeeEditTimeLimitHours] = useState<string | number>(settings.employeeEditTimeLimitHours || 24);
+  const [suspiciousFuelMarginPercentage, setSuspiciousFuelMarginPercentage] = useState<string | number>(settings.suspiciousFuelMarginPercentage || 25);
+  const [tankCapacityLiters, setTankCapacityLiters] = useState<string | number>(settings.tankCapacityLiters || 20000);
+  const [tankInitialStockLiters, setTankInitialStockLiters] = useState<string | number>(settings.tankInitialStockLiters !== undefined ? settings.tankInitialStockLiters : 20000);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   useEffect(() => {
@@ -34,11 +34,15 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
+    const parsedCapacity = Math.max(1000, Number(tankCapacityLiters) || 20000);
+    const parsedStock = Math.max(0, Number(tankInitialStockLiters) || 0);
+    
     onUpdateSettings({
-      employeeEditTimeLimitHours,
-      suspiciousFuelMarginPercentage,
-      tankCapacityLiters: Math.max(1000, Number(tankCapacityLiters) || 20000),
-      tankInitialStockLiters: Math.max(0, Number(tankInitialStockLiters) || 0)
+      employeeEditTimeLimitHours: Math.max(1, Number(employeeEditTimeLimitHours) || 24),
+      suspiciousFuelMarginPercentage: Math.max(1, Number(suspiciousFuelMarginPercentage) || 25),
+      tankCapacityLiters: parsedCapacity,
+      tankInitialStockLiters: parsedStock,
+      tankStockBaseUpdatedAt: new Date().toISOString()
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
@@ -99,7 +103,7 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
                     min="1000"
                     step="100"
                     value={tankCapacityLiters}
-                    onChange={(e) => setTankCapacityLiters(Math.max(1000, parseInt(e.target.value) || 0))}
+                    onChange={(e) => setTankCapacityLiters(e.target.value)}
                     className={`w-full p-2.5 rounded-xl border font-bold text-xs ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white text-gray-900'}`}
                   />
                   <p className="text-[10px] text-gray-500 dark:text-emerald-400 mt-1">
@@ -116,7 +120,7 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
                     min="0"
                     step="50"
                     value={tankInitialStockLiters}
-                    onChange={(e) => setTankInitialStockLiters(Math.max(0, parseInt(e.target.value) || 0))}
+                    onChange={(e) => setTankInitialStockLiters(e.target.value)}
                     className={`w-full p-2.5 rounded-xl border font-bold text-xs ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-amber-300' : 'bg-white text-emerald-800'}`}
                   />
                   <p className="text-[10px] text-gray-500 dark:text-emerald-400 mt-1">
@@ -139,7 +143,7 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
                 min="1"
                 max="72"
                 value={employeeEditTimeLimitHours}
-                onChange={(e) => setEmployeeEditTimeLimitHours(parseInt(e.target.value) || 24)}
+                onChange={(e) => setEmployeeEditTimeLimitHours(e.target.value)}
                 className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
               />
               <p className="text-[11px] text-gray-500 dark:text-emerald-400 mt-1">
@@ -156,7 +160,7 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
                 min="5"
                 max="100"
                 value={suspiciousFuelMarginPercentage}
-                onChange={(e) => setSuspiciousFuelMarginPercentage(parseInt(e.target.value) || 25)}
+                onChange={(e) => setSuspiciousFuelMarginPercentage(e.target.value)}
                 className={`w-full p-2.5 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
               />
               <p className="text-[11px] text-gray-500 dark:text-emerald-400 mt-1">

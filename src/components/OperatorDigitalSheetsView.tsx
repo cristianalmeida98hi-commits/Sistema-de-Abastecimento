@@ -1,11 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  FileText, Search, Filter, QrCode, Truck, Wrench, Fuel, 
-  CheckCircle2, AlertTriangle, Clock, Eye, Shield, Sparkles, ChevronRight,
-  AlertCircle, Droplet
+  FileText, Search, Filter, QrCode, Truck, Wrench, 
+  CheckCircle2, AlertTriangle, Clock, ChevronRight, Droplet
 } from 'lucide-react';
-import { Vehicle, EquipmentCategory, User, MaintenanceLog, FuelLog, PreventiveMaintenanceItem, SmartAlert, MachineIssue } from '../types';
-import { getSectorName, formatCurrency } from '../utils/calculations';
+import { Vehicle, User, MaintenanceLog, FuelLog, PreventiveMaintenanceItem, SmartAlert, MachineIssue } from '../types';
+import { getSectorName } from '../utils/calculations';
 
 interface OperatorDigitalSheetsViewProps {
   vehicles: Vehicle[];

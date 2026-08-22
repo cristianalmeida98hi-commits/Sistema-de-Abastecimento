@@ -48,6 +48,8 @@ let cache = {
 };
 
 let isInitialized = false;
+let notifyDebounceTimer: any = null;
+let alertCheckDebounceTimer: any = null;
 
 // Initialize Firebase Firestore Real-Time Listeners
 export function initStorage() {
@@ -60,7 +62,7 @@ export function initStorage() {
       if (snapshot.empty) {
         seedCollection('users', INITIAL_USERS);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as User));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
         cache.users = items;
         notifyDataUpdated();
       }
@@ -71,7 +73,7 @@ export function initStorage() {
       if (snapshot.empty) {
         seedCollection('vehicles', INITIAL_VEHICLES);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Vehicle));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Vehicle));
         cache.vehicles = items;
         notifyDataUpdated();
       }
@@ -82,7 +84,7 @@ export function initStorage() {
       if (snapshot.empty) {
         seedCollection('gas_stations', INITIAL_GAS_STATIONS);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as GasStation));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GasStation));
         cache.gasStations = items;
         notifyDataUpdated();
       }
@@ -93,19 +95,19 @@ export function initStorage() {
       if (snapshot.empty) {
         seedCollection('fuel_logs', INITIAL_FUEL_LOGS);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FuelLog));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelLog));
         items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
         cache.fuelLogs = items;
         notifyDataUpdated();
       }
     }, (err) => console.error('[Firestore FuelLogs Error]', err));
 
-    // 4.1 Fuel Refills (Entrada / Reabastecimento do Tanque) Subscription
+    // 4.1 Fuel Refills Subscription
     onSnapshot(collection(db, 'fuel_refills'), (snapshot) => {
       if (snapshot.empty) {
         seedCollection('fuel_refills', INITIAL_FUEL_REFILLS);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FuelRefill));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelRefill));
         items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
         cache.fuelRefills = items;
         notifyDataUpdated();
@@ -117,7 +119,7 @@ export function initStorage() {
       if (snapshot.empty) {
         seedCollection('maintenance_logs', INITIAL_MAINTENANCE_LOGS);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as MaintenanceLog));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceLog));
         items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         cache.maintenanceLogs = items;
         notifyDataUpdated();
@@ -129,7 +131,7 @@ export function initStorage() {
       if (snapshot.empty) {
         seedCollection('machine_issues', INITIAL_MACHINE_ISSUES);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as MachineIssue));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MachineIssue));
         items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
         cache.machineIssues = items;
         notifyDataUpdated();
@@ -141,7 +143,7 @@ export function initStorage() {
       if (snapshot.empty) {
         seedCollection('preventive_items', INITIAL_PREVENTIVE_ITEMS);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as PreventiveMaintenanceItem));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as PreventiveMaintenanceItem));
         cache.preventiveItems = items;
         notifyDataUpdated();
       }
@@ -152,10 +154,10 @@ export function initStorage() {
       if (snapshot.empty) {
         seedCollection('alerts', INITIAL_ALERTS);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as SmartAlert));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SmartAlert));
         items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         cache.alerts = items;
-        notifyDataUpdated();
+        notifyDataUpdated(false); // don't re-trigger alert check when alerts arrive
       }
     }, (err) => console.error('[Firestore Alerts Error]', err));
 
@@ -164,10 +166,10 @@ export function initStorage() {
       if (snapshot.empty) {
         seedCollection('audit_logs', INITIAL_AUDIT_LOGS);
       } else {
-        const items = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as AuditLog));
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
         items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
         cache.auditLogs = items;
-        notifyDataUpdated();
+        notifyDataUpdated(false);
       }
     }, (err) => console.error('[Firestore AuditLogs Error]', err));
 
@@ -189,13 +191,19 @@ export function initStorage() {
   }
 }
 
-function notifyDataUpdated() {
+export function notifyDataUpdated(shouldCheckAlerts: boolean = true) {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('andradeagro_data_updated'));
-    // Debounce/run check automated alerts in background
-    setTimeout(() => {
-      checkAutomatedAlerts();
-    }, 100);
+    if (notifyDebounceTimer) clearTimeout(notifyDebounceTimer);
+    notifyDebounceTimer = setTimeout(() => {
+      window.dispatchEvent(new Event('andradeagro_data_updated'));
+    }, 40);
+
+    if (shouldCheckAlerts) {
+      if (alertCheckDebounceTimer) clearTimeout(alertCheckDebounceTimer);
+      alertCheckDebounceTimer = setTimeout(() => {
+        checkAutomatedAlerts();
+      }, 300);
+    }
   }
 }
 

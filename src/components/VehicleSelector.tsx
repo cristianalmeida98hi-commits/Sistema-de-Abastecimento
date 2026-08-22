@@ -1,10 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { 
-  Truck, Search, ChevronDown, Check, X, 
-  Fuel, User as UserIcon, Gauge, Shield, Sparkles
-} from 'lucide-react';
-import { Vehicle, FuelType } from '../types';
-import { getFuelTypeName, getSectorName } from '../utils/calculations';
+import { Search, ChevronDown, Check, X } from 'lucide-react';
+import { Vehicle } from '../types';
 
 interface VehicleSelectorProps {
   vehicles: Vehicle[];
@@ -27,7 +23,7 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'TRATOR' | 'MAQUINA_AGRICOLA' | 'VEICULO' | 'CAMINHAO'>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<'ALL' | 'TRATOR' | 'MAQUINA_AGRICOLA' | 'VEICULO'>('ALL');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Filter fuelable vehicles only
@@ -41,12 +37,12 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
     [fuelableVehicles, selectedVehicleId]
   );
 
-  // Focus input on open
+  // Focus input when dropdown opens
   useEffect(() => {
     if (isOpen) {
       setTimeout(() => {
         searchInputRef.current?.focus();
-      }, 100);
+      }, 80);
     }
   }, [isOpen]);
 
@@ -60,35 +56,27 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
     };
   }, [fuelableVehicles]);
 
-  // Filtered vehicles
+  // Filtered vehicles with instant search (searching by model, licensePlate, patrimonyCode, manufacturer)
   const filteredVehicles = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
     return fuelableVehicles.filter(v => {
-      // Category match
-      if (categoryFilter !== 'ALL') {
-        if (categoryFilter === 'VEICULO') {
-          if (v.category !== 'VEICULO') return false;
-        } else if (v.category !== categoryFilter) {
-          return false;
-        }
+      // Category filter
+      if (categoryFilter !== 'ALL' && v.category !== categoryFilter) {
+        return false;
       }
 
-      // Search match
+      // Search query
       if (!query) return true;
-      const plateOrCode = (v.licensePlate || v.patrimonyCode || '').toLowerCase();
+      const plate = (v.licensePlate || '').toLowerCase();
+      const code = (v.patrimonyCode || '').toLowerCase();
       const model = (v.model || '').toLowerCase();
       const manufacturer = (v.manufacturer || '').toLowerCase();
-      const sector = (v.sector || '').toLowerCase();
-      const operator = (v.assignedOperatorName || '').toLowerCase();
-      const fuel = getFuelTypeName(v.fuelType).toLowerCase();
 
       return (
-        plateOrCode.includes(query) ||
+        plate.includes(query) ||
+        code.includes(query) ||
         model.includes(query) ||
-        manufacturer.includes(query) ||
-        sector.includes(query) ||
-        operator.includes(query) ||
-        fuel.includes(query)
+        manufacturer.includes(query)
       );
     });
   }, [fuelableVehicles, searchQuery, categoryFilter]);
@@ -99,17 +87,31 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
     setSearchQuery('');
   };
 
-  const getCategoryBadge = (category: string) => {
+  const getCategoryEmoji = (category: string) => {
     switch (category) {
       case 'TRATOR':
-        return { label: 'TRATOR', emoji: '🚜', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' };
+        return '🚜';
       case 'MAQUINA_AGRICOLA':
-        return { label: 'MÁQUINA AGRÍCOLA', emoji: '🌾', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40' };
+        return '🌾';
       case 'VEICULO':
-        return { label: 'VEÍCULO / CAMINHONETE', emoji: '🚗', color: 'bg-blue-500/20 text-blue-300 border-blue-500/40' };
+        return '🚗';
       default:
-        return { label: 'EQUIPAMENTO', emoji: '⚙️', color: 'bg-gray-500/20 text-gray-300 border-gray-500/40' };
+        return '⚙️';
     }
+  };
+
+  // Helper to format vehicle display title & plate/code
+  const getIdentifierText = (v: Vehicle) => {
+    if (v.licensePlate && v.patrimonyCode) {
+      return `${v.patrimonyCode} • Placa: ${v.licensePlate}`;
+    }
+    if (v.licensePlate) {
+      return `Placa: ${v.licensePlate}`;
+    }
+    if (v.patrimonyCode) {
+      return `Cód: ${v.patrimonyCode}`;
+    }
+    return 'Sem identificador';
   };
 
   return (
@@ -119,18 +121,18 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
           <label className="block text-xs font-black uppercase tracking-wider text-slate-200">
             {label}
           </label>
-          <span className="text-[11px] font-semibold text-emerald-300">
-            {fuelableVehicles.length} máquinas disponíveis
+          <span className="text-[11px] font-bold text-emerald-300">
+            {fuelableVehicles.length} cadastrados
           </span>
         </div>
       )}
 
-      {/* Selected Vehicle Card (Trigger) */}
+      {/* Selected Vehicle Trigger Card */}
       <button
         type="button"
         disabled={disabled}
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full text-left p-3 sm:p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 group outline-none ${
+        className={`w-full text-left p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 group outline-none min-h-[56px] ${
           disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
         } ${
           isOpen
@@ -142,66 +144,47 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
       >
         {selectedVehicle ? (
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#FACC15] text-[#064E3B] flex items-center justify-center font-black text-lg shrink-0 shadow-sm">
-              {getCategoryBadge(selectedVehicle.category).emoji}
+            {/* Category Emoji Badge */}
+            <div className="w-10 h-10 rounded-xl bg-[#FACC15] text-[#064E3B] flex items-center justify-center text-lg font-black shrink-0 shadow-sm">
+              {getCategoryEmoji(selectedVehicle.category)}
             </div>
 
+            {/* Clean Vehicle Name & Plate */}
             <div className="min-w-0 flex-1 space-y-0.5">
-              {/* Row 1: Category Pill & Plate Badge */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-[#FACC15] text-[#064E3B] shadow-xs">
-                  {selectedVehicle.licensePlate || selectedVehicle.patrimonyCode || 'S/PLACA'}
-                </span>
-                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${getCategoryBadge(selectedVehicle.category).color}`}>
-                  {getCategoryBadge(selectedVehicle.category).label}
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 border border-emerald-800">
-                  {getFuelTypeName(selectedVehicle.fuelType)}
-                </span>
-              </div>
-
-              {/* Row 2: Model Name */}
               <h4 className="text-sm sm:text-base font-extrabold text-white truncate group-hover:text-[#FACC15] transition-colors">
                 {selectedVehicle.model}
               </h4>
-
-              {/* Row 3: Meta details */}
-              <div className="flex items-center gap-3 text-[11px] text-emerald-200/90 flex-wrap font-medium">
-                {selectedVehicle.assignedOperatorName && (
-                  <span className="flex items-center gap-1">
-                    <UserIcon className="w-3 h-3 text-[#FACC15]" />
-                    {selectedVehicle.assignedOperatorName}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2 py-0.5 rounded-md text-xs font-black uppercase tracking-wider bg-[#064E3B] text-[#FACC15] border border-emerald-700/80">
+                  {selectedVehicle.licensePlate ? `Placa: ${selectedVehicle.licensePlate}` : selectedVehicle.patrimonyCode ? `Cód: ${selectedVehicle.patrimonyCode}` : 'Sem placa'}
+                </span>
+                {selectedVehicle.patrimonyCode && selectedVehicle.licensePlate && (
+                  <span className="text-[11px] font-semibold text-emerald-200/90">
+                    ({selectedVehicle.patrimonyCode})
                   </span>
                 )}
-                <span className="flex items-center gap-1">
-                  <Gauge className="w-3 h-3 text-[#FACC15]" />
-                  {selectedVehicle.category === 'VEICULO'
-                    ? `${selectedVehicle.currentKm?.toLocaleString('pt-BR') || 0} KM`
-                    : `${selectedVehicle.currentHourmeter?.toLocaleString('pt-BR') || 0} Horas`}
-                </span>
-                <span>Tanque: {selectedVehicle.tankCapacityLiters || 0}L</span>
               </div>
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-slate-400 py-1">
-            <Search className="w-5 h-5 text-emerald-400" />
-            <span className="text-sm font-semibold">Clique para buscar e selecionar um veículo...</span>
+          <div className="flex items-center gap-2 text-emerald-200 py-1">
+            <Search className="w-5 h-5 text-[#FACC15]" />
+            <span className="text-xs sm:text-sm font-bold">Clique para selecionar um veículo...</span>
           </div>
         )}
 
-        {/* Action button hint */}
+        {/* Change hint */}
         <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-900/60 border border-emerald-700/60 text-[#FACC15] font-bold text-xs group-hover:bg-[#FACC15] group-hover:text-[#064E3B] transition-all">
-          <span className="hidden sm:inline">Trocar</span>
+          <span>Trocar</span>
           <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
         </div>
       </button>
 
-      {/* Search & Selection Dropdown Menu */}
+      {/* Clean Dropdown Menu with Instant Search */}
       {isOpen && (
-        <div className="p-3 sm:p-4 rounded-3xl border border-emerald-700/80 bg-[#03231b] shadow-2xl space-y-3 animate-in fade-in zoom-in-95 duration-150 z-20">
+        <div className="p-3 sm:p-4 rounded-3xl border border-emerald-700/80 bg-[#03231b] shadow-2xl space-y-3 animate-in fade-in zoom-in-95 duration-150 z-30">
           
-          {/* Top Search Input */}
+          {/* Instant Search Bar */}
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#FACC15]" />
             <input
@@ -209,7 +192,7 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Pesquisar por modelo, placa, patrimônio, operador ou setor..."
+              placeholder="Buscar por nome do veículo, modelo ou placa..."
               className="w-full pl-10 pr-9 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-[#063327] border-2 border-emerald-600/80 text-white placeholder-emerald-300/60 outline-none focus:border-[#FACC15] focus:ring-2 focus:ring-[#FACC15]/20 transition-all"
             />
             {searchQuery && (
@@ -217,14 +200,15 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
                 type="button"
                 onClick={() => setSearchQuery('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg text-slate-300 hover:text-white hover:bg-emerald-800/60"
+                title="Limpar busca"
               >
                 <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          {/* Quick Category Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-[11px] font-bold">
+          {/* Clean Category Filters */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar text-[11px] font-bold">
             <button
               type="button"
               onClick={() => setCategoryFilter('ALL')}
@@ -271,87 +255,61 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
             </button>
           </div>
 
-          {/* List of Vehicles */}
-          <div className="max-h-64 sm:max-h-72 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+          {/* Clean List of Vehicles (Model & Plate only) */}
+          <div className="max-h-60 sm:max-h-72 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
             {filteredVehicles.length === 0 ? (
               <div className="p-6 text-center rounded-2xl bg-[#04281f] border border-emerald-900/80 text-emerald-300">
-                <Search className="w-8 h-8 mx-auto mb-2 text-[#FACC15] opacity-80" />
-                <p className="font-bold text-xs text-white">Nenhum veículo encontrado</p>
-                <p className="text-[11px] text-emerald-300 mt-1">
-                  Tente buscar por outro termo ou limpe os filtros.
-                </p>
+                <Search className="w-6 h-6 mx-auto mb-2 text-[#FACC15] opacity-80" />
+                <p className="font-bold text-xs text-white">Nenhum veículo encontrado para "{searchQuery}"</p>
                 <button
                   type="button"
                   onClick={() => { setSearchQuery(''); setCategoryFilter('ALL'); }}
-                  className="mt-3 px-3 py-1.5 bg-[#FACC15] text-[#064E3B] rounded-xl text-xs font-black"
+                  className="mt-2.5 px-3 py-1 bg-[#FACC15] text-[#064E3B] rounded-xl text-xs font-black"
                 >
-                  Limpar Filtros
+                  Limpar busca
                 </button>
               </div>
             ) : (
               filteredVehicles.map(v => {
                 const isSelected = v.id === selectedVehicleId;
-                const badge = getCategoryBadge(v.category);
+                const emoji = getCategoryEmoji(v.category);
+                const identifier = getIdentifierText(v);
 
                 return (
                   <div
                     key={v.id}
                     onClick={() => handleSelectVehicle(v.id)}
-                    className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                    className={`px-3.5 py-2.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 min-h-[48px] ${
                       isSelected
                         ? 'bg-[#064E3B] border-2 border-[#FACC15] shadow-md'
                         : 'bg-[#042d23] hover:bg-[#063b2e] border-emerald-800/80 text-slate-100'
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-base shrink-0 ${
-                        isSelected ? 'bg-[#FACC15] text-[#064E3B]' : 'bg-emerald-950 text-emerald-200 border border-emerald-800'
-                      }`}>
-                        {badge.emoji}
-                      </div>
+                      {/* Emoji Icon */}
+                      <span className="text-xl shrink-0">
+                        {emoji}
+                      </span>
 
-                      <div className="min-w-0 flex-1 space-y-0.5">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
-                            isSelected ? 'bg-[#FACC15] text-[#064E3B]' : 'bg-emerald-950 text-[#FACC15] border border-emerald-800'
-                          }`}>
-                            {v.licensePlate || v.patrimonyCode || 'S/PLACA'}
-                          </span>
-                          <span className="text-[10px] font-bold text-emerald-200">
-                            {getFuelTypeName(v.fuelType)}
-                          </span>
-                          <span className="text-[10px] text-emerald-300">
-                            • Setor: {getSectorName(v.sector)}
-                          </span>
-                        </div>
-
+                      {/* Clean Name & Plate */}
+                      <div className="min-w-0 flex-1">
                         <p className="text-xs sm:text-sm font-extrabold text-white truncate">
-                          {v.model}
+                          {v.patrimonyCode ? `${v.patrimonyCode} | ` : ''}{v.model}
                         </p>
-
-                        <div className="flex items-center gap-2 text-[10px] text-emerald-200/80">
-                          {v.assignedOperatorName && (
-                            <span>Op: <strong>{v.assignedOperatorName}</strong></span>
-                          )}
-                          <span>•</span>
-                          <span>
-                            {v.category === 'VEICULO'
-                              ? `${v.currentKm?.toLocaleString('pt-BR') || 0} KM`
-                              : `${v.currentHourmeter?.toLocaleString('pt-BR') || 0} h`}
-                          </span>
-                          <span>•</span>
-                          <span>Tanque: {v.tankCapacityLiters || 0}L</span>
-                        </div>
+                        <p className="text-[11px] font-bold text-[#FACC15] truncate">
+                          {v.licensePlate ? `Placa: ${v.licensePlate}` : v.patrimonyCode ? `Cód: ${v.patrimonyCode}` : 'Sem placa'}
+                        </p>
                       </div>
                     </div>
 
+                    {/* Radio/Check indicator */}
                     <div className="shrink-0">
                       {isSelected ? (
-                        <div className="w-7 h-7 rounded-full bg-[#FACC15] text-[#064E3B] flex items-center justify-center font-black">
-                          <Check className="w-4 h-4 stroke-[3]" />
+                        <div className="w-6 h-6 rounded-full bg-[#FACC15] text-[#064E3B] flex items-center justify-center font-black">
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
                         </div>
                       ) : (
-                        <div className="w-7 h-7 rounded-full border border-emerald-700 bg-emerald-950/40 text-transparent hover:border-[#FACC15]"></div>
+                        <div className="w-6 h-6 rounded-full border border-emerald-700 bg-emerald-950/40 text-transparent"></div>
                       )}
                     </div>
                   </div>
@@ -360,17 +318,17 @@ export const VehicleSelector: React.FC<VehicleSelectorProps> = ({
             )}
           </div>
 
-          {/* Close button footer */}
+          {/* Footer */}
           <div className="pt-2 border-t border-emerald-800/60 flex items-center justify-between text-xs">
             <span className="text-emerald-300 text-[11px]">
-              Exibindo {filteredVehicles.length} de {fuelableVehicles.length} máquinas
+              {filteredVehicles.length} {filteredVehicles.length === 1 ? 'veículo listado' : 'veículos listados'}
             </span>
             <button
               type="button"
               onClick={() => setIsOpen(false)}
-              className="px-3 py-1.5 bg-emerald-900/80 hover:bg-emerald-800 text-emerald-100 rounded-xl font-bold"
+              className="px-3 py-1.5 bg-emerald-900/80 hover:bg-emerald-800 text-emerald-100 rounded-xl font-bold text-xs"
             >
-              Fechar Lista
+              Fechar
             </button>
           </div>
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, AlertTriangle, Camera, CheckCircle2, User as UserIcon, Wrench } from 'lucide-react';
+import { X, AlertTriangle } from 'lucide-react';
 import { Vehicle, User, MachineIssue } from '../types';
 
 interface ReportProblemModalProps {

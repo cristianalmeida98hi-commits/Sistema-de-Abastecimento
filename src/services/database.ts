@@ -1,32 +1,25 @@
 import { 
-  collection, doc, getDocs, deleteDoc 
-} from 'firebase/firestore';
-import { db, safeSetDoc, safeUpdateDoc } from '../lib/firebase';
-import { 
   User, Vehicle, GasStation, FuelLog, MaintenanceLog 
 } from '../types';
 import { 
-  getVehicles, getUsers, getFuelLogs, getMaintenanceLogs, getGasStations 
+  getVehicles, getUsers, getFuelLogs, getMaintenanceLogs, getGasStations,
+  addVehicle, updateVehicle, deleteVehicle,
+  addUser, updateUser, deleteUser,
+  addFuelLog, deleteFuelLog,
+  addMaintenance, updateMaintenance, deleteMaintenance,
+  addGasStation, updateGasStation, deleteGasStation
 } from '../utils/storage';
 
 // Online Central Firebase Firestore Database Service Layer
 export const databaseService = {
   // MACHINES / VEHICLES
   async getMachines(): Promise<Vehicle[]> {
-    try {
-      const snapshot = await getDocs(collection(db, 'vehicles'));
-      if (!snapshot.empty) {
-        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Vehicle));
-      }
-    } catch (e) {
-      console.error('[databaseService] Error getting machines:', e);
-    }
     return getVehicles();
   },
 
   async addMachine(machine: Vehicle): Promise<boolean> {
     try {
-      await safeSetDoc(doc(db, 'vehicles', machine.id), machine);
+      await addVehicle(machine);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding machine:', e);
@@ -36,7 +29,7 @@ export const databaseService = {
 
   async updateMachine(id: string, fields: Partial<Vehicle>): Promise<boolean> {
     try {
-      await safeUpdateDoc(doc(db, 'vehicles', id), fields);
+      await updateVehicle(id, fields);
       return true;
     } catch (e) {
       console.error('[databaseService] Error updating machine:', e);
@@ -46,7 +39,7 @@ export const databaseService = {
 
   async deleteMachine(id: string): Promise<boolean> {
     try {
-      await deleteDoc(doc(db, 'vehicles', id));
+      await deleteVehicle(id);
       return true;
     } catch (e) {
       console.error('[databaseService] Error deleting machine:', e);
@@ -56,20 +49,12 @@ export const databaseService = {
 
   // EMPLOYEES / USERS
   async getEmployees(): Promise<User[]> {
-    try {
-      const snapshot = await getDocs(collection(db, 'users'));
-      if (!snapshot.empty) {
-        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
-      }
-    } catch (e) {
-      console.error('[databaseService] Error getting employees:', e);
-    }
     return getUsers();
   },
 
   async addEmployee(user: User): Promise<boolean> {
     try {
-      await safeSetDoc(doc(db, 'users', user.id), user);
+      await addUser(user);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding employee:', e);
@@ -79,7 +64,7 @@ export const databaseService = {
 
   async updateEmployee(id: string, fields: Partial<User>): Promise<boolean> {
     try {
-      await safeUpdateDoc(doc(db, 'users', id), fields);
+      await updateUser(id, fields);
       return true;
     } catch (e) {
       console.error('[databaseService] Error updating employee:', e);
@@ -89,7 +74,7 @@ export const databaseService = {
 
   async deleteEmployee(id: string): Promise<boolean> {
     try {
-      await deleteDoc(doc(db, 'users', id));
+      await deleteUser(id);
       return true;
     } catch (e) {
       console.error('[databaseService] Error deleting employee:', e);
@@ -99,20 +84,12 @@ export const databaseService = {
 
   // FUEL RECORDS / ABASTECIMENTOS
   async getFuelRecords(): Promise<FuelLog[]> {
-    try {
-      const snapshot = await getDocs(collection(db, 'fuel_logs'));
-      if (!snapshot.empty) {
-        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelLog));
-      }
-    } catch (e) {
-      console.error('[databaseService] Error getting fuel records:', e);
-    }
     return getFuelLogs();
   },
 
-  async addFuelRecord(log: FuelLog): Promise<boolean> {
+  async addFuelRecord(log: Omit<FuelLog, 'id' | 'createdAt'>): Promise<boolean> {
     try {
-      await safeSetDoc(doc(db, 'fuel_logs', log.id), log);
+      await addFuelLog(log);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding fuel record:', e);
@@ -122,7 +99,7 @@ export const databaseService = {
 
   async deleteFuelRecord(id: string): Promise<boolean> {
     try {
-      await deleteDoc(doc(db, 'fuel_logs', id));
+      await deleteFuelLog(id);
       return true;
     } catch (e) {
       console.error('[databaseService] Error deleting fuel record:', e);
@@ -132,20 +109,12 @@ export const databaseService = {
 
   // MAINTENANCE RECORDS / MANUTENÇÕES
   async getMaintenanceRecords(): Promise<MaintenanceLog[]> {
-    try {
-      const snapshot = await getDocs(collection(db, 'maintenance_logs'));
-      if (!snapshot.empty) {
-        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceLog));
-      }
-    } catch (e) {
-      console.error('[databaseService] Error getting maintenance records:', e);
-    }
     return getMaintenanceLogs();
   },
 
-  async addMaintenanceRecord(log: MaintenanceLog): Promise<boolean> {
+  async addMaintenanceRecord(log: Omit<MaintenanceLog, 'id'>): Promise<boolean> {
     try {
-      await safeSetDoc(doc(db, 'maintenance_logs', log.id), log);
+      await addMaintenance(log);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding maintenance record:', e);
@@ -155,7 +124,7 @@ export const databaseService = {
 
   async updateMaintenanceRecord(id: string, fields: Partial<MaintenanceLog>): Promise<boolean> {
     try {
-      await safeUpdateDoc(doc(db, 'maintenance_logs', id), fields);
+      await updateMaintenance(id, fields);
       return true;
     } catch (e) {
       console.error('[databaseService] Error updating maintenance record:', e);
@@ -165,7 +134,7 @@ export const databaseService = {
 
   async deleteMaintenanceRecord(id: string): Promise<boolean> {
     try {
-      await deleteDoc(doc(db, 'maintenance_logs', id));
+      await deleteMaintenance(id);
       return true;
     } catch (e) {
       console.error('[databaseService] Error deleting maintenance record:', e);
@@ -175,20 +144,12 @@ export const databaseService = {
 
   // GAS STATIONS / POSTOS
   async getGasStations(): Promise<GasStation[]> {
-    try {
-      const snapshot = await getDocs(collection(db, 'gas_stations'));
-      if (!snapshot.empty) {
-        return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GasStation));
-      }
-    } catch (e) {
-      console.error('[databaseService] Error getting gas stations:', e);
-    }
     return getGasStations();
   },
 
-  async addGasStation(station: GasStation): Promise<boolean> {
+  async addGasStation(station: Omit<GasStation, 'id'>): Promise<boolean> {
     try {
-      await safeSetDoc(doc(db, 'gas_stations', station.id), station);
+      await addGasStation(station);
       return true;
     } catch (e) {
       console.error('[databaseService] Error adding gas station:', e);
@@ -198,7 +159,7 @@ export const databaseService = {
 
   async updateGasStation(id: string, fields: Partial<GasStation>): Promise<boolean> {
     try {
-      await safeUpdateDoc(doc(db, 'gas_stations', id), fields);
+      await updateGasStation(id, fields);
       return true;
     } catch (e) {
       console.error('[databaseService] Error updating gas station:', e);
@@ -208,7 +169,7 @@ export const databaseService = {
 
   async deleteGasStation(id: string): Promise<boolean> {
     try {
-      await deleteDoc(doc(db, 'gas_stations', id));
+      await deleteGasStation(id);
       return true;
     } catch (e) {
       console.error('[databaseService] Error deleting gas station:', e);
@@ -216,3 +177,4 @@ export const databaseService = {
     }
   }
 };
+

@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 import { 
-  Fuel, Search, Bell, Plus, QrCode, Shield, User as UserIcon, 
-  LogOut, CheckCircle2, AlertTriangle, ChevronDown, Sparkles, Menu 
+  Search, Bell, Plus, LogOut, CheckCircle2, AlertTriangle, Menu 
 } from 'lucide-react';
 import { User, SmartAlert } from '../types';
-import { getUsers, setCurrentUser } from '../utils/storage';
 
 interface HeaderProps {
   currentUser: User;
@@ -22,20 +20,15 @@ interface HeaderProps {
 
 export const HeaderComponent: React.FC<HeaderProps> = ({
   currentUser,
-  onUserChanged,
   onLogout,
   onOpenFuelingModal,
-  onOpenQRScanner,
   onNavigate,
   alerts = [],
   searchQuery,
   onSearchChange,
   onToggleMobileMenu,
 }) => {
-  const [showRoleModal, setShowRoleModal] = useState(false);
   const [showAlertsDropdown, setShowAlertsDropdown] = useState(false);
-  
-  const allUsers = React.useMemo(() => getUsers(), []);
   const unresolvedAlerts = React.useMemo(() => (alerts || []).filter(a => !a.resolved), [alerts]);
 
   return (

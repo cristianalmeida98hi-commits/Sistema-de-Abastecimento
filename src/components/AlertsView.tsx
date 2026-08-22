@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, CheckCircle2, ShieldAlert, Clock, Fuel, FileText, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { SmartAlert, User } from '../types';
 import { formatDateBR } from '../utils/calculations';
 

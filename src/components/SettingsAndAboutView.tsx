@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Settings, Info, Shield, Clock, AlertTriangle, Building, 
-  RotateCcw, CheckCircle2, Fuel, Sparkles, User as UserIcon 
+  Settings, Shield, RotateCcw, CheckCircle2, Fuel 
 } from 'lucide-react';
 import { SystemSettings, User } from '../types';
 import { resetSystemData } from '../utils/storage';

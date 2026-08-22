@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   LayoutDashboard, Fuel, Truck, Wrench, Fuel as GasPump, Users, 
   FileSpreadsheet, AlertTriangle, ShieldCheck, Settings, ChevronRight,
-  Sparkles, Leaf, QrCode, LogOut, X
+  Leaf, QrCode, LogOut, X
 } from 'lucide-react';
 import { User, SmartAlert } from '../types';
 

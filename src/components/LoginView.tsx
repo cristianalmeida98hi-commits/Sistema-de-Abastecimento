@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Shield, Fuel, Lock, Mail, CheckCircle2, AlertCircle, Tablet, 
-  Key, User as UserIcon, ArrowRight, Sparkles, Building2, Smartphone,
-  Trash2, UserCheck, X, Plus, Settings2, RotateCcw
+  Fuel, Lock, Mail, CheckCircle2, AlertCircle, 
+  ArrowRight, Trash2, UserCheck, X, Settings2, RotateCcw
 } from 'lucide-react';
 import { User } from '../types';
 import { 

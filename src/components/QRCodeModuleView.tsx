@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  QrCode, Search, Filter, Printer, Download, Fuel, Truck, 
-  CheckCircle2, Camera, Clock, Calendar, Shield, ExternalLink,
-  RefreshCw, FileText, ArrowRight, User as UserIcon, Info
+  QrCode, Search, Printer, Download, Truck, 
+  CheckCircle2, Camera, Clock, Calendar, ExternalLink,
+  FileText, Info
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
-import { Vehicle, User, FuelLog, EquipmentCategory, Sector } from '../types';
+import { Vehicle, User, FuelLog } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
 import { generateQRCodeDataUrl } from '../utils/qrcode';
 import { openPrintWindow } from '../utils/printWindow';

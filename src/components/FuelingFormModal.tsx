@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import { Vehicle, GasStation, User, FuelType, FuelLog, SystemSettings, OperationType, ActivityType } from '../types';
 import { 
-  calculateFuelLogMetrics, formatCurrency, getFuelTypeName, getSectorName 
+  calculateFuelLogMetrics, formatCurrency, getFuelTypeName, getSectorName,
+  getActivitiesForOperation, OPERATION_OPTIONS 
 } from '../utils/calculations';
 import { getTankStatus } from '../utils/storage';
 
@@ -89,6 +90,17 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   const [operationType, setOperationType] = useState<OperationType>('GRAMA');
   const [activityType, setActivityType] = useState<ActivityType>('CORTE');
   const [observations, setObservations] = useState<string>('');
+
+  // Available activities for currently selected operation
+  const availableActivities = useMemo(() => {
+    return getActivitiesForOperation(operationType);
+  }, [operationType]);
+
+  const handleOperationTypeChange = (newOp: OperationType) => {
+    setOperationType(newOp);
+    const newActs = getActivitiesForOperation(newOp);
+    setActivityType((newActs[0]?.id || 'OUTRAS') as ActivityType);
+  };
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavedSuccess, setIsSavedSuccess] = useState(false);
@@ -384,30 +396,31 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
               </div>
             </div>
 
-            {/* Operation Type & Activity */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* Operation Type & Activity (Two-Step Selection) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                  Tipo de Operação
+                  Tipo de Operação *
                 </label>
                 <select
                   value={operationType}
-                  onChange={(e) => setOperationType(e.target.value as OperationType)}
+                  onChange={(e) => handleOperationTypeChange(e.target.value as OperationType)}
                   className={`w-full px-3 py-2 rounded-xl border text-xs outline-none font-bold ${
                     darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-slate-50 border-slate-300'
                   }`}
+                  required
                 >
-                  <option value="GRAMA">🌱 Grama</option>
-                  <option value="COLHEITA">🌾 Colheita</option>
-                  <option value="PLANTIO">🚜 Plantio</option>
-                  <option value="TRANSPORTE">🚚 Transporte</option>
-                  <option value="OUTROS">🔧 Outros</option>
+                  {OPERATION_OPTIONS.map((op) => (
+                    <option key={op.id} value={op.id}>
+                      {op.emoji} {op.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                  Atividade Específica
+                  Atividade *
                 </label>
                 <select
                   value={activityType}
@@ -415,12 +428,13 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                   className={`w-full px-3 py-2 rounded-xl border text-xs outline-none font-bold ${
                     darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-slate-50 border-slate-300'
                   }`}
+                  required
                 >
-                  <option value="CORTE">✂️ Corte</option>
-                  <option value="ROCADA">🌿 Roçada</option>
-                  <option value="COLETA_PALHA">🌾 Coleta de Palha</option>
-                  <option value="APLICACAO">🧪 Aplicação</option>
-                  <option value="OUTROS">⚙️ Outros</option>
+                  {availableActivities.map((act) => (
+                    <option key={act.id} value={act.id}>
+                      {act.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

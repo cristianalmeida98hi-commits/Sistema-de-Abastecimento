@@ -1,4 +1,5 @@
 import { FuelLog, Vehicle, FuelType, Sector } from '../types';
+import { getOperationTypeName, getActivityTypeName } from './operations';
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('pt-BR', {
@@ -215,6 +216,7 @@ export async function exportFuelLogsPDF(
     log.equipmentPlateOrCode,
     log.equipmentName,
     log.driverOrOperatorName,
+    `${getOperationTypeName(log.operationType)}${log.activityType ? ' - ' + getActivityTypeName(log.activityType, log.operationType) : ''}`,
     log.gasStationName,
     getFuelTypeName(log.fuelType),
     `${log.liters} L`,
@@ -228,9 +230,9 @@ export async function exportFuelLogsPDF(
 
   autoTable(doc, {
     startY: 38,
-    head: [['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Motorista/Operador', 'Posto', 'Combustível', 'Litros', 'R$/L', 'Total R$', 'Média']],
+    head: [['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Motorista/Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'R$/L', 'Total R$', 'Média']],
     body: tableData,
-    foot: [['TOTAL', `${logs.length} reg.`, '-', '-', '-', '-', `${totalLiters.toLocaleString('pt-BR')} L`, '-', formatCurrency(totalCost), '-']],
+    foot: [['TOTAL', `${logs.length} reg.`, '-', '-', '-', '-', '-', `${totalLiters.toLocaleString('pt-BR')} L`, '-', formatCurrency(totalCost), '-']],
     theme: 'grid',
     headStyles: {
       fillColor: [20, 78, 46],
@@ -245,8 +247,8 @@ export async function exportFuelLogsPDF(
       fontSize: 8
     },
     styles: {
-      fontSize: 7.5,
-      cellPadding: 2
+      fontSize: 7,
+      cellPadding: 1.5
     },
     alternateRowStyles: {
       fillColor: [248, 250, 248]
@@ -264,6 +266,8 @@ export function exportFuelLogsCSV(logs: FuelLog[], fileName: string = 'Abastecim
     'Categoria',
     'Placa / Código',
     'Nome Equipamento',
+    'Tipo de Operação',
+    'Atividade',
     'Motorista / Operador',
     'Frentista / Atendente',
     'Posto',
@@ -286,6 +290,8 @@ export function exportFuelLogsCSV(logs: FuelLog[], fileName: string = 'Abastecim
     `"${l.equipmentCategory}"`,
     `"${l.equipmentPlateOrCode}"`,
     `"${l.equipmentName.replace(/"/g, '""')}"`,
+    `"${getOperationTypeName(l.operationType)}"`,
+    `"${l.activityType ? getActivityTypeName(l.activityType, l.operationType) : ''}"`,
     `"${l.driverOrOperatorName.replace(/"/g, '""')}"`,
     `"${l.attendantName.replace(/"/g, '""')}"`,
     `"${l.gasStationName.replace(/"/g, '""')}"`,
@@ -311,3 +317,12 @@ export function exportFuelLogsCSV(logs: FuelLog[], fileName: string = 'Abastecim
   link.click();
   document.body.removeChild(link);
 }
+
+export { 
+  OPERATIONS_CONFIG, 
+  OPERATION_OPTIONS, 
+  getActivitiesForOperation, 
+  getOperationTypeName, 
+  getOperationTypeLabelOnly, 
+  getActivityTypeName 
+} from './operations';

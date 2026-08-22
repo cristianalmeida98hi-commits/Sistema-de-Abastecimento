@@ -1,7 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { FuelLog, User, Vehicle, GasStation, OperationType, ActivityType } from '../types';
-import { Fuel, CheckCircle2, Clock, Truck, Plus, Sparkles, Send, Shield, History, MapPin, AlertTriangle } from 'lucide-react';
+import { Fuel, CheckCircle2, Clock, Truck, Plus, Sparkles, Send, Shield, History, MapPin, AlertTriangle, ChevronRight } from 'lucide-react';
 import { getTankStatus } from '../utils/storage';
+import { 
+  getActivitiesForOperation, 
+  OPERATION_OPTIONS, 
+  getOperationTypeName, 
+  getActivityTypeName 
+} from '../utils/operations';
 
 interface OperatorFuelingViewProps {
   currentUser: User;
@@ -30,6 +36,17 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>(fuelableVehicles[0]?.id || '');
   const [operationType, setOperationType] = useState<OperationType>('GRAMA');
   const [activityType, setActivityType] = useState<ActivityType>('CORTE');
+
+  const availableActivities = useMemo(() => {
+    return getActivitiesForOperation(operationType);
+  }, [operationType]);
+
+  const handleSelectOperation = (opId: OperationType) => {
+    setOperationType(opId);
+    const acts = getActivitiesForOperation(opId);
+    setActivityType((acts[0]?.id || 'OUTRAS') as ActivityType);
+  };
+
   const [liters, setLiters] = useState<string>('80');
   const [hourmeter, setHourmeter] = useState<string>('');
   const [odometer, setOdometer] = useState<string>('');
@@ -71,6 +88,16 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
 
     if (!activeVehicle) {
       alert('Por favor, selecione uma máquina/veículo válida.');
+      return;
+    }
+
+    if (!operationType) {
+      alert('Por favor, selecione o Tipo de Operação.');
+      return;
+    }
+
+    if (operationType && !activityType) {
+      alert('Por favor, selecione a Atividade correspondente.');
       return;
     }
 
@@ -276,24 +303,23 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
           </select>
         </div>
 
-        {/* 3. Tipo de Operação */}
+        {/* 3. Tipo de Operação (Etapa 1) */}
         <div>
-          <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-2">
-            Tipo de Operação *
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider">
+              Tipo de Operação *
+            </label>
+            <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400">
+              Etapa 1 de 2
+            </span>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {[
-              { id: 'GRAMA', label: '🌱 Grama' },
-              { id: 'COLHEITA', label: '🌾 Colheita' },
-              { id: 'PLANTIO', label: '🚜 Plantio' },
-              { id: 'TRANSPORTE', label: '🚚 Transporte' },
-              { id: 'OUTROS', label: '🔧 Outros' },
-            ].map((op) => (
+            {OPERATION_OPTIONS.map((op) => (
               <button
                 key={op.id}
                 type="button"
-                onClick={() => setOperationType(op.id as OperationType)}
-                className={`py-3 px-3 rounded-2xl text-xs font-extrabold border transition-all text-center ${
+                onClick={() => handleSelectOperation(op.id)}
+                className={`py-3 px-3 rounded-2xl text-xs font-extrabold border transition-all text-center flex items-center justify-center gap-1.5 ${
                   operationType === op.id
                     ? 'bg-[#064E3B] text-white border-[#064E3B] shadow-sm ring-2 ring-[#FACC15]'
                     : darkMode
@@ -301,42 +327,45 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
                     : 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200/80'
                 }`}
               >
-                {op.label}
+                <span>{op.emoji}</span>
+                <span>{op.label}</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* 4. Atividade */}
-        <div>
-          <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-2">
-            Atividade Específica *
-          </label>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {[
-              { id: 'CORTE', label: '✂️ Corte' },
-              { id: 'ROCADA', label: '🌿 Roçada' },
-              { id: 'COLETA_PALHA', label: '🌾 Coleta Palha' },
-              { id: 'APLICACAO', label: '🧪 Aplicação' },
-              { id: 'OUTROS', label: '⚙️ Outros' },
-            ].map((act) => (
-              <button
-                key={act.id}
-                type="button"
-                onClick={() => setActivityType(act.id as ActivityType)}
-                className={`py-2.5 px-3 rounded-2xl text-xs font-extrabold border transition-all text-center ${
-                  activityType === act.id
-                    ? 'bg-[#064E3B] text-white border-[#064E3B] ring-2 ring-[#FACC15]'
-                    : darkMode
-                    ? 'bg-emerald-950/60 text-slate-200 border-emerald-900 hover:bg-emerald-900/60'
-                    : 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200/80'
-                }`}
-              >
-                {act.label}
-              </button>
-            ))}
+        {/* 4. Atividade (Etapa 2 - Dinâmica baseada na Operação) */}
+        {operationType && (
+          <div className="animate-in fade-in slide-in-from-top-1 duration-200">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider">
+                Atividade *
+              </label>
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-emerald-300">
+                Opções para {getOperationTypeName(operationType)}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {availableActivities.map((act) => (
+                <button
+                  key={act.id}
+                  type="button"
+                  onClick={() => setActivityType(act.id as ActivityType)}
+                  className={`py-2.5 px-3 rounded-2xl text-xs font-extrabold border transition-all text-center truncate ${
+                    activityType === act.id
+                      ? 'bg-[#064E3B] text-white border-[#064E3B] ring-2 ring-[#FACC15]'
+                      : darkMode
+                      ? 'bg-emerald-950/60 text-slate-200 border-emerald-900 hover:bg-emerald-900/60'
+                      : 'bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-200/80'
+                  }`}
+                  title={act.label}
+                >
+                  {act.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 5. Quantidade de Litros & Horímetro/KM */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">

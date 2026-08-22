@@ -3,9 +3,10 @@ import {
   Fuel, Search, Filter, Download, FileSpreadsheet, FileText, Printer, 
   Trash2, Edit3, Eye, AlertCircle, CheckCircle2, ChevronRight, X, Calendar, User as UserIcon
 } from 'lucide-react';
-import { FuelLog, Vehicle, GasStation, User, UserRole, SystemSettings } from '../types';
+import { FuelLog, Vehicle, GasStation, User, UserRole, SystemSettings, OperationType, ActivityType } from '../types';
 import { 
-  formatCurrency, formatDateTimeBR, getFuelTypeName, exportFuelLogsPDF, exportFuelLogsCSV 
+  formatCurrency, formatDateTimeBR, getFuelTypeName, exportFuelLogsPDF, exportFuelLogsCSV,
+  getOperationTypeName, getActivityTypeName, OPERATION_OPTIONS, getActivitiesForOperation
 } from '../utils/calculations';
 
 interface FuelLogsViewProps {
@@ -53,7 +54,19 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
   const [editingLog, setEditingLog] = useState<FuelLog | null>(null);
   const [editLiters, setEditLiters] = useState<number>(0);
   const [editPricePerLiter, setEditPricePerLiter] = useState<number>(0);
+  const [editOperationType, setEditOperationType] = useState<OperationType>('GRAMA');
+  const [editActivityType, setEditActivityType] = useState<ActivityType>('CORTE');
   const [editObservations, setEditObservations] = useState<string>('');
+
+  const editAvailableActivities = useMemo(() => {
+    return getActivitiesForOperation(editOperationType);
+  }, [editOperationType]);
+
+  const handleEditOperationChange = (newOp: OperationType) => {
+    setEditOperationType(newOp);
+    const acts = getActivitiesForOperation(newOp);
+    setEditActivityType((acts[0]?.id || 'OUTRAS') as ActivityType);
+  };
 
   // Combined Search
   const activeSearch = searchQuery || localSearch;
@@ -121,6 +134,8 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
     setEditingLog(log);
     setEditLiters(log.liters);
     setEditPricePerLiter(log.pricePerLiter);
+    setEditOperationType((log.operationType || 'GRAMA') as OperationType);
+    setEditActivityType((log.activityType || 'CORTE') as ActivityType);
     setEditObservations(log.observations || '');
   };
 
@@ -133,6 +148,8 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
       liters: editLiters,
       pricePerLiter: editPricePerLiter,
       totalValue,
+      operationType: editOperationType,
+      activityType: editActivityType,
       observations: editObservations
     });
 
@@ -327,11 +344,9 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
             }`}
           >
             <option value="ALL">Todas as Operações</option>
-            <option value="GRAMA">🌱 Grama</option>
-            <option value="COLHEITA">🌾 Colheita</option>
-            <option value="PLANTIO">🚜 Plantio</option>
-            <option value="TRANSPORTE">🚚 Transporte</option>
-            <option value="OUTROS">🔧 Outros</option>
+            {OPERATION_OPTIONS.map(op => (
+              <option key={op.id} value={op.id}>{op.emoji} {op.label}</option>
+            ))}
           </select>
 
           <div className="flex gap-2 col-span-1 sm:col-span-2">
@@ -393,7 +408,15 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
                     <td className="p-3 font-medium whitespace-nowrap">{formatDateTimeBR(log.dateTime)}</td>
                     <td className="p-3">
                       <p className="font-bold text-gray-900 dark:text-emerald-100">{log.equipmentName}</p>
-                      <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">{log.equipmentPlateOrCode}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">{log.equipmentPlateOrCode}</span>
+                        {log.operationType && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20">
+                            {getOperationTypeName(log.operationType)}
+                            {log.activityType ? ` • ${getActivityTypeName(log.activityType, log.operationType)}` : ''}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3 font-medium">{log.driverOrOperatorName}</td>
                     <td className="p-3 text-gray-600 dark:text-emerald-300">{log.gasStationName}</td>
@@ -489,6 +512,8 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
                 <p><strong>Posto:</strong> {inspectingLog.gasStationName}</p>
                 <p><strong>Motorista:</strong> {inspectingLog.driverOrOperatorName}</p>
                 <p><strong>Atendente:</strong> {inspectingLog.attendantName}</p>
+                <p><strong>Operação:</strong> {getOperationTypeName(inspectingLog.operationType)}</p>
+                <p><strong>Atividade:</strong> {inspectingLog.activityType ? getActivityTypeName(inspectingLog.activityType, inspectingLog.operationType) : '-'}</p>
                 <p><strong>Combustível:</strong> {getFuelTypeName(inspectingLog.fuelType)}</p>
                 <p><strong>Litros:</strong> <span className="font-bold text-emerald-600">{inspectingLog.liters} L</span></p>
                 <p><strong>Valor por Litro:</strong> {formatCurrency(inspectingLog.pricePerLiter)}</p>
@@ -542,6 +567,34 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveEdit} className="space-y-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold mb-1">Tipo de Operação *</label>
+                  <select
+                    value={editOperationType}
+                    onChange={(e) => handleEditOperationChange(e.target.value as OperationType)}
+                    className={`w-full p-2 rounded-xl border font-bold ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  >
+                    {OPERATION_OPTIONS.map(op => (
+                      <option key={op.id} value={op.id}>{op.emoji} {op.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">Atividade *</label>
+                  <select
+                    value={editActivityType}
+                    onChange={(e) => setEditActivityType(e.target.value as ActivityType)}
+                    className={`w-full p-2 rounded-xl border font-bold ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                  >
+                    {editAvailableActivities.map(act => (
+                      <option key={act.id} value={act.id}>{act.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block font-bold mb-1">Litros Abastecidos</label>
                 <input

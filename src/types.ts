@@ -72,9 +72,36 @@ export interface GasStation {
   active: boolean;
 }
 
-export type OperationType = 'GRAMA' | 'COLHEITA' | 'PLANTIO' | 'TRANSPORTE' | 'OUTROS';
+export type OperationType = 'GRAMA' | 'COLHEITA' | 'PLANTIO' | 'TRANSPORTE' | 'CANA' | 'OUTROS';
 
-export type ActivityType = 'CORTE' | 'ROCADA' | 'COLETA_PALHA' | 'APLICACAO' | 'OUTROS';
+export type ActivityType =
+  // Grama
+  | 'CORTE'
+  | 'ROCADA'
+  | 'APLICACAO'
+  | 'COLETA_PALHA'
+  // Colheita
+  | 'COLHEITA'
+  | 'CARREGAMENTO'
+  | 'TRANSBORDO'
+  // Plantio
+  | 'PLANTIO'
+  | 'PREPARO_SOLO'
+  | 'SULCACAO'
+  | 'ADUBACAO'
+  // Transporte
+  | 'TRANSPORTE_CANA'
+  | 'TRANSPORTE_INSUMOS'
+  | 'TRANSPORTE_MAQUINAS'
+  | 'TRANSPORTE_MATERIAIS'
+  // Cana
+  | 'CORTE_CANA'
+  | 'CARREGAMENTO_CANA'
+  | 'PLANTIO_CANA'
+  // Fallbacks
+  | 'OUTRAS'
+  | 'OUTROS'
+  | string;
 
 export interface FuelLog {
   id: string;

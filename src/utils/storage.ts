@@ -402,9 +402,9 @@ export function getTankStatus(gasStationId?: string) {
   const currentStock = Math.max(0, initialStock + totalRefilled - totalDispensed);
   const percentage = capacity > 0 ? Math.min(100, Math.max(0, (currentStock / capacity) * 100)) : 0;
   
-  // Alerta quando atingir 500L ou menos
+  // Alerta quando atingir 2.000L ou menos (aviso de combustível acabando) e crítico se <= 500L
   const isCritical = currentStock <= 500;
-  const isLow = currentStock <= 1000 || currentStock <= Math.max(1000, capacity * 0.1);
+  const isLow = currentStock <= 2000 || currentStock <= Math.max(2000, capacity * 0.1);
 
   return {
     capacity,
@@ -961,23 +961,25 @@ export function checkAutomatedAlerts() {
     const settings = getSettings();
     if (!settings.autoAlertsEnabled) return;
 
-    // 1. Check Tank Level (Alert <= 500L or <= 1000L)
+    // 1. Check Tank Level (Alert <= 2000L or <= 500L)
     const tank = getTankStatus();
     const lowTankAlertId = 'alt-low-tank';
     const existingLowTank = cache.alerts.find(a => a.id === lowTankAlertId);
 
     if (tank.isLow || tank.isCritical) {
       const isCritical = tank.isCritical; // <= 500L
-      const title = isCritical ? '⚠️ Alerta Crítico: Tanque Central ≤ 500L' : 'Nível Baixo de Combustível no Tanque Central';
+      const title = isCritical 
+        ? '⚠️ Alerta Crítico: Tanque Central ≤ 500L' 
+        : '⚠️ Combustível Acabando: Tanque Central ≤ 2.000L';
       const desc = isCritical 
-        ? `Nível crítico no Tanque Central: restam apenas ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L de combustível (limite de 500 L atingido). Favor providenciar recarga imediata.` 
-        : `Nível baixo no Tanque Central: restam ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L disponíveis (${tank.percentage}% da capacidade de ${tank.capacity.toLocaleString('pt-BR')} L).`;
+        ? `Nível crítico no Tanque Central (Fazenda): restam apenas ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L de combustível (limite de 500 L atingido). Favor providenciar recarga imediata.` 
+        : `Atenção: Nível de combustível baixo no Tanque Central da Fazenda. Restam ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L disponíveis (${tank.percentage}% da capacidade de ${tank.capacity.toLocaleString('pt-BR')} L - limite de alerta: 2.000 L). Favor solicitar reabastecimento.`;
 
       if (!existingLowTank) {
         const alertObj: SmartAlert = cleanUndefined({
           id: lowTankAlertId,
           type: 'LOW_TANK_LEVEL',
-          severity: isCritical ? 'ALTA' : 'MEDIA',
+          severity: 'ALTA',
           title,
           description: desc,
           date: new Date().toISOString().slice(0, 10),
@@ -985,13 +987,12 @@ export function checkAutomatedAlerts() {
         });
         cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== lowTankAlertId)];
         setDoc(doc(db, 'alerts', lowTankAlertId), alertObj).catch(console.error);
-      } else if (!existingLowTank.resolved && (existingLowTank.description !== desc || (isCritical && existingLowTank.severity !== 'ALTA'))) {
-        const severity: 'ALTA' | 'MEDIA' = isCritical ? 'ALTA' : 'MEDIA';
+      } else if (!existingLowTank.resolved && (existingLowTank.description !== desc || existingLowTank.title !== title)) {
         const updated: SmartAlert = cleanUndefined({
           ...existingLowTank,
           title,
           description: desc,
-          severity
+          severity: 'ALTA'
         });
         cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? updated : a);
         setDoc(doc(db, 'alerts', lowTankAlertId), updated).catch(console.error);

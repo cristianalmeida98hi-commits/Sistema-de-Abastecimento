@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   X, Fuel, Calendar, Clock, Truck, User as UserIcon, 
-  AlertTriangle, CheckCircle2, Droplet, Sparkles 
+  AlertTriangle, CheckCircle2, Check, Droplet, Sparkles, Plus, Gauge, MapPin
 } from 'lucide-react';
 import { Vehicle, GasStation, User, FuelType, FuelLog, SystemSettings, OperationType, ActivityType } from '../types';
 import { 
@@ -9,6 +9,7 @@ import {
   getActivitiesForOperation, OPERATION_OPTIONS 
 } from '../utils/calculations';
 import { getTankStatus } from '../utils/storage';
+import { VehicleSelector } from './VehicleSelector';
 
 interface FuelingFormModalProps {
   isOpen: boolean;
@@ -39,7 +40,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  // Tank Stock Status for Problem 5
+  // Real-time Tank Stock Status (Sede Fazenda)
   const tankStatus = useMemo(() => getTankStatus(), [isOpen]);
   const isTankLow = tankStatus.currentStock <= 2000;
 
@@ -61,7 +62,10 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
     return fuelableVehicles[0]?.id || '';
   });
 
-  const selectedEquipment = vehicles.find(v => v.id === equipmentId);
+  const selectedEquipment = useMemo(
+    () => vehicles.find(v => v.id === equipmentId) || fuelableVehicles[0],
+    [vehicles, equipmentId, fuelableVehicles]
+  );
 
   const [driverOrOperatorId, setDriverOrOperatorId] = useState<string>(
     selectedEquipment?.assignedOperatorId || currentUser?.id || users[0]?.id || ''
@@ -71,7 +75,10 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
     gasStations.find(s => s.type === 'INTERNO')?.id || gasStations[0]?.id || ''
   );
 
-  const selectedStation = gasStations.find(s => s.id === gasStationId) || gasStations[0];
+  const selectedStation = useMemo(
+    () => gasStations.find(s => s.id === gasStationId) || gasStations[0],
+    [gasStations, gasStationId]
+  );
 
   const [fuelType, setFuelType] = useState<FuelType>(
     selectedEquipment?.fuelType || 'DIESEL_S10'
@@ -84,7 +91,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   const isKmBased = selectedEquipment?.category === 'VEICULO';
   const initialCurrentKmOrHour = isKmBased 
     ? (selectedEquipment?.currentKm || 0) + 150 
-    : (selectedEquipment?.currentHourmeter || 0) + 10;
+    : (selectedEquipment?.currentHourmeter || 0) + 8;
 
   const [currentKmOrHour, setCurrentKmOrHour] = useState<number | string>(initialCurrentKmOrHour);
   const [operationType, setOperationType] = useState<OperationType>('GRAMA');
@@ -138,6 +145,17 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
 
   const selectedDriver = users.find(u => u.id === driverOrOperatorId) || currentUser;
 
+  // Quick increment buttons helper
+  const handleQuickAddLiters = (amount: number) => {
+    setLiters(prev => (Number(prev) || 0) + amount);
+  };
+
+  const handleSetFullTank = () => {
+    if (selectedEquipment?.tankCapacityLiters) {
+      setLiters(selectedEquipment.tankCapacityLiters);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEquipment || !selectedStation || numLiters <= 0) {
@@ -186,7 +204,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
       setTimeout(() => {
         setIsSavedSuccess(false);
         onClose();
-      }, 2000);
+      }, 1800);
     } catch (err: any) {
       console.error('Erro ao salvar abastecimento:', err);
       alert(`Erro ao salvar abastecimento: ${err?.message || 'Falha de comunicação.'}`);
@@ -195,306 +213,409 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
-      <div className={`w-full max-w-xl rounded-3xl shadow-2xl border flex flex-col overflow-hidden ${
-        darkMode ? 'bg-emerald-950 border-emerald-800 text-emerald-50' : 'bg-white border-emerald-100 text-gray-900'
-      }`}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-in fade-in">
+      <div className="w-full max-w-2xl sm:max-w-3xl rounded-3xl shadow-2xl border flex flex-col overflow-hidden bg-[#03231b] border-emerald-800 text-slate-100 max-h-[92vh]">
         
-        {/* Header */}
-        <div className="p-4 border-b border-emerald-800/20 bg-gradient-to-r from-emerald-900 to-emerald-800 text-white flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-amber-500 text-gray-950 flex items-center justify-center font-bold shrink-0">
+        {/* Modal Header */}
+        <div className="p-4 sm:p-5 border-b border-emerald-800/60 bg-gradient-to-r from-[#064E3B] to-[#043327] text-white flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-[#FACC15] text-[#064E3B] flex items-center justify-center font-black shrink-0 shadow-sm">
               <Fuel className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-sm font-extrabold">Novo Registro de Abastecimento</h2>
-              <p className="text-[11px] text-emerald-200">AndradeAgro • Registro Rápido e Direto</p>
+              <h2 className="text-base sm:text-lg font-black tracking-tight text-white">
+                Novo Registro de Abastecimento
+              </h2>
+              <p className="text-[11px] sm:text-xs text-emerald-200 font-medium">
+                AndradeAgro • Lançamento Rápido e Controle de Combustível
+              </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl bg-emerald-800/80 hover:bg-emerald-700 text-emerald-100 transition-colors"
+            className="w-10 h-10 min-h-[44px] min-w-[44px] rounded-2xl bg-emerald-900/60 hover:bg-emerald-800 text-white flex items-center justify-center transition-colors border border-emerald-700/60"
+            title="Fechar Formulário"
+            aria-label="Fechar Formulário"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Success Confirmation Modal Overlay (Problem 4) */}
+        {/* Success Confirmation Overlay */}
         {isSavedSuccess ? (
-          <div className="p-8 text-center space-y-4 animate-in zoom-in-95 duration-200">
-            <div className="w-16 h-16 bg-emerald-500 text-white rounded-full flex items-center justify-center mx-auto shadow-lg shadow-emerald-900/30 animate-bounce">
-              <CheckCircle2 className="w-10 h-10" />
+          <div className="p-8 sm:p-12 text-center space-y-4 animate-in zoom-in-95 duration-200 my-auto">
+            <div className="w-20 h-20 bg-[#FACC15] text-[#064E3B] rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-yellow-500/20 animate-bounce">
+              <CheckCircle2 className="w-12 h-12 stroke-[2.5]" />
             </div>
-            <div className="space-y-1">
-              <h3 className="text-lg font-black text-emerald-400">
-                ✅ Abastecimento salvo com sucesso!
+            <div className="space-y-1.5">
+              <h3 className="text-xl sm:text-2xl font-black text-white">
+                ✅ Abastecimento Salvo com Sucesso!
               </h3>
-              <p className="text-xs text-emerald-200">
-                Foram registrados <strong>{savedLiters} Litros</strong> para {selectedEquipment?.model} ({selectedEquipment?.licensePlate || selectedEquipment?.patrimonyCode}).
+              <p className="text-sm text-emerald-200 font-medium">
+                Foram registrados <strong className="text-[#FACC15] font-extrabold">{savedLiters} Litros</strong> para o equipamento <strong>{selectedEquipment?.model}</strong>.
               </p>
             </div>
-            <div className="inline-block px-4 py-1.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold text-xs">
-              Atualizando estoque e fechando...
+            <div className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-900/60 border border-emerald-700 text-[#FACC15] font-black text-xs">
+              <Clock className="w-4 h-4 animate-spin" />
+              <span>Atualizando estoque e sincronizando...</span>
             </div>
           </div>
         ) : (
-          /* Simplified Form Body (Problem 3) */
-          <form onSubmit={handleSubmit} className="p-4 sm:p-5 overflow-y-auto space-y-4 max-h-[80vh]">
+          /* Form Content with Smooth Scroll */
+          <form onSubmit={handleSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-5 custom-scrollbar">
             
             {/* Low Fuel Warning Banner (Problem 5: <= 2000L) */}
             {isTankLow && (
-              <div className="p-3.5 rounded-2xl bg-amber-500/20 border-2 border-amber-500/60 text-amber-900 dark:text-amber-200 flex items-center gap-3 text-xs shadow-md animate-pulse">
-                <div className="w-8 h-8 rounded-xl bg-amber-500 text-gray-950 flex items-center justify-center font-black shrink-0">
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-500/20 border-2 border-[#FACC15] text-white flex items-start sm:items-center gap-3 text-xs shadow-md">
+                <div className="w-9 h-9 rounded-xl bg-[#FACC15] text-[#064E3B] flex items-center justify-center font-black shrink-0 shadow-sm mt-0.5 sm:mt-0">
                   <AlertTriangle className="w-5 h-5" />
                 </div>
-                <div className="flex-1">
-                  <span className="font-extrabold uppercase text-amber-800 dark:text-amber-300 block text-[11px]">
-                    ⚠️ Combustível acabando!
+                <div className="flex-1 space-y-0.5">
+                  <span className="font-black uppercase tracking-wider text-[#FACC15] block text-xs">
+                    ⚠️ Combustível baixo
                   </span>
-                  <p className="text-[11px] font-medium leading-snug">
-                    Estoque disponível no Tanque Central: <strong>{tankStatus.currentStock.toLocaleString('pt-BR')}L</strong> (limite de alerta: 2.000L).
+                  <p className="text-xs text-slate-100 font-medium leading-relaxed">
+                    O tanque da Sede Fazenda está com <strong>{Math.round(tankStatus.currentStock).toLocaleString('pt-BR')} L</strong>. O nível está abaixo do limite de 2.000 L.
                   </p>
                 </div>
               </div>
             )}
 
-            {/* Vehicle Selection */}
-            <div>
-              <label className="block text-xs font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                Veículo / Trator / Máquina *
-              </label>
-              <select
-                value={equipmentId}
-                onChange={(e) => setEquipmentId(e.target.value)}
-                required
-                className={`w-full px-3 py-2.5 rounded-xl border text-xs font-bold outline-none ${
-                  darkMode ? 'bg-emerald-900/40 border-emerald-800 text-amber-400' : 'bg-gray-50 border-gray-200 text-emerald-800'
-                }`}
-              >
-                {fuelableVehicles.map(v => (
-                  <option key={v.id} value={v.id}>
-                    [{v.category === 'VEICULO' ? 'VEÍCULO' : 'MÁQUINA'}] {v.model} - {v.licensePlate || v.patrimonyCode}
-                  </option>
-                ))}
-              </select>
+            {/* 1. Vehicle Selection Component */}
+            <div className="p-3.5 sm:p-4 rounded-3xl bg-[#04281f] border border-emerald-800/80 space-y-2">
+              <VehicleSelector
+                vehicles={fuelableVehicles}
+                selectedVehicleId={equipmentId}
+                onSelect={(id) => setEquipmentId(id)}
+                darkMode={darkMode}
+                label="Selecione o Veículo ou Máquina *"
+              />
             </div>
 
-            {/* Liters & Meter Row */}
-            <div className="grid grid-cols-2 gap-3 p-3 rounded-2xl bg-emerald-500/5 border border-emerald-500/20">
-              <div>
-                <label className="block text-[11px] font-bold text-gray-700 dark:text-emerald-200 mb-1">
-                  Litros Abastecidos *
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  required
-                  placeholder="Ex: 50"
-                  value={liters}
-                  onChange={(e) => setLiters(e.target.value)}
-                  className={`w-full px-3 py-2 rounded-xl border text-sm font-black outline-none ${
-                    darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-gray-200 text-gray-900'
-                  }`}
-                />
+            {/* 2. Liters & Meter Row (High Contrast & Big Inputs) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-3xl bg-[#04281f] border border-emerald-800/80">
+              
+              {/* Liters Input & Quick Increment Chips */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-200">
+                    Litros Abastecidos *
+                  </label>
+                  <span className="text-[11px] font-bold text-[#FACC15]">
+                    Capacidade: {selectedEquipment?.tankCapacityLiters || 0}L
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <Droplet className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#FACC15]" />
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    required
+                    placeholder="Ex: 50"
+                    value={liters}
+                    onChange={(e) => setLiters(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3 rounded-2xl border-2 border-emerald-700/80 bg-[#063327] text-white text-lg font-black outline-none focus:border-[#FACC15] focus:ring-2 focus:ring-[#FACC15]/20 transition-all placeholder-emerald-300/40"
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-sm text-[#FACC15]">
+                    LITROS
+                  </span>
+                </div>
+
+                {/* Quick Fill Chips */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleQuickAddLiters(10)}
+                    className="px-2.5 py-1 rounded-xl bg-emerald-900/60 hover:bg-emerald-800 text-[#FACC15] font-bold text-[11px] border border-emerald-700 transition-colors"
+                  >
+                    +10 L
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickAddLiters(20)}
+                    className="px-2.5 py-1 rounded-xl bg-emerald-900/60 hover:bg-emerald-800 text-[#FACC15] font-bold text-[11px] border border-emerald-700 transition-colors"
+                  >
+                    +20 L
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickAddLiters(50)}
+                    className="px-2.5 py-1 rounded-xl bg-emerald-900/60 hover:bg-emerald-800 text-[#FACC15] font-bold text-[11px] border border-emerald-700 transition-colors"
+                  >
+                    +50 L
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickAddLiters(100)}
+                    className="px-2.5 py-1 rounded-xl bg-emerald-900/60 hover:bg-emerald-800 text-[#FACC15] font-bold text-[11px] border border-emerald-700 transition-colors"
+                  >
+                    +100 L
+                  </button>
+                  {selectedEquipment?.tankCapacityLiters ? (
+                    <button
+                      type="button"
+                      onClick={handleSetFullTank}
+                      className="px-2.5 py-1 rounded-xl bg-[#FACC15] hover:bg-yellow-400 text-[#064E3B] font-black text-[11px] transition-colors"
+                    >
+                      Completar ({selectedEquipment.tankCapacityLiters}L)
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
+              {/* Meter Input (Km or Hourmeter) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-black uppercase tracking-wider text-slate-200">
+                    {isKmBased ? 'Quilometragem (KM) *' : 'Horímetro Atual (Horas) *'}
+                  </label>
+                  <span className="text-[11px] font-bold text-emerald-300">
+                    Anterior: {metrics.previousKmOrHour ? `${metrics.previousKmOrHour} ${isKmBased ? 'KM' : 'h'}` : 'Primeiro'}
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <Gauge className="w-5 h-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#FACC15]" />
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    required
+                    value={currentKmOrHour}
+                    onChange={(e) => setCurrentKmOrHour(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3 rounded-2xl border-2 border-emerald-700/80 bg-[#063327] text-[#FACC15] text-lg font-black outline-none focus:border-[#FACC15] focus:ring-2 focus:ring-[#FACC15]/20 transition-all"
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-sm text-slate-200">
+                    {isKmBased ? 'KM' : 'HORAS'}
+                  </span>
+                </div>
+
+                {/* Meter difference note */}
+                <div className="flex items-center justify-between text-[11px] text-emerald-300 font-semibold pt-1">
+                  <span>Variação calculada:</span>
+                  <span className="text-white font-bold">
+                    +{Math.max(0, numKmOrHour - (metrics.previousKmOrHour || 0))} {isKmBased ? 'KM' : 'horas'}
+                  </span>
+                </div>
+              </div>
+
+            </div>
+
+            {/* 3. Operation Type & Activity (Two-Step Workflow) */}
+            <div className="p-4 rounded-3xl bg-[#04281f] border border-emerald-800/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black uppercase tracking-wider text-slate-200">
+                  Tipo de Operação & Atividade Agrícola *
+                </span>
+                <span className="text-[10px] font-bold text-[#FACC15] bg-emerald-950 px-2 py-0.5 rounded-md border border-emerald-800">
+                  Etapa 1 & 2
+                </span>
+              </div>
+
+              {/* Step 1: Operation Selection */}
               <div>
-                <label className="block text-[11px] font-bold text-gray-700 dark:text-emerald-200 mb-1">
-                  {isKmBased ? 'Quilometragem (KM) *' : 'Horímetro Atual (h) *'}
+                <label className="block text-[11px] font-bold text-emerald-300 mb-1.5">
+                  1. Selecione o Tipo de Operação *
                 </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  required
-                  value={currentKmOrHour}
-                  onChange={(e) => setCurrentKmOrHour(e.target.value)}
-                  className={`w-full px-3 py-2 rounded-xl border text-sm font-black outline-none ${
-                    darkMode ? 'bg-emerald-950 border-emerald-800 text-amber-400' : 'bg-white border-gray-200 text-emerald-800'
-                  }`}
-                />
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                  {OPERATION_OPTIONS.map((op) => {
+                    const isSelected = operationType === op.id;
+                    return (
+                      <button
+                        key={op.id}
+                        type="button"
+                        onClick={() => handleOperationTypeChange(op.id)}
+                        className={`p-2.5 rounded-2xl border text-center transition-all flex flex-col items-center justify-center gap-1 ${
+                          isSelected
+                            ? 'bg-[#FACC15] text-[#064E3B] font-black border-[#FACC15] shadow-md scale-[1.02]'
+                            : 'bg-[#063327] hover:bg-[#063f30] text-slate-200 border-emerald-700/80 font-bold'
+                        }`}
+                      >
+                        <span className="text-lg">{op.emoji}</span>
+                        <span className="text-xs truncate w-full">{op.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Step 2: Activity Selection */}
+              <div className="pt-2 border-t border-emerald-800/60">
+                <label className="block text-[11px] font-bold text-emerald-300 mb-1.5">
+                  2. Selecione a Atividade Específica ({OPERATION_OPTIONS.find(o => o.id === operationType)?.label}) *
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {availableActivities.map((act) => {
+                    const isSelected = activityType === act.id;
+                    return (
+                      <button
+                        key={act.id}
+                        type="button"
+                        onClick={() => setActivityType(act.id as ActivityType)}
+                        className={`px-3 py-2 rounded-xl border text-left transition-all flex items-center justify-between text-xs ${
+                          isSelected
+                            ? 'bg-emerald-600 text-white font-black border-emerald-400 shadow-sm'
+                            : 'bg-[#063327] hover:bg-[#063f30] text-slate-200 border-emerald-700/80 font-semibold'
+                        }`}
+                      >
+                        <span className="truncate">{act.label}</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3] shrink-0 ml-1 text-[#FACC15]" />}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            {/* Date, Fuel Type, Station */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                  Data e Hora *
+            {/* 4. Details Grid: Fuel Type, Station, Driver, DateTime */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-3xl bg-[#04281f] border border-emerald-800/80">
+              
+              {/* Station Selection */}
+              <div className="space-y-1">
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200">
+                  Local / Posto de Saída *
                 </label>
-                <input
-                  type="datetime-local"
-                  value={dateTime}
-                  onChange={(e) => setDateTime(e.target.value)}
-                  required
-                  className={`w-full px-3 py-2 rounded-xl border text-xs outline-none ${
-                    darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
-                  }`}
-                />
+                <select
+                  value={gasStationId}
+                  onChange={(e) => setGasStationId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-700/80 bg-[#063327] text-white text-xs font-bold outline-none focus:border-[#FACC15] transition-all"
+                >
+                  {gasStations.map(s => (
+                    <option key={s.id} value={s.id} className="bg-[#03231b] text-white">
+                      {s.name} ({s.type === 'INTERNO' ? 'Tanque Sede' : 'Externo'})
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                  Tipo de Combustível *
+              {/* Fuel Type */}
+              <div className="space-y-1">
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200">
+                  Combustível *
                 </label>
                 <select
                   value={fuelType}
                   onChange={(e) => setFuelType(e.target.value as FuelType)}
-                  className={`w-full px-3 py-2 rounded-xl border text-xs font-bold outline-none ${
-                    darkMode ? 'bg-emerald-900/40 border-emerald-800 text-amber-400' : 'bg-gray-50 border-gray-200 text-emerald-800'
-                  }`}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-700/80 bg-[#063327] text-[#FACC15] text-xs font-bold outline-none focus:border-[#FACC15] transition-all"
                 >
-                  <option value="DIESEL_S10">Diesel S10</option>
-                  <option value="DIESEL_S500">Diesel S500</option>
-                  <option value="GASOLINA_COMUM">Gasolina Comum</option>
-                  <option value="GASOLINA_GRID">Gasolina Aditivada</option>
-                  <option value="ETANOL">Etanol Hidratado</option>
-                  <option value="ARLA_32">Arla 32</option>
+                  <option value="DIESEL_S10" className="bg-[#03231b] text-white">Diesel S10</option>
+                  <option value="DIESEL_S500" className="bg-[#03231b] text-white">Diesel S500</option>
+                  <option value="GASOLINA_COMUM" className="bg-[#03231b] text-white">Gasolina Comum</option>
+                  <option value="GASOLINA_GRID" className="bg-[#03231b] text-white">Gasolina Aditivada</option>
+                  <option value="ETANOL" className="bg-[#03231b] text-white">Etanol Hidratado</option>
+                  <option value="ARLA_32" className="bg-[#03231b] text-white">Arla 32</option>
                 </select>
               </div>
-            </div>
 
-            {/* Driver & Station */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                  Motorista / Operador
+              {/* Driver / Operator */}
+              <div className="space-y-1">
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200">
+                  Motorista / Operador *
                 </label>
                 <select
                   value={driverOrOperatorId}
                   onChange={(e) => setDriverOrOperatorId(e.target.value)}
-                  className={`w-full px-3 py-2 rounded-xl border text-xs outline-none ${
-                    darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
-                  }`}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-700/80 bg-[#063327] text-white text-xs font-bold outline-none focus:border-[#FACC15] transition-all"
                 >
                   {users.map(u => (
-                    <option key={u.id} value={u.id}>
+                    <option key={u.id} value={u.id} className="bg-[#03231b] text-white">
                       {u.name} ({u.department || u.role})
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label className="block text-[11px] font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                  Local / Posto de Saída
+              {/* Date & Time */}
+              <div className="space-y-1">
+                <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200">
+                  Data e Hora do Abastecimento *
                 </label>
-                <select
-                  value={gasStationId}
-                  onChange={(e) => setGasStationId(e.target.value)}
-                  className={`w-full px-3 py-2 rounded-xl border text-xs outline-none ${
-                    darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
-                  }`}
-                >
-                  {gasStations.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.type})
-                    </option>
-                  ))}
-                </select>
+                <input
+                  type="datetime-local"
+                  value={dateTime}
+                  onChange={(e) => setDateTime(e.target.value)}
+                  required
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-700/80 bg-[#063327] text-white text-xs font-bold outline-none focus:border-[#FACC15] transition-all"
+                />
               </div>
+
             </div>
 
-            {/* Operation Type & Activity (Two-Step Selection) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* 5. Financial & Metrics Bar */}
+            <div className="p-4 rounded-3xl bg-gradient-to-r from-[#064E3B] to-[#043327] border-2 border-[#FACC15] shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <label className="block text-[11px] font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                  Tipo de Operação *
-                </label>
-                <select
-                  value={operationType}
-                  onChange={(e) => handleOperationTypeChange(e.target.value as OperationType)}
-                  className={`w-full px-3 py-2 rounded-xl border text-xs outline-none font-bold ${
-                    darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-slate-50 border-slate-300'
-                  }`}
-                  required
-                >
-                  {OPERATION_OPTIONS.map((op) => (
-                    <option key={op.id} value={op.id}>
-                      {op.emoji} {op.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                  Atividade *
-                </label>
-                <select
-                  value={activityType}
-                  onChange={(e) => setActivityType(e.target.value as ActivityType)}
-                  className={`w-full px-3 py-2 rounded-xl border text-xs outline-none font-bold ${
-                    darkMode ? 'bg-emerald-950 border-emerald-800 text-slate-100' : 'bg-slate-50 border-slate-300'
-                  }`}
-                  required
-                >
-                  {availableActivities.map((act) => (
-                    <option key={act.id} value={act.id}>
-                      {act.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Total Value Bar */}
-            <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] uppercase font-bold text-amber-800 dark:text-amber-300 block">
-                  Valor Estimado ({numLiters}L × {formatCurrency(pricePerLiter)})
+                <span className="text-[10px] uppercase font-black tracking-widest text-[#FACC15] block">
+                  Valor Total Estimado ({numLiters} L × {formatCurrency(pricePerLiter)}/L)
                 </span>
-                <span className="text-sm font-black text-amber-900 dark:text-amber-200">
+                <span className="text-xl sm:text-2xl font-black text-white tracking-tight">
                   {formatCurrency(metrics.totalValue)}
                 </span>
               </div>
-              <div className="text-right">
-                <span className="text-[10px] text-gray-500 dark:text-emerald-400 block">Capacidade Tanque</span>
-                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">{selectedEquipment?.tankCapacityLiters || 0}L</span>
+
+              <div className="flex items-center gap-4 text-xs font-bold text-emerald-200">
+                {metrics.calculatedAverageKmPerLiter !== undefined && (
+                  <div className="text-right">
+                    <span className="block text-[10px] text-[#FACC15] font-black uppercase">Média Km/L</span>
+                    <span className="text-sm font-extrabold text-white">{metrics.calculatedAverageKmPerLiter} km/L</span>
+                  </div>
+                )}
+                {metrics.calculatedAverageLitersPerHour !== undefined && (
+                  <div className="text-right">
+                    <span className="block text-[10px] text-[#FACC15] font-black uppercase">Consumo L/h</span>
+                    <span className="text-sm font-extrabold text-white">{metrics.calculatedAverageLitersPerHour} L/h</span>
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Observations (Optional) */}
-            <div>
-              <label className="block text-[11px] font-bold mb-1 text-gray-700 dark:text-emerald-200">
-                Observações (Opcional)
+            {/* Suspicious Consumption Alert if Triggered */}
+            {metrics.flaggedSuspicious && (
+              <div className="p-3.5 rounded-2xl bg-red-500/20 border border-red-500 text-red-200 flex items-center gap-3 text-xs font-bold">
+                <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+                <span>⚠️ {metrics.suspiciousReason}</span>
+              </div>
+            )}
+
+            {/* 6. Observations Field */}
+            <div className="space-y-1">
+              <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200">
+                Observações / Localização do Talhão (Opcional)
               </label>
               <input
                 type="text"
                 value={observations}
                 onChange={(e) => setObservations(e.target.value)}
-                placeholder="Ex: Talhão 04 / Corte de grama bermuda..."
-                className={`w-full px-3 py-2 rounded-xl border text-xs outline-none ${
-                  darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 border-gray-200'
-                }`}
+                placeholder="Ex: Talhão 04 / Corte de grama bermuda / Início da manhã..."
+                className="w-full px-4 py-2.5 rounded-2xl border border-emerald-700/80 bg-[#04281f] text-white text-xs font-medium outline-none focus:border-[#FACC15] placeholder-emerald-300/40 transition-all"
               />
             </div>
 
-            {/* Action Buttons */}
-            <div className="pt-2 border-t border-emerald-800/20 flex items-center justify-end gap-2.5">
+            {/* 7. Modal Actions Footer */}
+            <div className="pt-3 border-t border-emerald-800/60 flex items-center justify-end gap-3 shrink-0">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2.5 rounded-xl text-xs font-bold text-gray-600 dark:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                className="px-5 py-3 min-h-[44px] rounded-2xl text-xs font-bold text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors border border-emerald-800/80"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className={`px-5 py-2.5 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-400 text-gray-950 shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-transform active:scale-95 ${
+                className={`px-6 py-3 min-h-[48px] rounded-2xl text-xs font-black bg-[#FACC15] hover:bg-yellow-400 text-[#064E3B] shadow-lg shadow-yellow-500/20 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer ${
                   isSubmitting ? 'opacity-70 cursor-wait' : ''
                 }`}
               >
                 {isSubmitting ? (
                   <>
-                    <Clock className="w-4 h-4 animate-spin" />
-                    <span>Salvando...</span>
+                    <Clock className="w-4 h-4 animate-spin text-[#064E3B]" />
+                    <span>Salvando Abastecimento...</span>
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 className="w-4 h-4" />
+                    <CheckCircle2 className="w-4 h-4 text-[#064E3B]" />
                     <span>Salvar Abastecimento</span>
                   </>
                 )}

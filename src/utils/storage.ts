@@ -961,19 +961,14 @@ export function checkAutomatedAlerts() {
     const settings = getSettings();
     if (!settings.autoAlertsEnabled) return;
 
-    // 1. Check Tank Level (Alert <= 2000L or <= 500L)
+    // 1. Check Tank Level of Sede Fazenda (Alert <= 2000L)
     const tank = getTankStatus();
     const lowTankAlertId = 'alt-low-tank';
     const existingLowTank = cache.alerts.find(a => a.id === lowTankAlertId);
 
-    if (tank.isLow || tank.isCritical) {
-      const isCritical = tank.isCritical; // <= 500L
-      const title = isCritical 
-        ? '⚠️ Alerta Crítico: Tanque Central ≤ 500L' 
-        : '⚠️ Combustível Acabando: Tanque Central ≤ 2.000L';
-      const desc = isCritical 
-        ? `Nível crítico no Tanque Central (Fazenda): restam apenas ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L de combustível (limite de 500 L atingido). Favor providenciar recarga imediata.` 
-        : `Atenção: Nível de combustível baixo no Tanque Central da Fazenda. Restam ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L disponíveis (${tank.percentage}% da capacidade de ${tank.capacity.toLocaleString('pt-BR')} L - limite de alerta: 2.000 L). Favor solicitar reabastecimento.`;
+    if (tank.currentStock <= 2000) {
+      const title = '⚠️ Combustível baixo';
+      const desc = `O tanque da Sede Fazenda está com ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L. O nível está abaixo do limite de 2.000 L.`;
 
       if (!existingLowTank) {
         const alertObj: SmartAlert = cleanUndefined({
@@ -987,22 +982,27 @@ export function checkAutomatedAlerts() {
         });
         cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== lowTankAlertId)];
         setDoc(doc(db, 'alerts', lowTankAlertId), alertObj).catch(console.error);
-      } else if (!existingLowTank.resolved && (existingLowTank.description !== desc || existingLowTank.title !== title)) {
+      } else {
+        // Ensure the existing alert is active/pending and has the updated real stock
         const updated: SmartAlert = cleanUndefined({
           ...existingLowTank,
           title,
           description: desc,
-          severity: 'ALTA'
+          severity: 'ALTA',
+          resolved: false,
+          resolvedAt: undefined,
+          resolvedBy: undefined
         });
         cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? updated : a);
         setDoc(doc(db, 'alerts', lowTankAlertId), updated).catch(console.error);
       }
     } else if (existingLowTank && !existingLowTank.resolved) {
+      // Tank level returned to above 2.000 L -> auto-resolve the alert
       const resolvedAlert = cleanUndefined({
         ...existingLowTank,
         resolved: true,
         resolvedAt: new Date().toISOString(),
-        resolvedBy: 'Sistema (Tanque Reabastecido)'
+        resolvedBy: 'Sistema (Estoque Normalizado)'
       });
       cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? resolvedAlert : a);
       setDoc(doc(db, 'alerts', lowTankAlertId), resolvedAlert).catch(console.error);

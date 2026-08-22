@@ -8,6 +8,7 @@ import {
   getOperationTypeName, 
   getActivityTypeName 
 } from '../utils/operations';
+import { VehicleSelector } from './VehicleSelector';
 
 interface OperatorFuelingViewProps {
   currentUser: User;
@@ -229,18 +230,18 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
       <form onSubmit={handleSubmit} className={`p-6 rounded-3xl border shadow-lg space-y-5 ${
         darkMode ? 'bg-[#042d23] border-emerald-900/80 text-white' : 'bg-white border-slate-200 text-slate-900'
       }`}>
-        {/* Low Fuel Warning Banner (Problem 5: <= 2000L) */}
+        {/* Low Fuel Warning Banner (Sede Fazenda <= 2000L) */}
         {isTankLow && (
-          <div className="p-4 rounded-2xl bg-amber-500/20 border-2 border-amber-500/60 text-amber-900 dark:text-amber-200 flex items-center gap-3 text-xs shadow-md animate-pulse">
-            <div className="w-9 h-9 rounded-xl bg-amber-500 text-gray-950 flex items-center justify-center font-black shrink-0">
+          <div className="p-4 rounded-2xl bg-amber-500/20 border-2 border-[#FACC15] text-white flex items-center gap-3 text-xs shadow-md">
+            <div className="w-9 h-9 rounded-xl bg-[#FACC15] text-[#064E3B] flex items-center justify-center font-black shrink-0">
               <AlertTriangle className="w-5 h-5" />
             </div>
-            <div className="flex-1">
-              <span className="font-extrabold uppercase text-amber-800 dark:text-amber-300 block text-xs">
-                ⚠️ Combustível acabando!
+            <div className="flex-1 space-y-0.5">
+              <span className="font-extrabold uppercase text-[#FACC15] block text-xs">
+                ⚠️ Combustível baixo
               </span>
-              <p className="text-[11px] font-medium leading-snug">
-                Estoque disponível no Tanque Central: <strong>{tankStatus.currentStock.toLocaleString('pt-BR')}L</strong> (limite de alerta: 2.000L).
+              <p className="text-xs text-slate-100 font-medium leading-snug">
+                O tanque da Sede Fazenda está com <strong>{Math.round(tankStatus.currentStock).toLocaleString('pt-BR')} L</strong>. O nível está abaixo do limite de 2.000 L.
               </p>
             </div>
           </div>
@@ -279,28 +280,15 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
           />
         </div>
 
-        {/* 2. Máquina ou Veículo */}
+        {/* 2. Máquina ou Veículo Selecionado */}
         <div>
-          <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-1">
-            Máquina ou Veículo Utilizado *
-          </label>
-          <select
-            value={selectedVehicleId}
-            onChange={(e) => setSelectedVehicleId(e.target.value)}
-            required
-            className={`w-full px-4 py-3.5 text-xs font-bold rounded-2xl border outline-none transition-all ${
-              darkMode 
-                ? 'bg-emerald-950 border-emerald-800 text-slate-100 focus:ring-2 focus:ring-[#FACC15]' 
-                : 'bg-slate-50 border-slate-300 text-slate-900 focus:bg-white focus:ring-2 focus:ring-[#064E3B]'
-            }`}
-          >
-            {fuelableVehicles.map((veh) => (
-              <option key={veh.id} value={veh.id}>
-                {veh.category === 'TRATOR' || veh.category === 'MAQUINA_AGRICOLA' ? '🚜 ' : '🚛 '}
-                {veh.model} — {veh.licensePlate || veh.patrimonyCode} ({veh.sector})
-              </option>
-            ))}
-          </select>
+          <VehicleSelector
+            vehicles={fuelableVehicles}
+            selectedVehicleId={selectedVehicleId}
+            onSelect={(id) => setSelectedVehicleId(id)}
+            darkMode={darkMode}
+            label="Máquina ou Veículo Utilizado *"
+          />
         </div>
 
         {/* 3. Tipo de Operação (Etapa 1) */}

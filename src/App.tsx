@@ -15,6 +15,7 @@ import {
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
+import { CheckCircle2 } from 'lucide-react';
 
 // Lazy Loaded Views & Modals for optimum initial loading performance
 const DashboardView = React.lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
@@ -178,6 +179,12 @@ export default function App() {
     }
   };
 
+  const [fuelingSuccessFeedback, setFuelingSuccessFeedback] = useState<{
+    show: boolean;
+    liters: number;
+    equipmentName: string;
+  } | null>(null);
+
   const handleOpenFuelingModalWithEquipment = (equipmentId: string) => {
     const currentVehicles = getVehicles();
     const eq = currentVehicles.find(v => v.id === equipmentId);
@@ -196,9 +203,18 @@ export default function App() {
 
       if (currentUser && currentUser.role === 'FUNCIONARIO') {
         setIsFuelingModalOpen(false);
-        logoutUser();
-        setCurrentUser(null);
-        setLoginSuccessMessage('Abastecimento registrado com sucesso!');
+        setFuelingSuccessFeedback({
+          show: true,
+          liters: logData.liters,
+          equipmentName: logData.equipmentName || 'Equipamento'
+        });
+
+        setTimeout(() => {
+          setFuelingSuccessFeedback(null);
+          logoutUser();
+          setCurrentUser(null);
+          setLoginSuccessMessage(`✅ Abastecimento de ${logData.liters}L registrado com sucesso!`);
+        }, 2200);
       }
     } catch (err: any) {
       console.error('Erro ao salvar abastecimento:', err);
@@ -483,6 +499,29 @@ export default function App() {
           />
         )}
       </Suspense>
+
+      {/* Fueling Success Feedback Toast / Overlay (Problem 4) */}
+      {fuelingSuccessFeedback?.show && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-emerald-950 border-2 border-amber-400 p-6 sm:p-8 rounded-3xl text-center space-y-4 max-w-sm w-full shadow-2xl animate-in zoom-in-95">
+            <div className="w-16 h-16 bg-emerald-500 text-gray-950 rounded-full flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/30 animate-bounce">
+              <CheckCircle2 className="w-10 h-10 text-white" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-black text-white">✅ Abastecimento Salvo!</h3>
+              <p className="text-sm font-bold text-amber-400">
+                {fuelingSuccessFeedback.liters} Litros Registrados
+              </p>
+              <p className="text-xs text-emerald-200">
+                {fuelingSuccessFeedback.equipmentName}
+              </p>
+            </div>
+            <div className="p-2.5 bg-emerald-900/60 rounded-xl text-[11px] text-emerald-300 font-medium">
+              Redirecionando para a tela inicial...
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

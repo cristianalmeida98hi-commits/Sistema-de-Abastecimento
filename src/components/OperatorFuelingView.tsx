@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { FuelLog, User, Vehicle, GasStation, OperationType, ActivityType } from '../types';
-import { Fuel, CheckCircle2, Clock, Truck, Plus, Sparkles, Send, Shield, History, MapPin } from 'lucide-react';
+import { Fuel, CheckCircle2, Clock, Truck, Plus, Sparkles, Send, Shield, History, MapPin, AlertTriangle } from 'lucide-react';
+import { getTankStatus } from '../utils/storage';
 
 interface OperatorFuelingViewProps {
   currentUser: User;
@@ -19,6 +20,9 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
   userLogs = [],
   darkMode
 }) => {
+  const tankStatus = useMemo(() => getTankStatus(), []);
+  const isTankLow = tankStatus.currentStock <= 2000;
+
   const fuelableVehicles = React.useMemo(
     () => vehicles.filter(v => v.fuelType !== 'NENHUM'),
     [vehicles]
@@ -198,6 +202,23 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
       <form onSubmit={handleSubmit} className={`p-6 rounded-3xl border shadow-lg space-y-5 ${
         darkMode ? 'bg-[#042d23] border-emerald-900/80 text-white' : 'bg-white border-slate-200 text-slate-900'
       }`}>
+        {/* Low Fuel Warning Banner (Problem 5: <= 2000L) */}
+        {isTankLow && (
+          <div className="p-4 rounded-2xl bg-amber-500/20 border-2 border-amber-500/60 text-amber-900 dark:text-amber-200 flex items-center gap-3 text-xs shadow-md animate-pulse">
+            <div className="w-9 h-9 rounded-xl bg-amber-500 text-gray-950 flex items-center justify-center font-black shrink-0">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <span className="font-extrabold uppercase text-amber-800 dark:text-amber-300 block text-xs">
+                ⚠️ Combustível acabando!
+              </span>
+              <p className="text-[11px] font-medium leading-snug">
+                Estoque disponível no Tanque Central: <strong>{tankStatus.currentStock.toLocaleString('pt-BR')}L</strong> (limite de alerta: 2.000L).
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-emerald-900/60 pb-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-[#064E3B] flex items-center justify-center text-[#FACC15]">

@@ -31,7 +31,7 @@ export const StaffViewComponent: React.FC<StaffViewProps> = ({
   const [cpf, setCpf] = useState('');
   const [cnh, setCnh] = useState('');
   const [cnhCategory, setCnhCategory] = useState('D');
-  const [cnhExpiration, setCnhExpiration] = useState('2028-12-31');
+  const [cnhExpiration, setCnhExpiration] = useState('');
   const [avatar, setAvatar] = useState('');
 
   const handleOpenAdd = () => {
@@ -45,7 +45,7 @@ export const StaffViewComponent: React.FC<StaffViewProps> = ({
     setCpf('');
     setCnh('');
     setCnhCategory('D');
-    setCnhExpiration('2028-12-31');
+    setCnhExpiration('');
     setAvatar('');
     setShowModal(true);
   };
@@ -61,7 +61,7 @@ export const StaffViewComponent: React.FC<StaffViewProps> = ({
     setCpf(u.cpf || '');
     setCnh(u.cnh || '');
     setCnhCategory(u.cnhCategory || 'D');
-    setCnhExpiration(u.cnhExpiration || '2028-12-31');
+    setCnhExpiration(u.cnhExpiration || '');
     setAvatar(u.avatar || '');
     setShowModal(true);
   };
@@ -79,7 +79,7 @@ export const StaffViewComponent: React.FC<StaffViewProps> = ({
         cpf,
         cnh,
         cnhCategory,
-        cnhExpiration,
+        cnhExpiration: cnhExpiration.trim() || undefined,
         avatar: avatar || undefined
       });
     } else {
@@ -93,7 +93,7 @@ export const StaffViewComponent: React.FC<StaffViewProps> = ({
         cpf,
         cnh,
         cnhCategory,
-        cnhExpiration,
+        cnhExpiration: cnhExpiration.trim() || undefined,
         active: true,
         avatar: avatar || undefined
       });

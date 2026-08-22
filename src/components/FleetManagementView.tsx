@@ -124,20 +124,23 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   const handleCreateEquipment = (e: React.FormEvent) => {
     e.preventDefault();
     const operator = users.find(u => u.id === assignedOperatorId);
+    const cleanPatrimony = patrimonyCode.trim();
+    const cleanPlate = licensePlate.trim();
+    const isRoadVehicle = activeTab === 'VEICULO';
 
     onAddVehicle({
       category: activeTab,
-      model,
-      manufacturer,
+      model: model.trim(),
+      manufacturer: manufacturer.trim(),
       year,
       color: 'Verde/Branco',
-      licensePlate: activeTab === 'VEICULO' ? licensePlate : `AGRO-${patrimonyCode}`,
-      patrimonyCode: activeTab !== 'VEICULO' ? patrimonyCode : undefined,
+      licensePlate: isRoadVehicle ? cleanPlate : (cleanPatrimony ? `AGRO-${cleanPatrimony}` : 'AGRO-000'),
+      patrimonyCode: !isRoadVehicle ? cleanPatrimony : (cleanPatrimony || undefined),
       sector,
       fuelType,
       tankCapacityLiters,
-      currentKm: activeTab === 'VEICULO' ? currentKm : 0,
-      currentHourmeter: activeTab !== 'VEICULO' ? currentHourmeter : undefined,
+      currentKm: isRoadVehicle ? currentKm : 0,
+      currentHourmeter: !isRoadVehicle ? currentHourmeter : undefined,
       status: 'ATIVO',
       assignedOperatorId: operator?.id,
       assignedOperatorName: operator?.name,
@@ -181,18 +184,21 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     if (!editingVehicle) return;
 
     const operator = users.find(u => u.id === assignedOperatorId);
+    const cleanPatrimony = patrimonyCode.trim();
+    const cleanPlate = licensePlate.trim();
+    const isRoadVehicle = editingVehicle.category === 'VEICULO';
 
     onUpdateVehicle(editingVehicle.id, {
-      model,
-      manufacturer,
+      model: model.trim(),
+      manufacturer: manufacturer.trim(),
       year,
-      licensePlate: editingVehicle.category === 'VEICULO' ? licensePlate : editingVehicle.licensePlate,
-      patrimonyCode: editingVehicle.category !== 'VEICULO' ? patrimonyCode : editingVehicle.patrimonyCode,
+      licensePlate: isRoadVehicle ? cleanPlate : (cleanPatrimony ? `AGRO-${cleanPatrimony}` : editingVehicle.licensePlate),
+      patrimonyCode: !isRoadVehicle ? cleanPatrimony : (cleanPatrimony || undefined),
       sector,
       fuelType,
       tankCapacityLiters,
-      currentKm: editingVehicle.category === 'VEICULO' ? currentKm : editingVehicle.currentKm,
-      currentHourmeter: editingVehicle.category !== 'VEICULO' ? currentHourmeter : editingVehicle.currentHourmeter,
+      currentKm: isRoadVehicle ? currentKm : (editingVehicle.currentKm || 0),
+      currentHourmeter: !isRoadVehicle ? currentHourmeter : editingVehicle.currentHourmeter,
       assignedOperatorId: assignedOperatorId || undefined,
       assignedOperatorName: operator?.name,
       photoUrl: photoUrl || undefined,

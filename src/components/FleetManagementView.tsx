@@ -1,10 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Truck, Plus, Search, Filter, QrCode, Wrench, Fuel, CheckCircle2, 
-  AlertTriangle, Clock, Calendar, Shield, X, Edit3, Trash2, Printer, Eye, Droplet
+  AlertTriangle, Clock, Calendar, Shield, X, Edit3, Trash2, Printer, Eye, Droplet, Layers, Sparkles
 } from 'lucide-react';
-import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, FuelLog } from '../types';
+import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, FuelLog, OperationalCapacity, MachineSubtype } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
+import { MachineCapacitiesEditor } from './MachineCapacitiesEditor';
+import { getConsolidatedCapacities, getCapacityTypeEmoji, getMachineSubtypeName } from '../utils/capacities';
 import { QRCodeCanvas } from 'qrcode.react';
 import { generateQRCodeDataUrl } from '../utils/qrcode';
 import { openPrintWindow } from '../utils/printWindow';
@@ -57,6 +59,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   const [tankCapacityLiters, setTankCapacityLiters] = useState(100);
   const [sprayingTankCapacityLiters, setSprayingTankCapacityLiters] = useState<number>(0);
   const [hasSprayingTank, setHasSprayingTank] = useState<boolean>(false);
+  const [machineSubtype, setMachineSubtype] = useState<MachineSubtype | undefined>(undefined);
+  const [operationalCapacities, setOperationalCapacities] = useState<OperationalCapacity[]>([]);
   const [currentKm, setCurrentKm] = useState(0);
   const [currentHourmeter, setCurrentHourmeter] = useState(0);
   const [assignedOperatorId, setAssignedOperatorId] = useState('');
@@ -129,8 +133,10 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     const cleanPatrimony = patrimonyCode.trim();
     const cleanPlate = licensePlate.trim();
     const isRoadVehicle = activeTab === 'VEICULO';
-    const isAgroOrSpraying = !isRoadVehicle || sector === 'PULVERIZACAO';
-    const sprayCapacity = (isAgroOrSpraying && (hasSprayingTank || sector === 'PULVERIZACAO')) ? (Number(sprayingTankCapacityLiters) || 0) : undefined;
+    
+    // Sync spray capacity from operational capacities if defined
+    const sprayCapObj = operationalCapacities.find(c => c.type === 'PULVERIZACAO');
+    const sprayCapacity = sprayCapObj ? (Number(sprayCapObj.value) || 0) : (hasSprayingTank ? sprayingTankCapacityLiters : 0);
 
     onAddVehicle({
       category: activeTab,
@@ -142,9 +148,11 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
       patrimonyCode: !isRoadVehicle ? cleanPatrimony : (cleanPatrimony || undefined),
       sector,
       fuelType,
-      tankCapacityLiters,
-      sprayingTankCapacityLiters: sprayCapacity && sprayCapacity > 0 ? sprayCapacity : undefined,
-      hasSprayingTank: !!(sprayCapacity && sprayCapacity > 0),
+      tankCapacityLiters: fuelType === 'NENHUM' ? 0 : tankCapacityLiters,
+      sprayingTankCapacityLiters: sprayCapacity > 0 ? sprayCapacity : undefined,
+      hasSprayingTank: sprayCapacity > 0,
+      operationalCapacities: operationalCapacities.length > 0 ? operationalCapacities : undefined,
+      machineSubtype: !isRoadVehicle ? (machineSubtype || (activeTab === 'MAQUINA_AGRICOLA' ? 'OUTRO' : undefined)) : undefined,
       currentKm: isRoadVehicle ? currentKm : 0,
       currentHourmeter: !isRoadVehicle ? currentHourmeter : undefined,
       status: 'ATIVO',
@@ -165,6 +173,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     setTankCapacityLiters(100);
     setSprayingTankCapacityLiters(0);
     setHasSprayingTank(false);
+    setMachineSubtype(undefined);
+    setOperationalCapacities([]);
     setCurrentKm(0);
     setCurrentHourmeter(0);
     setAssignedOperatorId('');
@@ -180,9 +190,11 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     setPatrimonyCode(v.patrimonyCode || '');
     setSector(v.sector || 'AGRICOLA');
     setFuelType(v.fuelType || 'DIESEL_S10');
-    setTankCapacityLiters(v.tankCapacityLiters || 100);
+    setTankCapacityLiters(v.tankCapacityLiters || 0);
     setSprayingTankCapacityLiters(v.sprayingTankCapacityLiters || 0);
     setHasSprayingTank(!!v.hasSprayingTank || !!(v.sprayingTankCapacityLiters && v.sprayingTankCapacityLiters > 0) || v.sector === 'PULVERIZACAO');
+    setMachineSubtype(v.machineSubtype);
+    setOperationalCapacities(getConsolidatedCapacities(v));
     setCurrentKm(v.currentKm || 0);
     setCurrentHourmeter(v.currentHourmeter || 0);
     setAssignedOperatorId(v.assignedOperatorId || '');
@@ -197,8 +209,10 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     const cleanPatrimony = patrimonyCode.trim();
     const cleanPlate = licensePlate.trim();
     const isRoadVehicle = editingVehicle.category === 'VEICULO';
-    const isAgroOrSpraying = !isRoadVehicle || sector === 'PULVERIZACAO';
-    const sprayCapacity = (isAgroOrSpraying && (hasSprayingTank || sector === 'PULVERIZACAO')) ? (Number(sprayingTankCapacityLiters) || 0) : undefined;
+
+    // Sync spray capacity from operational capacities if defined
+    const sprayCapObj = operationalCapacities.find(c => c.type === 'PULVERIZACAO');
+    const sprayCapacity = sprayCapObj ? (Number(sprayCapObj.value) || 0) : (hasSprayingTank ? sprayingTankCapacityLiters : 0);
 
     onUpdateVehicle(editingVehicle.id, {
       model: model.trim(),
@@ -208,9 +222,11 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
       patrimonyCode: !isRoadVehicle ? cleanPatrimony : (cleanPatrimony || undefined),
       sector,
       fuelType,
-      tankCapacityLiters,
-      sprayingTankCapacityLiters: sprayCapacity && sprayCapacity > 0 ? sprayCapacity : undefined,
-      hasSprayingTank: !!(sprayCapacity && sprayCapacity > 0),
+      tankCapacityLiters: fuelType === 'NENHUM' ? 0 : tankCapacityLiters,
+      sprayingTankCapacityLiters: sprayCapacity > 0 ? sprayCapacity : undefined,
+      hasSprayingTank: sprayCapacity > 0,
+      operationalCapacities: operationalCapacities.length > 0 ? operationalCapacities : undefined,
+      machineSubtype: !isRoadVehicle ? machineSubtype : undefined,
       currentKm: isRoadVehicle ? currentKm : (editingVehicle.currentKm || 0),
       currentHourmeter: !isRoadVehicle ? currentHourmeter : editingVehicle.currentHourmeter,
       assignedOperatorId: assignedOperatorId || undefined,
@@ -428,10 +444,17 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
             {/* Content Body */}
             <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
               <div>
-                <p className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400">
-                  {v.manufacturer} • {v.year}
-                </p>
-                <h3 className="font-extrabold text-sm text-gray-900 dark:text-emerald-100 line-clamp-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400">
+                    {v.manufacturer} • {v.year}
+                  </p>
+                  {v.machineSubtype && (
+                    <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-300/60 dark:border-emerald-700/60">
+                      {getMachineSubtypeName(v.machineSubtype)}
+                    </span>
+                  )}
+                </div>
+                <h3 className="font-extrabold text-sm text-gray-900 dark:text-emerald-100 line-clamp-1 mt-0.5">
                   {v.model}
                 </h3>
                 <p className="text-[11px] text-gray-500 dark:text-emerald-300 font-medium mt-0.5">
@@ -448,21 +471,40 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   </strong>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500 dark:text-emerald-400">Combustível / Tanque:</span>
-                  <strong className="text-gray-800 dark:text-emerald-200">{v.fuelType === 'NENHUM' ? 'Não se aplica' : `${v.tankCapacityLiters}L (${getFuelTypeName(v.fuelType)})`}</strong>
+                  <span className="text-gray-500 dark:text-emerald-400">Combustível:</span>
+                  <strong className="text-gray-800 dark:text-emerald-200">
+                    {v.fuelType === 'NENHUM' ? 'Não se aplica' : `${v.tankCapacityLiters}L (${getFuelTypeName(v.fuelType)})`}
+                  </strong>
                 </div>
 
-                {/* Tanque de Pulverização / Calda para Máquinas Agrícolas e Tratores */}
-                {(v.sprayingTankCapacityLiters || 0) > 0 && (
-                  <div className="flex justify-between items-center bg-cyan-500/10 dark:bg-cyan-950/40 px-2 py-1 rounded-lg border border-cyan-500/20">
-                    <span className="text-cyan-700 dark:text-cyan-300 font-bold text-[11px] flex items-center gap-1">
-                      <Droplet className="w-3.5 h-3.5 text-cyan-500" /> Tanque Pulverização:
-                    </span>
-                    <strong className="text-cyan-900 dark:text-cyan-100 font-extrabold text-[11px]">
-                      {v.sprayingTankCapacityLiters?.toLocaleString('pt-BR')} L (Calda)
-                    </strong>
-                  </div>
-                )}
+                {/* Capacidades Operacionais da Máquina */}
+                {(() => {
+                  const caps = getConsolidatedCapacities(v).filter(c => c.type !== 'COMBUSTIVEL');
+                  if (caps.length === 0) return null;
+                  return (
+                    <div className="space-y-1 pt-1 border-t border-emerald-500/10">
+                      {caps.map((cap, idx) => (
+                        <div 
+                          key={cap.id || idx}
+                          className={`flex justify-between items-center px-2 py-0.5 rounded-lg border text-[11px] ${
+                            cap.type === 'PULVERIZACAO' ? 'bg-cyan-500/10 dark:bg-cyan-950/40 border-cyan-500/20 text-cyan-900 dark:text-cyan-100' :
+                            cap.type === 'ADUBO' ? 'bg-amber-500/10 dark:bg-amber-950/40 border-amber-500/20 text-amber-900 dark:text-amber-100' :
+                            cap.type === 'SEMENTE' ? 'bg-emerald-500/10 dark:bg-emerald-950/40 border-emerald-500/20 text-emerald-900 dark:text-emerald-100' :
+                            'bg-slate-100 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                          }`}
+                        >
+                          <span className="font-bold flex items-center gap-1">
+                            <span>{getCapacityTypeEmoji(cap.type)}</span>
+                            <span className="truncate max-w-[130px]">{cap.name}:</span>
+                          </span>
+                          <strong className="font-extrabold whitespace-nowrap">
+                            {cap.value.toLocaleString('pt-BR')} {cap.unit}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
 
                 {v.assignedOperatorName && (
                   <div className="flex justify-between">
@@ -606,22 +648,51 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
 
               {/* Specs */}
               <div className="md:col-span-2 space-y-2 text-xs">
-                <p className="text-base font-extrabold text-gray-900 dark:text-emerald-100">{passportVehicle.model}</p>
+                <div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-base font-extrabold text-gray-900 dark:text-emerald-100">{passportVehicle.model}</p>
+                    {passportVehicle.machineSubtype && (
+                      <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-300/60 dark:border-emerald-700/60">
+                        {getMachineSubtypeName(passportVehicle.machineSubtype)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-2 text-gray-600 dark:text-emerald-300">
                   <p><strong>Fabricante:</strong> {passportVehicle.manufacturer}</p>
                   <p><strong>Ano:</strong> {passportVehicle.year}</p>
                   <p><strong>Setor:</strong> {getSectorName(passportVehicle.sector)}</p>
-                  <p><strong>Tanque Combustível:</strong> {passportVehicle.tankCapacityLiters} Litros</p>
-                  {(passportVehicle.sprayingTankCapacityLiters || 0) > 0 && (
-                    <p className="text-cyan-700 dark:text-cyan-300">
-                      <strong>Tanque Pulverização:</strong> {passportVehicle.sprayingTankCapacityLiters} L (Calda)
-                    </p>
-                  )}
-                  <p><strong>Combustível:</strong> {getFuelTypeName(passportVehicle.fuelType)}</p>
+                  <p><strong>Combustível:</strong> {passportVehicle.fuelType === 'NENHUM' ? 'Não se aplica' : `${passportVehicle.tankCapacityLiters}L (${getFuelTypeName(passportVehicle.fuelType)})`}</p>
                   <p><strong>Uso Atual:</strong> {passportVehicle.category === 'VEICULO' ? `${passportVehicle.currentKm} km` : `${passportVehicle.currentHourmeter || 0} h`}</p>
                   <p><strong>Operador:</strong> {passportVehicle.assignedOperatorName || 'Não atribuído'}</p>
                   <p><strong>Status:</strong> {passportVehicle.status}</p>
                 </div>
+
+                {/* Capacidades Operacionais Registradas */}
+                {(() => {
+                  const caps = getConsolidatedCapacities(passportVehicle).filter(c => c.type !== 'COMBUSTIVEL');
+                  if (caps.length === 0) return null;
+                  return (
+                    <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 space-y-1.5 mt-2">
+                      <p className="font-extrabold text-[11px] text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                        <Layers className="w-3.5 h-3.5 text-emerald-600" /> Capacidades Operacionais:
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {caps.map((c, i) => (
+                          <div key={c.id || i} className="text-[11px] flex justify-between items-center bg-white dark:bg-emerald-950 px-2 py-1 rounded-md border border-emerald-200 dark:border-emerald-800">
+                            <span className="font-semibold text-slate-700 dark:text-emerald-300 flex items-center gap-1">
+                              <span>{getCapacityTypeEmoji(c.type)}</span> {c.name}:
+                            </span>
+                            <strong className="text-emerald-900 dark:text-emerald-100 font-extrabold">
+                              {c.value.toLocaleString('pt-BR')} {c.unit}
+                            </strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {passportVehicle.notes && (
                   <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-emerald-900/30 border text-[11px]">
@@ -737,41 +808,6 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1">Tipo de Combustível</label>
-                  <select
-                    value={fuelType}
-                    onChange={(e) => {
-                      const selected = e.target.value as FuelType;
-                      setFuelType(selected);
-                      if (selected === 'NENHUM') {
-                        setTankCapacityLiters(0);
-                      }
-                    }}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
-                  >
-                    <option value="DIESEL_S10">Diesel S10</option>
-                    <option value="DIESEL_S500">Diesel S500</option>
-                    <option value="GASOLINA_COMUM">Gasolina Comum</option>
-                    <option value="GASOLINA_GRID">Gasolina Aditivada</option>
-                    <option value="ETANOL">Etanol Hidratado</option>
-                    <option value="ARLA_32">Arla 32</option>
-                    <option value="NENHUM">Nenhum (Não se aplica)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-bold mb-1">Capacidade Tanque Combustível (L)</label>
-                  <input
-                    type="number"
-                    value={tankCapacityLiters}
-                    onChange={(e) => setTankCapacityLiters(parseInt(e.target.value) || 0)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
-                  />
-                </div>
-
-                <div>
                   <label className="block font-bold mb-1">
                     {activeTab === 'VEICULO' ? 'Quilometragem Inicial (KM)' : 'Horímetro Inicial (Horas)'}
                   </label>
@@ -788,83 +824,20 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 </div>
               </div>
 
-              {/* Tanque de Pulverização / Calda - Exclusivo para Tratores e Máquinas Agrícolas */}
-              {activeTab !== 'VEICULO' && (
-                <div className={`p-3 rounded-2xl border space-y-2.5 transition-all ${
-                  darkMode ? 'bg-emerald-900/30 border-emerald-800' : 'bg-cyan-50/70 border-cyan-200'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={hasSprayingTank || sector === 'PULVERIZACAO'}
-                        onChange={(e) => {
-                          setHasSprayingTank(e.target.checked);
-                          if (!e.target.checked && sector !== 'PULVERIZACAO') {
-                            setSprayingTankCapacityLiters(0);
-                          } else if (e.target.checked && sprayingTankCapacityLiters === 0) {
-                            setSprayingTankCapacityLiters(2000);
-                          }
-                        }}
-                        className="w-4 h-4 rounded border-cyan-500 text-cyan-600 focus:ring-cyan-500"
-                      />
-                      <span className="font-extrabold text-xs text-cyan-900 dark:text-cyan-200 flex items-center gap-1.5">
-                        <Droplet className="w-3.5 h-3.5 text-cyan-500" />
-                        Possui Tanque de Pulverização / Calda?
-                      </span>
-                    </label>
-                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-700 dark:text-cyan-300">
-                      Defensivos & Calda
-                    </span>
-                  </div>
-
-                  {(hasSprayingTank || sector === 'PULVERIZACAO' || sprayingTankCapacityLiters > 0) && (
-                    <div className="space-y-2 pt-1 animate-in fade-in duration-200">
-                      <div>
-                        <label className="block font-bold mb-1 text-cyan-950 dark:text-cyan-200">
-                          Capacidade do Tanque de Pulverização (Litros de Calda) *
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="50"
-                          placeholder="Ex: 600, 2000, 3000, 4000..."
-                          value={sprayingTankCapacityLiters || ''}
-                          onChange={(e) => setSprayingTankCapacityLiters(parseFloat(e.target.value) || 0)}
-                          className={`w-full p-2 rounded-xl border font-bold ${
-                            darkMode ? 'bg-emerald-950 border-cyan-700 text-white' : 'bg-white border-cyan-300 text-cyan-950'
-                          }`}
-                        />
-                        <p className="text-[10px] text-cyan-700 dark:text-cyan-300 mt-1">
-                          Volume nominal do tanque de calda / defensivos para aplicação e pulverização agrícola.
-                        </p>
-                      </div>
-
-                      {/* Quick capacity buttons */}
-                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                        <span className="text-[10px] text-slate-500 dark:text-emerald-400 font-semibold">Atalhos rápidos:</span>
-                        {[600, 1000, 2000, 3000, 4000].map(vol => (
-                          <button
-                            key={vol}
-                            type="button"
-                            onClick={() => {
-                              setHasSprayingTank(true);
-                              setSprayingTankCapacityLiters(vol);
-                            }}
-                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-colors ${
-                              sprayingTankCapacityLiters === vol
-                                ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
-                                : 'bg-white dark:bg-emerald-950/60 border-cyan-400/40 text-cyan-800 dark:text-cyan-200 hover:bg-cyan-100 dark:hover:bg-cyan-900/40'
-                            }`}
-                          >
-                            {vol.toLocaleString('pt-BR')} L
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+              {/* Capacidades da Máquina (Dinâmica e Específica por Equipamento) */}
+              <MachineCapacitiesEditor
+                category={activeTab}
+                machineSubtype={machineSubtype}
+                onMachineSubtypeChange={setMachineSubtype}
+                sector={sector}
+                fuelType={fuelType}
+                onFuelTypeChange={setFuelType}
+                tankCapacityLiters={tankCapacityLiters}
+                onTankCapacityChange={setTankCapacityLiters}
+                capacities={operationalCapacities}
+                onChangeCapacities={setOperationalCapacities}
+                darkMode={darkMode}
+              />
 
               <div>
                 <label className="block font-bold mb-1">Operador Atribuído (Opcional)</label>
@@ -1001,41 +974,6 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1">Tipo de Combustível</label>
-                  <select
-                    value={fuelType}
-                    onChange={(e) => {
-                      const selected = e.target.value as FuelType;
-                      setFuelType(selected);
-                      if (selected === 'NENHUM') {
-                        setTankCapacityLiters(0);
-                      }
-                    }}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
-                  >
-                    <option value="DIESEL_S10">Diesel S10</option>
-                    <option value="DIESEL_S500">Diesel S500</option>
-                    <option value="GASOLINA_COMUM">Gasolina Comum</option>
-                    <option value="GASOLINA_GRID">Gasolina Aditivada</option>
-                    <option value="ETANOL">Etanol Hidratado</option>
-                    <option value="ARLA_32">Arla 32</option>
-                    <option value="NENHUM">Nenhum (Não se aplica)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-bold mb-1">Capacidade Tanque Combustível (L)</label>
-                  <input
-                    type="number"
-                    value={tankCapacityLiters}
-                    onChange={(e) => setTankCapacityLiters(parseInt(e.target.value) || 0)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50'}`}
-                  />
-                </div>
-
-                <div>
                   <label className="block font-bold mb-1">
                     {editingVehicle.category === 'VEICULO' ? 'Quilometragem (KM)' : 'Horímetro (Horas)'}
                   </label>
@@ -1052,83 +990,20 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 </div>
               </div>
 
-              {/* Tanque de Pulverização / Calda - Exclusivo para Tratores e Máquinas Agrícolas */}
-              {editingVehicle.category !== 'VEICULO' && (
-                <div className={`p-3 rounded-2xl border space-y-2.5 transition-all ${
-                  darkMode ? 'bg-emerald-900/30 border-emerald-800' : 'bg-cyan-50/70 border-cyan-200'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={hasSprayingTank || sector === 'PULVERIZACAO'}
-                        onChange={(e) => {
-                          setHasSprayingTank(e.target.checked);
-                          if (!e.target.checked && sector !== 'PULVERIZACAO') {
-                            setSprayingTankCapacityLiters(0);
-                          } else if (e.target.checked && sprayingTankCapacityLiters === 0) {
-                            setSprayingTankCapacityLiters(2000);
-                          }
-                        }}
-                        className="w-4 h-4 rounded border-cyan-500 text-cyan-600 focus:ring-cyan-500"
-                      />
-                      <span className="font-extrabold text-xs text-cyan-900 dark:text-cyan-200 flex items-center gap-1.5">
-                        <Droplet className="w-3.5 h-3.5 text-cyan-500" />
-                        Possui Tanque de Pulverização / Calda?
-                      </span>
-                    </label>
-                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-700 dark:text-cyan-300">
-                      Defensivos & Calda
-                    </span>
-                  </div>
-
-                  {(hasSprayingTank || sector === 'PULVERIZACAO' || sprayingTankCapacityLiters > 0) && (
-                    <div className="space-y-2 pt-1 animate-in fade-in duration-200">
-                      <div>
-                        <label className="block font-bold mb-1 text-cyan-950 dark:text-cyan-200">
-                          Capacidade do Tanque de Pulverização (Litros de Calda) *
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="50"
-                          placeholder="Ex: 600, 2000, 3000, 4000..."
-                          value={sprayingTankCapacityLiters || ''}
-                          onChange={(e) => setSprayingTankCapacityLiters(parseFloat(e.target.value) || 0)}
-                          className={`w-full p-2 rounded-xl border font-bold ${
-                            darkMode ? 'bg-emerald-950 border-cyan-700 text-white' : 'bg-white border-cyan-300 text-cyan-950'
-                          }`}
-                        />
-                        <p className="text-[10px] text-cyan-700 dark:text-cyan-300 mt-1">
-                          Volume nominal do tanque de calda / defensivos para aplicação e pulverização agrícola.
-                        </p>
-                      </div>
-
-                      {/* Quick capacity buttons */}
-                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                        <span className="text-[10px] text-slate-500 dark:text-emerald-400 font-semibold">Atalhos rápidos:</span>
-                        {[600, 1000, 2000, 3000, 4000].map(vol => (
-                          <button
-                            key={vol}
-                            type="button"
-                            onClick={() => {
-                              setHasSprayingTank(true);
-                              setSprayingTankCapacityLiters(vol);
-                            }}
-                            className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-colors ${
-                              sprayingTankCapacityLiters === vol
-                                ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
-                                : 'bg-white dark:bg-emerald-950/60 border-cyan-400/40 text-cyan-800 dark:text-cyan-200 hover:bg-cyan-100 dark:hover:bg-cyan-900/40'
-                            }`}
-                          >
-                            {vol.toLocaleString('pt-BR')} L
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+              {/* Capacidades da Máquina (Dinâmica e Específica por Equipamento) */}
+              <MachineCapacitiesEditor
+                category={editingVehicle.category}
+                machineSubtype={machineSubtype}
+                onMachineSubtypeChange={setMachineSubtype}
+                sector={sector}
+                fuelType={fuelType}
+                onFuelTypeChange={setFuelType}
+                tankCapacityLiters={tankCapacityLiters}
+                onTankCapacityChange={setTankCapacityLiters}
+                capacities={operationalCapacities}
+                onChangeCapacities={setOperationalCapacities}
+                darkMode={darkMode}
+              />
 
               <div>
                 <label className="block font-bold mb-1">Operador Atribuído (Opcional)</label>

@@ -154,6 +154,9 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     sector: 'PREPARO_SOLO',
     fuelType: 'DIESEL_S10',
     tankCapacityLiters: 680,
+    operationalCapacities: [
+      { id: 'cap-004-1', type: 'COMBUSTIVEL', name: 'Tanque de Combustível', value: 680, unit: 'L', notes: 'Diesel S10 de alta autonomia' }
+    ],
     currentKm: 0,
     currentHourmeter: 3420,
     lastOilChangeHourmeter: 3200,
@@ -181,6 +184,9 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     sector: 'PREPARO_SOLO',
     fuelType: 'DIESEL_S500',
     tankCapacityLiters: 635,
+    operationalCapacities: [
+      { id: 'cap-005-1', type: 'COMBUSTIVEL', name: 'Tanque de Combustível', value: 635, unit: 'L', notes: 'Diesel S500' }
+    ],
     currentKm: 0,
     currentHourmeter: 4890,
     status: 'ATIVO',
@@ -204,6 +210,10 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     sector: 'COLHEITA',
     fuelType: 'DIESEL_S10',
     tankCapacityLiters: 1250,
+    operationalCapacities: [
+      { id: 'cap-006-1', type: 'COMBUSTIVEL', name: 'Tanque de Combustível', value: 1250, unit: 'L', notes: 'Autonomia para turno duplo' },
+      { id: 'cap-006-2', type: 'SEMENTE', name: 'Tanque Graneleiro', value: 14100, unit: 'L', notes: 'Capacidade para aprox. 10.500 kg de grãos' }
+    ],
     currentKm: 0,
     currentHourmeter: 2150,
     status: 'ATIVO',
@@ -229,6 +239,11 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     tankCapacityLiters: 400,
     sprayingTankCapacityLiters: 4000,
     hasSprayingTank: true,
+    operationalCapacities: [
+      { id: 'cap-007-1', type: 'PULVERIZACAO', name: 'Tanque de Pulverização (Calda)', value: 4000, unit: 'L', notes: 'Tanque central de calda com agitador mecânico' },
+      { id: 'cap-007-2', type: 'COMBUSTIVEL', name: 'Tanque de Combustível', value: 400, unit: 'L', notes: 'Diesel S10' },
+      { id: 'cap-007-3', type: 'RESERVATORIO', name: 'Reservatório de Água Limpa', value: 400, unit: 'L', notes: 'Para lavagem de circuito e tríplice lavagem' }
+    ],
     currentKm: 0,
     currentHourmeter: 1180,
     status: 'ATIVO',
@@ -252,6 +267,10 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     sector: 'OFICINA_MANUTENCAO',
     fuelType: 'DIESEL_S500',
     tankCapacityLiters: 345,
+    operationalCapacities: [
+      { id: 'cap-008-1', type: 'COMBUSTIVEL', name: 'Tanque de Combustível', value: 345, unit: 'L', notes: 'Diesel S500' },
+      { id: 'cap-008-2', type: 'CACAMBA', name: 'Caçamba de Escavação', value: 1.2, unit: 'm³', notes: 'Capacidade coroada' }
+    ],
     currentKm: 0,
     currentHourmeter: 6120,
     status: 'EM_MANUTENCAO',
@@ -283,6 +302,32 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     photoUrl: 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80',
     nextRevisionKmOrHour: 1000,
     notes: 'Implemento agrícola rebocado sem motor/combustível próprio.'
+  },
+  {
+    id: 'veh-010',
+    category: 'MAQUINA_AGRICOLA',
+    licensePlate: 'AGRO-ADUBO-15',
+    patrimonyCode: 'MAQ-004',
+    machineSubtype: 'DISTRIBUIDOR_ADUBO',
+    model: 'Tornado 1500 Distribuidor a Lance',
+    manufacturer: 'Stara / Jan',
+    year: 2023,
+    color: 'Verde / Vermelho',
+    sector: 'AGRICOLA',
+    fuelType: 'NENHUM',
+    tankCapacityLiters: 0,
+    operationalCapacities: [
+      { id: 'cap-010-1', type: 'ADUBO', name: 'Capacidade de Adubo / Calcário', value: 1500, unit: 'kg', notes: 'Depósito em polietileno com esteira dosadora' },
+      { id: 'cap-010-2', type: 'CARGA', name: 'Volume Útil do Depósito', value: 1.5, unit: 'm³', notes: 'Capacidade volumétrica' }
+    ],
+    currentKm: 0,
+    currentHourmeter: 640,
+    status: 'ATIVO',
+    assignedOperatorId: 'usr-004',
+    assignedOperatorName: 'Marcos Oliveira',
+    photoUrl: 'https://images.unsplash.com/photo-1589758438368-0ad531db3366?w=600&auto=format&fit=crop&q=80',
+    nextRevisionKmOrHour: 800,
+    notes: 'Distribuição a lanço de fertilizantes, adubos químicos e corretivos de solo.'
   }
 ];
 

@@ -25,11 +25,34 @@ export type EquipmentCategory = 'VEICULO' | 'TRATOR' | 'MAQUINA_AGRICOLA' | 'IMP
 export type MachineSubtype = 
   | 'PULVERIZADOR' 
   | 'COLHEITADEIRA' 
+  | 'DISTRIBUIDOR_ADUBO'
+  | 'PLANTADEIRA_SEMEADORA'
   | 'ESCAVADEIRA' 
   | 'RETROESCAVADEIRA' 
   | 'PA_CARREGADEIRA' 
   | 'MOTONIVELADORA' 
-  | 'IMPLEMENTO';
+  | 'IMPLEMENTO'
+  | 'CARRETA_AGRICOLA'
+  | 'OUTRO';
+
+export type OperationalCapacityType = 
+  | 'COMBUSTIVEL'    // Tanque de Combustível (L)
+  | 'PULVERIZACAO'   // Tanque de Pulverização / Calda (L)
+  | 'ADUBO'          // Tanque / Depósito / Caçamba de Adubo (kg, t, L, m³)
+  | 'SEMENTE'        // Depósito de Sementes / Graneleiro (kg, t, L, sacas)
+  | 'CACAMBA'        // Caçamba de Carga / Basculante (kg, t, m³)
+  | 'RESERVATORIO'   // Reservatório de Água / Óleo / Outros Fluidos (L, m³)
+  | 'CARGA'          // Capacidade de Carga Operacional / Tração (kg, t)
+  | 'OUTRO';         // Capacidade Personalizada
+
+export interface OperationalCapacity {
+  id: string;
+  type: OperationalCapacityType;
+  name: string; // Nome descritivo (ex: 'Tanque de Pulverização', 'Depósito de Adubo')
+  value: number; // Valor numérico da capacidade
+  unit: string; // Unidade de medida (L, kg, t, m³, sacas, etc.)
+  notes?: string; // Observações opcionais (ex: 'Barra 36m', 'Granulado', 'Coroada')
+}
 
 export interface Vehicle {
   id: string;
@@ -45,6 +68,7 @@ export interface Vehicle {
   tankCapacityLiters: number;
   sprayingTankCapacityLiters?: number; // Capacidade do tanque de pulverização / calda (L) para máquinas agrícolas e tratores
   hasSprayingTank?: boolean;          // Indicador se possui tanque de pulverização
+  operationalCapacities?: OperationalCapacity[]; // Lista detalhada de capacidades operacionais da máquina
   currentKm: number;
   currentHourmeter?: number;
   lastOilChangeHourmeter?: number; // Horímetro no momento da última troca de óleo

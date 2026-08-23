@@ -227,6 +227,8 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     sector: 'PULVERIZACAO',
     fuelType: 'DIESEL_S10',
     tankCapacityLiters: 400,
+    sprayingTankCapacityLiters: 4000,
+    hasSprayingTank: true,
     currentKm: 0,
     currentHourmeter: 1180,
     status: 'ATIVO',

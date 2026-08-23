@@ -8,7 +8,7 @@ import {
   Calendar, FileText, User as UserIcon, BarChart3, Shield, Filter, 
   PlusCircle, RefreshCw, AlertCircle, Camera, Check, ChevronRight,
   TrendingUp, Award, Layers, Sparkles, Edit, Trash2, Info, DollarSign,
-  Plus, CheckSquare, ArrowLeft
+  Plus, CheckSquare, ArrowLeft, Droplet
 } from 'lucide-react';
 import { 
   Vehicle, FuelLog, MaintenanceLog, MachineIssue, 
@@ -567,7 +567,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
             </div>
 
             {/* Spec Details Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
+            <div className={`grid grid-cols-2 sm:grid-cols-4 ${(vehicle.sprayingTankCapacityLiters || 0) > 0 ? 'md:grid-cols-5' : ''} gap-2 text-xs pt-1`}>
               <div className="p-2.5 rounded-2xl bg-white dark:bg-emerald-900/60 border">
                 <span className="text-[10px] text-slate-500 block">Horímetro / KM Atual:</span>
                 <strong className="text-slate-900 dark:text-slate-100 text-sm font-black">
@@ -578,11 +578,23 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
               </div>
 
               <div className="p-2.5 rounded-2xl bg-white dark:bg-emerald-900/60 border">
-                <span className="text-[10px] text-slate-500 block">Tanque / Combustível:</span>
+                <span className="text-[10px] text-slate-500 block">Tanque Combustível:</span>
                 <strong className="text-slate-900 dark:text-slate-100">
                   {vehicle.fuelType === 'NENHUM' ? 'Não se aplica' : `${vehicle.tankCapacityLiters}L (${getFuelTypeName(vehicle.fuelType)})`}
                 </strong>
               </div>
+
+              {(vehicle.sprayingTankCapacityLiters || 0) > 0 && (
+                <div className="p-2.5 rounded-2xl bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-300 dark:border-cyan-800">
+                  <span className="text-[10px] text-cyan-800 dark:text-cyan-300 block font-bold flex items-center gap-1">
+                    <Droplet className="w-3 h-3 text-cyan-600 dark:text-cyan-400" /> Tanque Pulverização:
+                  </span>
+                  <strong className="text-cyan-950 dark:text-cyan-100 font-extrabold text-sm block">
+                    {vehicle.sprayingTankCapacityLiters?.toLocaleString('pt-BR')} Litros
+                  </strong>
+                  <span className="text-[9px] text-cyan-700 dark:text-cyan-300 font-medium">Calda / Defensivos</span>
+                </div>
+              )}
 
               <div className="p-2.5 rounded-2xl bg-white dark:bg-emerald-900/60 border">
                 <span className="text-[10px] text-slate-500 block">Operador Responsável:</span>

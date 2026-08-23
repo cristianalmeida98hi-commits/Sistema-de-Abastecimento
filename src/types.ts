@@ -43,6 +43,8 @@ export interface Vehicle {
   sector: Sector;
   fuelType: FuelType;
   tankCapacityLiters: number;
+  sprayingTankCapacityLiters?: number; // Capacidade do tanque de pulverização / calda (L) para máquinas agrícolas e tratores
+  hasSprayingTank?: boolean;          // Indicador se possui tanque de pulverização
   currentKm: number;
   currentHourmeter?: number;
   lastOilChangeHourmeter?: number; // Horímetro no momento da última troca de óleo

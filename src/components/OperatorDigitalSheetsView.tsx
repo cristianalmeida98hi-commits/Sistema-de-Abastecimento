@@ -321,6 +321,18 @@ export const OperatorDigitalSheetsView: React.FC<OperatorDigitalSheetsViewProps>
                     </div>
                   </div>
 
+                  {/* Spraying Tank Badge if applicable */}
+                  {(vehicle.sprayingTankCapacityLiters || 0) > 0 && (
+                    <div className="px-2.5 py-1.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-200 dark:border-cyan-800/60 flex items-center justify-between text-xs">
+                      <span className="text-cyan-800 dark:text-cyan-300 font-bold flex items-center gap-1 text-[11px]">
+                        <Droplet className="w-3.5 h-3.5 text-cyan-500" /> Tanque Pulverização:
+                      </span>
+                      <strong className="text-cyan-950 dark:text-cyan-100 font-black text-[11px]">
+                        {vehicle.sprayingTankCapacityLiters?.toLocaleString('pt-BR')} L
+                      </strong>
+                    </div>
+                  )}
+
                   {/* Last Maintenance note */}
                   <div className="text-[11px] text-slate-500 dark:text-emerald-300/80 flex items-center justify-between border-t pt-2 border-slate-100 dark:border-emerald-900/40">
                     <span className="flex items-center gap-1">

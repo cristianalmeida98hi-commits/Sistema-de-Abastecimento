@@ -132,6 +132,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
             <div class="meta">
               <p>📍 Setor: ${getSectorName(v.sector)}</p>
               <p>⛽ Combustível: ${v.fuelType === 'NENHUM' ? 'Não se aplica' : `${v.tankCapacityLiters} Litros (${getFuelTypeName(v.fuelType)})`}</p>
+              ${(v.sprayingTankCapacityLiters || 0) > 0 ? `<p>🌱 Calda / Pulverização: ${v.sprayingTankCapacityLiters} Litros</p>` : ''}
               <p>🔑 ID Máquina: ${v.id}</p>
             </div>
           </div>
@@ -478,6 +479,14 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
                     {currentScannedVehicle.fuelType === 'NENHUM' ? 'Não se aplica' : `${getFuelTypeName(currentScannedVehicle.fuelType)} (${currentScannedVehicle.tankCapacityLiters}L)`}
                   </strong>
                 </div>
+                {(currentScannedVehicle.sprayingTankCapacityLiters || 0) > 0 && (
+                  <div className="p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/50 border border-cyan-300 dark:border-cyan-800 col-span-2">
+                    <span className="text-cyan-800 dark:text-cyan-300 text-[10px] font-bold block">Tanque Pulverização / Calda:</span>
+                    <strong className="text-cyan-950 dark:text-cyan-100 text-xs font-black">
+                      {currentScannedVehicle.sprayingTankCapacityLiters?.toLocaleString('pt-BR')} Litros
+                    </strong>
+                  </div>
+                )}
                 <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-emerald-950/50 border">
                   <span className="text-slate-500 text-[10px] block">Uso / Odômetro / Horímetro:</span>
                   <strong className="text-slate-900 dark:text-slate-100">

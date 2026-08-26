@@ -3,12 +3,15 @@ import {
 } from 'firebase/firestore';
 import { db, safeSetDoc, safeUpdateDoc } from '../lib/firebase';
 import { 
-  User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem, PreventiveItemKey, FuelRefill 
+  User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, 
+  SystemSettings, MachineIssue, PreventiveMaintenanceItem, PreventiveItemKey, 
+  FuelRefill, CentralTank, TankMovement, ScheduledServiceItem, MaintenanceControlType 
 } from '../types';
 import { 
   INITIAL_USERS, INITIAL_VEHICLES, INITIAL_GAS_STATIONS, 
   INITIAL_FUEL_LOGS, INITIAL_FUEL_REFILLS, INITIAL_MAINTENANCE_LOGS, INITIAL_ALERTS, 
-  INITIAL_AUDIT_LOGS, INITIAL_SETTINGS, INITIAL_MACHINE_ISSUES, INITIAL_PREVENTIVE_ITEMS 
+  INITIAL_AUDIT_LOGS, INITIAL_SETTINGS, INITIAL_MACHINE_ISSUES, INITIAL_PREVENTIVE_ITEMS,
+  INITIAL_CENTRAL_TANKS, INITIAL_TANK_MOVEMENTS 
 } from '../data/seedData';
 
 const SESSION_KEYS = {
@@ -37,6 +40,8 @@ let cache = {
   users: INITIAL_USERS as User[],
   vehicles: INITIAL_VEHICLES as Vehicle[],
   gasStations: INITIAL_GAS_STATIONS as GasStation[],
+  centralTanks: INITIAL_CENTRAL_TANKS as CentralTank[],
+  tankMovements: INITIAL_TANK_MOVEMENTS as TankMovement[],
   fuelLogs: INITIAL_FUEL_LOGS as FuelLog[],
   fuelRefills: INITIAL_FUEL_REFILLS as FuelRefill[],
   maintenanceLogs: INITIAL_MAINTENANCE_LOGS as MaintenanceLog[],
@@ -91,7 +96,30 @@ export function initStorage() {
       }
     }, (err) => console.error('[Firestore Vehicles Error]', err));
 
-    // 3. Gas Stations Subscription
+    // 3. Central Tanks Subscription (Tanques Centrais: Quadra e Itapeva)
+    onSnapshot(collection(db, 'central_tanks'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('central_tanks', INITIAL_CENTRAL_TANKS);
+      } else {
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CentralTank));
+        cache.centralTanks = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore CentralTanks Error]', err));
+
+    // 3.1 Tank Movements Subscription
+    onSnapshot(collection(db, 'tank_movements'), (snapshot) => {
+      if (snapshot.empty) {
+        seedCollection('tank_movements', INITIAL_TANK_MOVEMENTS);
+      } else {
+        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as TankMovement));
+        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+        cache.tankMovements = items;
+        notifyDataUpdated();
+      }
+    }, (err) => console.error('[Firestore TankMovements Error]', err));
+
+    // 3.2 Gas Stations Subscription
     onSnapshot(collection(db, 'gas_stations'), (snapshot) => {
       if (snapshot.empty) {
         seedCollection('gas_stations', INITIAL_GAS_STATIONS);
@@ -299,60 +327,79 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
     return { success: false, error: 'Este usuário está inativo no sistema. Fale com a administração.' };
   }
 
-  const expectedPassword = user.password || '123456';
-  if (password !== expectedPassword) {
-    return { success: false, error: 'Senha incorreta. Verifique e tente novamente.' };
+  if (user.password !== password) {
+    return { success: false, error: 'Senha incorreta. Verifique suas credenciais.' };
   }
 
-  try {
-    sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
+  // Update session
+  setCurrentUserSession(user);
+
+  // Handle remember email
+  if (typeof window !== 'undefined') {
     if (rememberMe) {
       localStorage.setItem(SESSION_KEYS.REMEMBERED_EMAIL, targetEmail);
     } else {
       localStorage.removeItem(SESSION_KEYS.REMEMBERED_EMAIL);
     }
-    // Clean up any legacy localStorage keys
-    localStorage.removeItem('andradeagro_remembered_user_v1');
-    localStorage.removeItem('andradeagro_remembered_user');
-
-    logAuditEvent('LOGIN', 'Acesso', `Login realizado com sucesso (${user.role === 'ADMIN' ? 'Administrador' : 'Funcionário'})`);
-
-    notifyDataUpdated(false);
-    return { success: true, user };
-  } catch (err) {
-    return { success: false, error: 'Erro ao salvar sessão de login.' };
   }
+
+  // Register audit
+  logAuditEvent('LOGIN', 'Autenticação', `Usuário ${user.name} (${user.role}) realizou login no sistema.`);
+
+  return { success: true, user };
 }
 
 export function logoutUser(): void {
   try {
+    const user = getCurrentUser();
+    if (user) {
+      logAuditEvent('LOGOUT', 'Autenticação', `Usuário ${user.name} saiu do sistema.`);
+    }
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
-      sessionStorage.removeItem('andradeagro_session_user_v1');
-      localStorage.removeItem('andradeagro_remembered_user_v1');
-      localStorage.removeItem('andradeagro_remembered_user');
-      notifyDataUpdated(false);
     }
+    notifyDataUpdated(false);
   } catch (err) {
-    console.error('Error logging out:', err);
+    console.error('Error logging out user:', err);
   }
 }
 
-export function setCurrentUser(user: User | null): void {
+export function setCurrentUserSession(user: User): void {
   try {
-    if (user) {
+    if (typeof window !== 'undefined') {
       sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
-      notifyDataUpdated(false);
-    } else {
-      logoutUser();
     }
   } catch (err) {
     console.error('Error setting current user:', err);
   }
 }
 
+export function setCurrentUser(user: User | null): void {
+  if (user) {
+    setCurrentUserSession(user);
+    notifyDataUpdated(false);
+  } else {
+    logoutUser();
+  }
+}
+
 export function getVehicles(): Vehicle[] {
   return cache.vehicles;
+}
+
+export function getCentralTanks(): CentralTank[] {
+  return cache.centralTanks && cache.centralTanks.length > 0 ? cache.centralTanks : INITIAL_CENTRAL_TANKS;
+}
+
+export function getCentralTank(id: string): CentralTank | undefined {
+  const tanks = getCentralTanks();
+  return tanks.find(t => t.id === id);
+}
+
+export function getTankMovements(tankId?: string): TankMovement[] {
+  const all = cache.tankMovements || [];
+  if (!tankId) return all;
+  return all.filter(m => m.tankId === tankId);
 }
 
 export function getGasStations(): GasStation[] {
@@ -367,20 +414,37 @@ export function getFuelRefills(): FuelRefill[] {
   return cache.fuelRefills;
 }
 
-// Calculate Tank Status (Current Stock, Percentage, Low Tank Alert condition)
-export function getTankStatus(gasStationId?: string) {
-  const settings = getSettings();
-  const capacity = Number(settings.tankCapacityLiters) > 0 ? Number(settings.tankCapacityLiters) : 20000;
-  const initialStock = settings.tankInitialStockLiters !== undefined && Number(settings.tankInitialStockLiters) >= 0
-    ? Number(settings.tankInitialStockLiters) 
-    : capacity;
+// Calculate Individual Tank Status (Tanque Central Quadra, Tanque Central Itapeva ou Genérico)
+export function getTankStatus(targetTankId?: string) {
+  const allTanks = getCentralTanks();
   
-  const baseUpdatedAt = settings.tankStockBaseUpdatedAt ? new Date(settings.tankStockBaseUpdatedAt).getTime() : 0;
+  // Identify which tank to evaluate
+  let targetTank: CentralTank | undefined;
+  if (targetTankId) {
+    targetTank = allTanks.find(t => t.id === targetTankId || (targetTankId.includes('quadra') && t.id === 'tank-quadra') || (targetTankId.includes('itapeva') && t.id === 'tank-itapeva'));
+  }
+  
+  // Fallback to first tank (Quadra) if not found
+  if (!targetTank) {
+    targetTank = allTanks[0] || INITIAL_CENTRAL_TANKS[0];
+  }
 
-  // Total refilled into the tank from suppliers (Entrada de combustível)
+  const capacity = targetTank?.capacityLiters || 10000;
+  const initialStock = targetTank?.currentStockLiters !== undefined ? targetTank.currentStockLiters : 7500;
+  const minStockAlert = targetTank?.minStockAlertLiters || 2000;
+  const baseUpdatedAt = targetTank?.stockBaseUpdatedAt ? new Date(targetTank.stockBaseUpdatedAt).getTime() : 0;
+
+  // Refills dedicated to this specific tank
   const refills = getFuelRefills();
   const totalRefilled = refills.reduce((sum, r) => {
     const rDate = r.dateTime || (r as any).date;
+    // Check if refill belongs to this tank (by tankId or matched name)
+    const isThisTank = (r as any).tankId === targetTank?.id || 
+      (targetTank?.id === 'tank-quadra' && (!((r as any).tankId) || (r as any).tankId === 'stn-001' || (r as any).tankId === 'stn-quadra')) ||
+      (targetTank?.id === 'tank-itapeva' && (r as any).tankId === 'tank-itapeva');
+    
+    if (!isThisTank) return sum;
+
     if (baseUpdatedAt > 0 && rDate) {
       const refillTime = new Date(rDate).getTime();
       if (refillTime < baseUpdatedAt) return sum;
@@ -388,13 +452,15 @@ export function getTankStatus(gasStationId?: string) {
     return sum + (Number(r.liters) || 0);
   }, 0);
 
-  // Total consumed by machines/vehicles from central/internal post
+  // Dispensed fuel logs dedicated to this specific tank
   const fuelLogs = getFuelLogs();
   const totalDispensed = fuelLogs.reduce((sum, log) => {
-    // If filtering by specific station or default central tank
-    if (gasStationId && log.gasStationId && log.gasStationId !== gasStationId) {
-      return sum;
-    }
+    const isThisTank = log.gasStationId === targetTank?.id || 
+      (targetTank?.id === 'tank-quadra' && (log.gasStationId === 'stn-001' || log.gasStationId === 'stn-quadra' || log.gasStationName?.toLowerCase().includes('quadra') || (!log.gasStationId && !log.gasStationName?.toLowerCase().includes('itapeva')))) ||
+      (targetTank?.id === 'tank-itapeva' && (log.gasStationId === 'tank-itapeva' || log.gasStationId === 'stn-itapeva' || log.gasStationName?.toLowerCase().includes('itapeva')));
+
+    if (!isThisTank) return sum;
+
     if (baseUpdatedAt > 0 && log.dateTime) {
       const logTime = new Date(log.dateTime).getTime();
       if (logTime < baseUpdatedAt) return sum;
@@ -405,12 +471,16 @@ export function getTankStatus(gasStationId?: string) {
   const currentStock = Math.max(0, initialStock + totalRefilled - totalDispensed);
   const percentage = capacity > 0 ? Math.min(100, Math.max(0, (currentStock / capacity) * 100)) : 0;
   
-  // Alerta quando atingir 2.000L ou menos (aviso de combustível acabando) e crítico se <= 500L
-  const isCritical = currentStock <= 500;
-  const isLow = currentStock <= 2000 || currentStock <= Math.max(2000, capacity * 0.1);
+  // Alerta quando estoque atual <= estoque mínimo configurado (padrão 2.000 L)
+  const isCritical = currentStock <= Math.max(500, minStockAlert * 0.25);
+  const isLow = currentStock <= minStockAlert;
 
   return {
+    tankId: targetTank?.id || 'tank-quadra',
+    name: targetTank?.name || 'Tanque Central',
+    location: targetTank?.location || 'Sede',
     capacity,
+    minStockAlert,
     initialStock,
     totalRefilled,
     totalDispensed,
@@ -491,11 +561,11 @@ export function getPreventiveItems(equipmentId?: string): PreventiveMaintenanceI
 
   // Default fallback generator if machine has no preventive items yet
   const defaultKeys: { key: PreventiveItemKey; name: string; interval: number }[] = [
-    { key: 'TROCA_OLEO_MOTOR', name: 'Troca de Óleo do Motor', interval: 250 },
-    { key: 'FILTRO_OLEO', name: 'Filtro de Óleo Lubrificante', interval: 250 },
+    { key: 'TROCA_OLEO_MOTOR', name: 'Troca de Óleo do Motor', interval: 300 },
+    { key: 'FILTRO_OLEO', name: 'Filtro de Óleo Lubrificante', interval: 300 },
     { key: 'FILTRO_COMBUSTIVEL', name: 'Filtro de Combustível / Separador', interval: 500 },
     { key: 'FILTRO_AR', name: 'Filtro de Ar do Motor', interval: 500 },
-    { key: 'LUBRIFICACAO', name: 'Lubrificação Geral (Graxa)', interval: 50 },
+    { key: 'LUBRIFICACAO', name: 'Lubrificação Geral (Graxa)', interval: 100 },
     { key: 'REVISAO_GERAL', name: 'Revisões Gerais do Equipamento', interval: 1000 },
     { key: 'PNEUS_ESTEIRAS', name: 'Calibragem & Inspeção de Pneus/Esteiras', interval: 100 }
   ];
@@ -556,6 +626,32 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
     // Write fuel log to Firestore
     await setDoc(doc(db, 'fuel_logs', cleanedLog.id), cleanedLog);
 
+    // If fueling came from a central tank, register a Tank Movement (Saída / Abastecimento)
+    const isTankQuadra = log.gasStationId === 'tank-quadra' || log.gasStationId === 'stn-001' || log.gasStationId === 'stn-quadra' || log.gasStationName?.toLowerCase().includes('quadra');
+    const isTankItapeva = log.gasStationId === 'tank-itapeva' || log.gasStationId === 'stn-itapeva' || log.gasStationName?.toLowerCase().includes('itapeva');
+    
+    if (isTankQuadra || isTankItapeva) {
+      const activeTankId = isTankItapeva ? 'tank-itapeva' : 'tank-quadra';
+      const statusBefore = getTankStatus(activeTankId);
+      const prevStock = statusBefore.currentStock;
+      const afterStock = Math.max(0, prevStock - log.liters);
+
+      await addTankMovement({
+        tankId: activeTankId,
+        dateTime: log.dateTime || new Date().toISOString(),
+        type: 'SAIDA_ABASTECIMENTO',
+        liters: log.liters,
+        previousStock: prevStock,
+        afterStock: afterStock,
+        userId: log.attendantId || log.driverOrOperatorId || 'sys',
+        userName: log.attendantName || log.driverOrOperatorName || 'Operador',
+        equipmentId: log.equipmentId,
+        equipmentName: log.equipmentName,
+        fuelLogId: cleanedLog.id,
+        notes: `Abastecimento de ${log.liters}L em ${log.equipmentName} (${log.equipmentPlateOrCode}).`
+      });
+    }
+
     // Update Equipment current KM / Hourmeter in Firestore
     const vehicles = getVehicles();
     const targetVehicle = vehicles.find(v => v.id === log.equipmentId);
@@ -595,7 +691,7 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
       await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
     }
 
-    logAuditEvent('CRIAR', 'Abastecimento', `Registrou ${newLog.liters}L em ${newLog.equipmentName} (${newLog.equipmentPlateOrCode}).`);
+    logAuditEvent('CRIAR', 'Abastecimento', `Registrou ${newLog.liters}L em ${newLog.equipmentName} (${newLog.equipmentPlateOrCode}) via ${newLog.gasStationName}.`);
     notifyDataUpdated();
     return cleanedLog;
   } catch (err) {
@@ -623,6 +719,76 @@ export async function deleteFuelLog(id: string): Promise<void> {
 
   await deleteDoc(doc(db, 'fuel_logs', id));
   logAuditEvent('EXCLUIR', 'Abastecimento', `Removeu o abastecimento ID ${id}.`);
+}
+
+// Central Tanks Mutators
+export async function updateCentralTank(id: string, fields: Partial<CentralTank>, reason?: string): Promise<void> {
+  const current = getCentralTank(id);
+  const currentStatus = getTankStatus(id);
+  const user = getCurrentUser();
+
+  const prevStock = currentStatus ? currentStatus.currentStock : (current?.currentStockLiters || 0);
+  const newStock = fields.currentStockLiters !== undefined ? Number(fields.currentStockLiters) : prevStock;
+  const stockChanged = fields.currentStockLiters !== undefined && Math.abs(newStock - prevStock) > 0.01;
+
+  const cleaned = cleanUndefined({
+    ...fields,
+    currentStockLiters: newStock,
+    stockBaseUpdatedAt: stockChanged ? new Date().toISOString() : (current?.stockBaseUpdatedAt || new Date().toISOString())
+  });
+
+  const updatedObj = current ? { ...current, ...cleaned } : { id, ...cleaned } as CentralTank;
+  cache.centralTanks = cache.centralTanks.map(t => t.id === id ? updatedObj : t);
+  if (!cache.centralTanks.some(t => t.id === id)) {
+    cache.centralTanks.push(updatedObj);
+  }
+  notifyDataUpdated();
+
+  await setDoc(doc(db, 'central_tanks', id), cleaned, { merge: true });
+
+  // If currentStockLiters was manually adjusted, register an audit movement with full details
+  if (stockChanged) {
+    const diff = newStock - prevStock;
+    const diffText = diff > 0 ? `+${diff.toLocaleString('pt-BR')} L` : `${diff.toLocaleString('pt-BR')} L`;
+    const adjReason = reason?.trim() || 'Ajuste manual de calibração do estoque físico';
+
+    await addTankMovement({
+      tankId: id,
+      dateTime: new Date().toISOString(),
+      type: 'AJUSTE_MANUAL',
+      liters: newStock,
+      previousStock: prevStock,
+      afterStock: newStock,
+      difference: diff,
+      userId: user?.id || 'sys',
+      userName: user?.name || 'Administrador',
+      reason: adjReason,
+      notes: `Ajuste manual em ${updatedObj.name}: anterior ${prevStock.toLocaleString('pt-BR')}L → novo ${newStock.toLocaleString('pt-BR')}L (${diffText}). Motivo: ${adjReason}.`
+    });
+
+    logAuditEvent(
+      'CONFIGURACAO', 
+      'Ajuste de Estoque de Tanque', 
+      `Ajustou estoque do ${updatedObj.name}: ${prevStock.toLocaleString('pt-BR')}L → ${newStock.toLocaleString('pt-BR')}L (${diffText}). Motivo: ${adjReason}.`
+    );
+  } else {
+    logAuditEvent('EDITAR', 'Tanque Central', `Atualizou dados e configurações de ${updatedObj.name} (${updatedObj.location}).`);
+  }
+
+  checkAutomatedAlerts();
+}
+
+export async function addTankMovement(movement: Omit<TankMovement, 'id'>): Promise<TankMovement> {
+  const newMov: TankMovement = {
+    ...movement,
+    id: `mov-${Date.now()}-${Math.floor(Math.random() * 1000)}`
+  };
+  const cleaned = cleanUndefined(newMov);
+  cache.tankMovements = [cleaned, ...(cache.tankMovements || [])];
+  notifyDataUpdated(false);
+
+  await setDoc(doc(db, 'tank_movements', cleaned.id), cleaned);
+  return cleaned;
 }
 
 // Vehicle / Machine Mutators
@@ -668,7 +834,37 @@ export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<Mai
   notifyDataUpdated();
 
   await setDoc(doc(db, 'maintenance_logs', cleaned.id), cleaned);
+
+  // When a maintenance is registered, also update the vehicle's last maintenance reference and next target
+  const vehicles = getVehicles();
+  const targetVehicle = vehicles.find(v => v.id === m.equipmentId);
+  if (targetVehicle) {
+    const isKm = targetVehicle.category === 'VEICULO' || targetVehicle.maintenanceControlType === 'QUILOMETRAGEM';
+    const interval = isKm 
+      ? (targetVehicle.maintenanceIntervalKm || 10000)
+      : (targetVehicle.maintenanceIntervalHours || targetVehicle.oilChangeIntervalHours || 300);
+
+    const updates: Partial<Vehicle> = {};
+    if (isKm) {
+      updates.lastMaintenanceKm = m.kmOrHourAtService;
+      updates.nextMaintenanceKm = m.nextServiceKmOrHour || (m.kmOrHourAtService + interval);
+      updates.lastMaintenanceDate = m.date;
+    } else {
+      updates.lastMaintenanceHourmeter = m.kmOrHourAtService;
+      updates.nextMaintenanceHourmeter = m.nextServiceKmOrHour || (m.kmOrHourAtService + interval);
+      updates.lastMaintenanceDate = m.date;
+      if (m.type === 'TROCA_OLEO' || m.title.toLowerCase().includes('óleo')) {
+        updates.lastOilChangeHourmeter = m.kmOrHourAtService;
+        updates.lastOilChangeDate = m.date;
+        updates.nextOilChangeHourmeter = m.nextServiceKmOrHour || (m.kmOrHourAtService + interval);
+      }
+    }
+
+    await updateVehicle(targetVehicle.id, updates);
+  }
+
   logAuditEvent('CRIAR', 'Manutenção', `Agendou/Registrou manutenção "${m.title}" em ${m.equipmentName}.`);
+  checkAutomatedAlerts();
   return cleaned;
 }
 
@@ -679,6 +875,7 @@ export async function updateMaintenance(id: string, fields: Partial<MaintenanceL
 
   await updateDoc(doc(db, 'maintenance_logs', id), cleaned);
   logAuditEvent('EDITAR', 'Manutenção', `Atualizou registro de manutenção ID ${id}.`);
+  checkAutomatedAlerts();
 }
 
 export async function deleteMaintenance(id: string): Promise<void> {
@@ -687,6 +884,7 @@ export async function deleteMaintenance(id: string): Promise<void> {
 
   await deleteDoc(doc(db, 'maintenance_logs', id));
   logAuditEvent('EXCLUIR', 'Manutenção', `Excluiu o registro de manutenção ID ${id}.`);
+  checkAutomatedAlerts();
 }
 
 // Machine Issue Mutators
@@ -746,13 +944,16 @@ export async function recordPreventiveService(
 ): Promise<void> {
   const all = getPreventiveItems();
   const target = all.find(item => item.equipmentId === equipmentId && item.itemKey === itemKey);
-  
+  const vehicles = getVehicles();
+  const vehicle = vehicles.find(v => v.id === equipmentId);
+  const interval = target?.intervalHours || vehicle?.maintenanceIntervalHours || 300;
+
   if (target) {
     const updatedItem: PreventiveMaintenanceItem = cleanUndefined({
       ...target,
       lastServiceDate: new Date().toISOString().slice(0, 10),
       lastServiceHourmeter: currentHourmeter,
-      nextScheduledHourmeter: currentHourmeter + target.intervalHours,
+      nextScheduledHourmeter: currentHourmeter + interval,
       notes: notes || target.notes
     });
     
@@ -764,14 +965,14 @@ export async function recordPreventiveService(
     // Create a maintenance log entry in Firestore
     await addMaintenance({
       equipmentId,
-      equipmentName: target.itemName,
-      equipmentPlateOrCode: equipmentId,
+      equipmentName: vehicle?.model || target.itemName,
+      equipmentPlateOrCode: vehicle?.patrimonyCode || vehicle?.licensePlate || equipmentId,
       date: new Date().toISOString().slice(0, 10),
-      type: 'TROCA_OLEO',
+      type: itemKey.includes('OLEO') ? 'TROCA_OLEO' : (itemKey.includes('FILTRO') ? 'TROCA_FILTROS' : 'REVISAO'),
       title: `Manutenção Preventiva: ${target.itemName}`,
-      description: `Serviço realizado no horímetro ${currentHourmeter}h. Próxima com +${target.intervalHours}h.`,
+      description: `Serviço realizado no horímetro ${currentHourmeter}h. Próxima programada com +${interval}h (em ${currentHourmeter + interval}h).`,
       kmOrHourAtService: currentHourmeter,
-      nextServiceKmOrHour: currentHourmeter + target.intervalHours,
+      nextServiceKmOrHour: currentHourmeter + interval,
       cost: 0,
       supplierOrWorkshop: 'Oficina Interna AndradeAgro',
       performedBy: getCurrentUser()?.name || 'Oficina',
@@ -779,7 +980,7 @@ export async function recordPreventiveService(
       notes
     });
 
-    logAuditEvent('CRIAR', 'Manutenção Preventiva', `Registrou ${target.itemName} no horímetro ${currentHourmeter}h.`);
+    logAuditEvent('CRIAR', 'Manutenção Preventiva', `Registrou ${target.itemName} em ${vehicle?.model || equipmentId} no horímetro ${currentHourmeter}h.`);
   }
 }
 
@@ -875,7 +1076,27 @@ export async function addFuelRefill(refill: Omit<FuelRefill, 'id' | 'createdAt'>
   notifyDataUpdated();
 
   await setDoc(doc(db, 'fuel_refills', cleaned.id), cleaned);
-  logAuditEvent('CRIAR', 'Entrada de Combustível', `Registrou entrada de ${cleaned.liters.toLocaleString('pt-BR')}L (${cleaned.fuelType}) de ${cleaned.supplierName || 'Fornecedor'}.`);
+
+  // Register in Tank Movements
+  const targetTankId = (refill as any).tankId || 'tank-quadra';
+  const tankStatus = getTankStatus(targetTankId);
+  const prevStock = tankStatus.currentStock;
+  const afterStock = prevStock + cleaned.liters;
+
+  await addTankMovement({
+    tankId: targetTankId,
+    dateTime: cleaned.dateTime || (cleaned as any).date || new Date().toISOString(),
+    type: 'ENTRADA',
+    liters: cleaned.liters,
+    previousStock: prevStock,
+    afterStock: afterStock,
+    userId: getCurrentUser()?.id || 'sys',
+    userName: getCurrentUser()?.name || 'Administrador',
+    refillId: cleaned.id,
+    notes: `Recebimento de combustível: ${cleaned.liters.toLocaleString('pt-BR')}L (${cleaned.fuelType}) de ${cleaned.supplierName || 'Fornecedor'}. NF: ${cleaned.invoiceNumber || 'S/N'}.`
+  });
+
+  logAuditEvent('CRIAR', 'Entrada de Combustível', `Registrou entrada de ${cleaned.liters.toLocaleString('pt-BR')}L no ${tankStatus.name} (${cleaned.fuelType}) de ${cleaned.supplierName || 'Fornecedor'}.`);
   
   checkAutomatedAlerts();
   return cleaned;
@@ -890,24 +1111,45 @@ export async function deleteFuelRefill(id: string): Promise<void> {
   checkAutomatedAlerts();
 }
 
-// Dedicated Oil Change Recorder
+// Dedicated Oil Change / Maintenance Service Recorder
+// Dedicated Oil Change / Maintenance Service Recorder
 export async function recordOilChange(
   equipmentId: string,
   recordedHourmeter: number,
   date?: string,
   cost: number = 0,
-  notes?: string
+  notes?: string,
+  extra?: {
+    oilType?: string;
+    oilQuantityLiters?: number;
+    filtersReplaced?: string;
+    performedBy?: string;
+    supplierOrWorkshop?: string;
+  }
 ): Promise<void> {
   const serviceDate = date || new Date().toISOString().slice(0, 10);
   const vehicles = getVehicles();
   const targetVehicle = vehicles.find(v => v.id === equipmentId);
-  const nextScheduled = recordedHourmeter + 300;
+  
+  // Use equipment specific interval (default 300h only if not specified)
+  const interval = Number(targetVehicle?.oilChangeIntervalHours) || Number(targetVehicle?.maintenanceIntervalHours) || 300;
+  const nextScheduled = recordedHourmeter + interval;
+  const performedBy = extra?.performedBy || getCurrentUser()?.name || 'Mecânico Responsável';
+  const supplierOrWorkshop = extra?.supplierOrWorkshop || 'Oficina Interna AndradeAgro';
+  const oilType = extra?.oilType || 'Óleo Motor 15W40';
+  const oilQuantityLiters = extra?.oilQuantityLiters;
+  const filtersReplaced = extra?.filtersReplaced;
 
   if (targetVehicle) {
     const updatedVehicle: Partial<Vehicle> = {
+      oilChangeControlActive: true,
+      lastMaintenanceHourmeter: recordedHourmeter,
+      lastMaintenanceDate: serviceDate,
+      nextMaintenanceHourmeter: nextScheduled,
       lastOilChangeHourmeter: recordedHourmeter,
       lastOilChangeDate: serviceDate,
       nextOilChangeHourmeter: nextScheduled,
+      oilChangeIntervalHours: interval,
       currentHourmeter: Math.max(targetVehicle.currentHourmeter || 0, recordedHourmeter)
     };
     await updateVehicle(targetVehicle.id, updatedVehicle);
@@ -922,18 +1164,24 @@ export async function recordOilChange(
       lastServiceDate: serviceDate,
       lastServiceHourmeter: recordedHourmeter,
       nextScheduledHourmeter: nextScheduled,
-      intervalHours: 300,
+      intervalHours: interval,
       notes: notes || oilPrevItem.notes
     });
     cache.preventiveItems = cache.preventiveItems.map(p => p.id === oilPrevItem.id ? updatedItem : p);
     await setDoc(doc(db, 'preventive_items', oilPrevItem.id), updatedItem);
   }
 
-  // Resolve any existing oil change alert for this machine
-  const existingAlert = cache.alerts.find(a => a.id === `alt-oil-${equipmentId}` || (a.equipmentId === equipmentId && a.type === 'OIL_CHANGE_DUE'));
+  // Resolve any existing maintenance alert for this machine
+  const existingAlert = cache.alerts.find(a => a.id === `alt-oil-${equipmentId}` || (a.equipmentId === equipmentId && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')));
   if (existingAlert && !existingAlert.resolved) {
     await resolveAlert(existingAlert.id);
   }
+
+  // Build full description
+  let desc = `Troca de óleo realizada no horímetro ${recordedHourmeter}h. Intervalo: ${interval}h. Próxima troca programada para ${nextScheduled}h.`;
+  if (oilType) desc += ` Tipo: ${oilType}.`;
+  if (oilQuantityLiters) desc += ` Volume: ${oilQuantityLiters}L.`;
+  if (filtersReplaced) desc += ` Filtros: ${filtersReplaced}.`;
 
   // Add Maintenance Log
   await addMaintenance({
@@ -943,14 +1191,18 @@ export async function recordOilChange(
     date: serviceDate,
     type: 'TROCA_OLEO',
     title: `Troca de Óleo do Motor (${recordedHourmeter}h)`,
-    description: `Troca de óleo realizada no horímetro ${recordedHourmeter}h. Próxima troca programada com +300h (em ${nextScheduled}h).`,
+    description: desc,
     kmOrHourAtService: recordedHourmeter,
     nextServiceKmOrHour: nextScheduled,
     cost,
-    supplierOrWorkshop: 'Oficina Interna AndradeAgro',
-    performedBy: getCurrentUser()?.name || 'Oficina',
+    supplierOrWorkshop,
+    performedBy,
     status: 'CONCLUIDO',
-    notes
+    notes,
+    oilType,
+    oilQuantityLiters,
+    filtersReplaced,
+    intervalHoursApplied: interval
   });
 
   logAuditEvent('CRIAR', 'Troca de Óleo', `Registrou troca de óleo em ${targetVehicle?.model || equipmentId} no horímetro ${recordedHourmeter}h (Próxima: ${nextScheduled}h).`);
@@ -958,106 +1210,277 @@ export async function recordOilChange(
   notifyDataUpdated();
 }
 
-// Automated Intelligence Checker for Alerts
+// Configurator for Oil Change Interval & Initial Reference Meter without creating fake past maintenance
+export async function setOilChangeConfigAndReference(
+  equipmentId: string,
+  config: {
+    active: boolean;
+    intervalHours: number;
+    warningAdvanceHours: number;
+    referenceHourmeter?: number;
+    lastServiceDate?: string;
+  }
+): Promise<void> {
+  const vehicles = getVehicles();
+  const target = vehicles.find(v => v.id === equipmentId);
+  if (!target) return;
+
+  const active = config.active !== false;
+  const interval = Math.max(1, Number(config.intervalHours) || 300);
+  const advance = Math.max(0, Number(config.warningAdvanceHours) || 50);
+  const refMeter = config.referenceHourmeter !== undefined 
+    ? Number(config.referenceHourmeter) 
+    : (target.lastOilChangeHourmeter !== undefined ? Number(target.lastOilChangeHourmeter) : (target.currentHourmeter || 0));
+  
+  const nextScheduled = refMeter + interval;
+
+  const vehicleUpdates: Partial<Vehicle> = {
+    oilChangeControlActive: active,
+    oilChangeIntervalHours: interval,
+    oilChangeWarningAdvanceHours: advance,
+    lastOilChangeHourmeter: refMeter,
+    lastOilChangeDate: config.lastServiceDate || target.lastOilChangeDate || new Date().toISOString().slice(0, 10),
+    nextOilChangeHourmeter: nextScheduled,
+    maintenanceIntervalHours: interval,
+    maintenanceWarningAdvanceHours: advance,
+    lastMaintenanceHourmeter: refMeter,
+    nextMaintenanceHourmeter: nextScheduled,
+  };
+
+  await updateVehicle(target.id, vehicleUpdates);
+
+  // If deactivated, resolve pending alerts for this equipment
+  if (!active) {
+    const existingAlert = cache.alerts.find(a => a.id === `alt-oil-${equipmentId}` || (a.equipmentId === equipmentId && a.type === 'OIL_CHANGE_DUE'));
+    if (existingAlert && !existingAlert.resolved) {
+      await resolveAlert(existingAlert.id);
+    }
+  }
+
+  logAuditEvent('CONFIGURACAO', 'Troca de Óleo', `Configurou troca de óleo de ${target.model}: Intervalo ${interval}h, Alerta ${advance}h antes, Horímetro ref: ${refMeter}h, Ativo: ${active ? 'Sim' : 'Não'}.`);
+  checkAutomatedAlerts();
+  notifyDataUpdated();
+}
+
+// Automated Intelligence Checker for Alerts (Multi-tank & Multi-interval maintenance)
 export function checkAutomatedAlerts() {
   try {
     const settings = getSettings();
     if (!settings.autoAlertsEnabled) return;
 
-    // 1. Check Tank Level of Sede Fazenda (Alert <= 2000L)
-    const tank = getTankStatus();
-    const lowTankAlertId = 'alt-low-tank';
-    const existingLowTank = cache.alerts.find(a => a.id === lowTankAlertId);
+    // 1. Check Tank Level for EACH Central Tank independently (Quadra & Itapeva)
+    const centralTanks = getCentralTanks();
+    centralTanks.forEach(tank => {
+      const tankStatus = getTankStatus(tank.id);
+      const lowTankAlertId = `alt-low-tank-${tank.id}`;
+      const existingLowTank = cache.alerts.find(a => a.id === lowTankAlertId);
+      const minStock = tank.minStockAlertLiters || 2000;
 
-    if (tank.currentStock <= 2000) {
-      const title = '⚠️ Combustível baixo';
-      const desc = `O tanque da Sede Fazenda está com ${Math.round(tank.currentStock).toLocaleString('pt-BR')} L. O nível está abaixo do limite de 2.000 L.`;
+      if (tankStatus.currentStock <= minStock) {
+        const isCritical = tankStatus.currentStock <= Math.max(500, minStock * 0.25);
+        const title = isCritical ? `🔴 Estoque crítico - ${tank.name}` : `⚠️ Estoque baixo - ${tank.name}`;
+        const desc = `O ${tank.name} (${tank.location}) está com ${Math.round(tankStatus.currentStock).toLocaleString('pt-BR')} L. Nível ${isCritical ? 'crítico' : 'abaixo do estoque mínimo'} de ${minStock.toLocaleString('pt-BR')} L. Reabastecimento recomendado.`;
 
-      if (!existingLowTank) {
-        const alertObj: SmartAlert = cleanUndefined({
-          id: lowTankAlertId,
-          type: 'LOW_TANK_LEVEL',
-          severity: 'ALTA',
-          title,
-          description: desc,
-          date: new Date().toISOString().slice(0, 10),
-          resolved: false
-        });
-        cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== lowTankAlertId)];
-        setDoc(doc(db, 'alerts', lowTankAlertId), alertObj).catch(console.error);
-      } else {
-        // Ensure the existing alert is active/pending and has the updated real stock
-        const updated: SmartAlert = cleanUndefined({
+        if (!existingLowTank) {
+          const alertObj: SmartAlert = cleanUndefined({
+            id: lowTankAlertId,
+            type: 'LOW_TANK_LEVEL',
+            severity: isCritical ? 'ALTA' : 'MEDIA',
+            title,
+            description: desc,
+            date: new Date().toISOString().slice(0, 10),
+            resolved: false
+          });
+          cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== lowTankAlertId)];
+          setDoc(doc(db, 'alerts', lowTankAlertId), alertObj).catch(console.error);
+        } else if (!existingLowTank.resolved || existingLowTank.description !== desc) {
+          const updated: SmartAlert = cleanUndefined({
+            ...existingLowTank,
+            title,
+            description: desc,
+            severity: isCritical ? 'ALTA' : 'MEDIA',
+            resolved: false,
+            resolvedAt: undefined,
+            resolvedBy: undefined
+          });
+          cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? updated : a);
+          setDoc(doc(db, 'alerts', lowTankAlertId), updated).catch(console.error);
+        }
+      } else if (existingLowTank && !existingLowTank.resolved) {
+        // Tank level returned to above minimum limit -> auto-resolve the alert
+        const resolvedAlert = cleanUndefined({
           ...existingLowTank,
-          title,
-          description: desc,
-          severity: 'ALTA',
-          resolved: false,
-          resolvedAt: undefined,
-          resolvedBy: undefined
+          resolved: true,
+          resolvedAt: new Date().toISOString(),
+          resolvedBy: 'Sistema (Estoque Normalizado)'
         });
-        cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? updated : a);
-        setDoc(doc(db, 'alerts', lowTankAlertId), updated).catch(console.error);
+        cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? resolvedAlert : a);
+        setDoc(doc(db, 'alerts', lowTankAlertId), resolvedAlert).catch(console.error);
       }
-    } else if (existingLowTank && !existingLowTank.resolved) {
-      // Tank level returned to above 2.000 L -> auto-resolve the alert
-      const resolvedAlert = cleanUndefined({
-        ...existingLowTank,
-        resolved: true,
-        resolvedAt: new Date().toISOString(),
-        resolvedBy: 'Sistema (Estoque Normalizado)'
-      });
-      cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? resolvedAlert : a);
-      setDoc(doc(db, 'alerts', lowTankAlertId), resolvedAlert).catch(console.error);
-    }
+    });
 
-    // 2. Check 300h Oil Change on Tractors, Implements, and Farm Machines
+    // 2. Check Flexible & Individual Maintenance Intervals per Vehicle/Machine
     const vehicles = getVehicles();
     vehicles.forEach(v => {
-      if (v.category === 'TRATOR' || v.category === 'MAQUINA_AGRICOLA' || v.category === 'IMPLEMENTO' || (v.currentHourmeter && v.currentHourmeter > 0)) {
+      const isKm = v.category === 'VEICULO' || v.maintenanceControlType === 'QUILOMETRAGEM';
+      
+      if (!isKm) {
+        // Hour-based maintenance control
+        const isOilControlActive = v.oilChangeControlActive !== false;
         const curHour = Number(v.currentHourmeter) || 0;
-        const lastChange = Number(v.lastOilChangeHourmeter) || 0;
-        const interval = Number(v.oilChangeIntervalHours) || 300;
-        const nextChange = v.nextOilChangeHourmeter !== undefined 
-          ? Number(v.nextOilChangeHourmeter) 
-          : (lastChange > 0 ? (lastChange + interval) : interval);
-        
-        const oilAlertId = `alt-oil-${v.id}`;
-        const existingOilAlert = cache.alerts.find(a => a.id === oilAlertId || (a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'));
+        const lastMnt = Number(v.lastOilChangeHourmeter) || Number(v.lastMaintenanceHourmeter) || 0;
+        const interval = Number(v.oilChangeIntervalHours) || Number(v.maintenanceIntervalHours) || 300;
+        const warningAdvance = v.oilChangeWarningAdvanceHours !== undefined ? Number(v.oilChangeWarningAdvanceHours) : (Number(v.maintenanceWarningAdvanceHours) || 50);
+        const nextMnt = v.nextOilChangeHourmeter !== undefined
+          ? Number(v.nextOilChangeHourmeter)
+          : (v.nextMaintenanceHourmeter !== undefined ? Number(v.nextMaintenanceHourmeter) : (lastMnt > 0 ? lastMnt + interval : interval));
 
-        if (curHour >= nextChange && curHour > 0) {
-          const title = `⚠️ Troca de Óleo Necessária: ${v.model}`;
-          const desc = `Esta máquina atingiu ${curHour}h (intervalo de ${interval}h desde a última troca realizada em ${lastChange}h - limite: ${nextChange}h).`;
-          
-          if (!existingOilAlert || existingOilAlert.cycleTargetHourmeter !== nextChange) {
-            // New cycle or alert not yet created for this specific 300h threshold
-            const oilAlertObj: SmartAlert = cleanUndefined({
-              id: oilAlertId,
-              type: 'OIL_CHANGE_DUE',
-              severity: 'ALTA',
-              title,
-              description: desc,
-              equipmentId: v.id,
-              equipmentName: v.model,
-              date: new Date().toISOString().slice(0, 10),
-              resolved: false,
-              cycleTargetHourmeter: nextChange,
-              lastOilChangeHourmeter: lastChange
+        const mntAlertId = `alt-oil-${v.id}`;
+        const existingMntAlert = cache.alerts.find(a => a.id === mntAlertId || (a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'));
+
+        if (!isOilControlActive || v.category === 'IMPLEMENTO') {
+          // If oil change control is disabled for this equipment, resolve any existing alert
+          if (existingMntAlert && !existingMntAlert.resolved) {
+            const resolvedAlert: SmartAlert = cleanUndefined({
+              ...existingMntAlert,
+              resolved: true,
+              resolvedBy: 'Sistema (Controle Desativado)'
             });
-            cache.alerts = [oilAlertObj, ...cache.alerts.filter(a => a.id !== oilAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'))];
-            setDoc(doc(db, 'alerts', oilAlertId), oilAlertObj).catch(console.error);
-          } else if (!existingOilAlert.resolved) {
-            // Alert exists and is active for this cycle - keep content fresh
-            if (existingOilAlert.description !== desc) {
+            cache.alerts = cache.alerts.map(a => a.id === existingMntAlert.id ? resolvedAlert : a);
+            setDoc(doc(db, 'alerts', existingMntAlert.id), resolvedAlert).catch(console.error);
+          }
+          return;
+        }
+
+        if (curHour > 0) {
+          if (curHour >= nextMnt) {
+            // Overdue / Vencida: 🔴 Troca de óleo vencida
+            const delay = curHour - nextMnt;
+            const title = `🔴 Troca de óleo vencida: ${v.model}`;
+            const desc = `Equipamento: ${v.model}. Horímetro atual: ${curHour}h. Troca prevista: ${nextMnt}h. Atraso: ${delay}h (Intervalo: ${interval}h).`;
+
+            if (!existingMntAlert || existingMntAlert.cycleTargetHourmeter !== nextMnt || existingMntAlert.severity !== 'ALTA') {
+              const alertObj: SmartAlert = cleanUndefined({
+                id: mntAlertId,
+                type: 'OIL_CHANGE_DUE',
+                severity: 'ALTA',
+                title,
+                description: desc,
+                equipmentId: v.id,
+                equipmentName: v.model,
+                date: new Date().toISOString().slice(0, 10),
+                resolved: false,
+                cycleTargetHourmeter: nextMnt,
+                lastOilChangeHourmeter: lastMnt
+              });
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== mntAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'))];
+              setDoc(doc(db, 'alerts', mntAlertId), alertObj).catch(console.error);
+            } else if (!existingMntAlert.resolved && existingMntAlert.description !== desc) {
               const updated = cleanUndefined({
-                ...existingOilAlert,
+                ...existingMntAlert,
                 title,
                 description: desc,
                 severity: 'ALTA' as const
               }) as SmartAlert;
-              cache.alerts = cache.alerts.map(a => a.id === existingOilAlert.id ? updated : a);
-              setDoc(doc(db, 'alerts', existingOilAlert.id), updated).catch(console.error);
+              cache.alerts = cache.alerts.map(a => a.id === existingMntAlert.id ? updated : a);
+              setDoc(doc(db, 'alerts', existingMntAlert.id), updated).catch(console.error);
             }
+          } else if (curHour >= (nextMnt - warningAdvance)) {
+            // Near due / Próxima da manutenção: 🟡 Troca de óleo próxima
+            const diff = nextMnt - curHour;
+            const title = `🟡 Troca de óleo próxima: ${v.model}`;
+            const desc = `Equipamento: ${v.model}. Próxima troca: ${nextMnt}h. Horímetro atual: ${curHour}h. Faltam: ${diff}h (Intervalo: ${interval}h).`;
+
+            if (!existingMntAlert || existingMntAlert.cycleTargetHourmeter !== nextMnt || existingMntAlert.severity !== 'MEDIA') {
+              const alertObj: SmartAlert = cleanUndefined({
+                id: mntAlertId,
+                type: 'OIL_CHANGE_DUE',
+                severity: 'MEDIA',
+                title,
+                description: desc,
+                equipmentId: v.id,
+                equipmentName: v.model,
+                date: new Date().toISOString().slice(0, 10),
+                resolved: false,
+                cycleTargetHourmeter: nextMnt,
+                lastOilChangeHourmeter: lastMnt
+              });
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== mntAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'))];
+              setDoc(doc(db, 'alerts', mntAlertId), alertObj).catch(console.error);
+            }
+          } else if (existingMntAlert && !existingMntAlert.resolved) {
+            // Machine maintenance has been completed or is well within safe bounds
+            const resolvedAlert: SmartAlert = cleanUndefined({
+              ...existingMntAlert,
+              resolved: true,
+              resolvedBy: 'Sistema (Troca de Óleo em Dia)'
+            });
+            cache.alerts = cache.alerts.map(a => a.id === existingMntAlert.id ? resolvedAlert : a);
+            setDoc(doc(db, 'alerts', existingMntAlert.id), resolvedAlert).catch(console.error);
+          }
+        }
+      } else {
+        // Km-based maintenance control
+        const curKm = Number(v.currentKm) || 0;
+        const lastKm = Number(v.lastMaintenanceKm) || 0;
+        const intervalKm = Number(v.maintenanceIntervalKm) || 10000;
+        const warningAdvanceKm = Number(v.maintenanceWarningAdvanceKm) || 1000;
+        const nextKm = v.nextMaintenanceKm !== undefined
+          ? Number(v.nextMaintenanceKm)
+          : (lastKm > 0 ? lastKm + intervalKm : intervalKm);
+
+        const kmAlertId = `alt-km-${v.id}`;
+        const existingKmAlert = cache.alerts.find(a => a.id === kmAlertId);
+
+        if (curKm > 0) {
+          if (curKm >= nextKm) {
+            const title = `⚠️ Revisão Vencida: ${v.model} (${v.licensePlate})`;
+            const desc = `Veículo atingiu ${curKm.toLocaleString('pt-BR')} km (limite: ${nextKm.toLocaleString('pt-BR')} km, intervalo de ${intervalKm.toLocaleString('pt-BR')} km).`;
+            
+            if (!existingKmAlert) {
+              const alertObj: SmartAlert = cleanUndefined({
+                id: kmAlertId,
+                type: 'PREVENTIVE_MAINTENANCE',
+                severity: 'ALTA',
+                title,
+                description: desc,
+                equipmentId: v.id,
+                equipmentName: v.model,
+                date: new Date().toISOString().slice(0, 10),
+                resolved: false
+              });
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId)];
+              setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
+            }
+          } else if (curKm >= (nextKm - warningAdvanceKm)) {
+            const diffKm = nextKm - curKm;
+            const title = `🟡 Revisão Próxima: ${v.model}`;
+            const desc = `Faltam ${diffKm.toLocaleString('pt-BR')} km para a revisão programada de ${nextKm.toLocaleString('pt-BR')} km.`;
+
+            if (!existingKmAlert) {
+              const alertObj: SmartAlert = cleanUndefined({
+                id: kmAlertId,
+                type: 'PREVENTIVE_MAINTENANCE',
+                severity: 'MEDIA',
+                title,
+                description: desc,
+                equipmentId: v.id,
+                equipmentName: v.model,
+                date: new Date().toISOString().slice(0, 10),
+                resolved: false
+              });
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId)];
+              setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
+            }
+          } else if (existingKmAlert && !existingKmAlert.resolved) {
+            // Vehicle review has been completed or is well within safe bounds
+            const resolvedAlert: SmartAlert = cleanUndefined({
+              ...existingKmAlert,
+              resolved: true,
+              resolvedBy: 'Sistema (Revisão em Dia)'
+            });
+            cache.alerts = cache.alerts.map(a => a.id === existingKmAlert.id ? resolvedAlert : a);
+            setDoc(doc(db, 'alerts', existingKmAlert.id), resolvedAlert).catch(console.error);
           }
         }
       }
@@ -1080,20 +1503,14 @@ export async function updateSettings(newSettings: Partial<SystemSettings>): Prom
 }
 
 export async function updateTankCapacity(capacityLiters: number, currentStockLiters?: number): Promise<void> {
-  const validCapacity = Math.max(1000, Number(capacityLiters) || 20000);
-  const current = getSettings();
-  const validStock = currentStockLiters !== undefined 
-    ? Math.max(0, Number(currentStockLiters))
-    : (current.tankInitialStockLiters !== undefined ? current.tankInitialStockLiters : validCapacity);
+  const validCapacity = Math.max(1000, Number(capacityLiters) || 10000);
+  const validStock = currentStockLiters !== undefined ? Math.max(0, Number(currentStockLiters)) : validCapacity;
 
-  const payload: Partial<SystemSettings> = {
-    tankCapacityLiters: validCapacity,
-    tankInitialStockLiters: validStock,
-    tankStockBaseUpdatedAt: new Date().toISOString()
-  };
-
-  await updateSettings(payload);
-  logAuditEvent('CONFIGURACAO', 'Tanque', `Ajustou capacidade para ${validCapacity.toLocaleString('pt-BR')} L e estoque atual para ${validStock.toLocaleString('pt-BR')} L.`);
+  // Update primary tank (Quadra)
+  await updateCentralTank('tank-quadra', {
+    capacityLiters: validCapacity,
+    currentStockLiters: validStock
+  });
 }
 
 // Reset system data in Firestore
@@ -1101,6 +1518,8 @@ export async function resetSystemData(): Promise<void> {
   try {
     await seedCollection('users', INITIAL_USERS);
     await seedCollection('vehicles', INITIAL_VEHICLES);
+    await seedCollection('central_tanks', INITIAL_CENTRAL_TANKS);
+    await seedCollection('tank_movements', INITIAL_TANK_MOVEMENTS);
     await seedCollection('gas_stations', INITIAL_GAS_STATIONS);
     await seedCollection('fuel_logs', INITIAL_FUEL_LOGS);
     await seedCollection('fuel_refills', INITIAL_FUEL_REFILLS);

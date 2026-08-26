@@ -1,4 +1,8 @@
-import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem, FuelRefill } from '../types';
+import { 
+  User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, 
+  SystemSettings, MachineIssue, PreventiveMaintenanceItem, FuelRefill,
+  CentralTank, TankMovement 
+} from '../types';
 
 export const INITIAL_USERS: User[] = [
   {
@@ -91,6 +95,12 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     fuelType: 'DIESEL_S10',
     tankCapacityLiters: 80,
     currentKm: 42350,
+    maintenanceControlType: 'QUILOMETRAGEM',
+    maintenanceIntervalKm: 10000,
+    maintenanceWarningAdvanceKm: 1000,
+    lastMaintenanceKm: 40000,
+    lastMaintenanceDate: '2026-06-15',
+    nextMaintenanceKm: 50000,
     status: 'ATIVO',
     assignedOperatorId: 'usr-001',
     assignedOperatorName: 'Carlos Eduardo Andrade',
@@ -112,6 +122,11 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     fuelType: 'ETANOL',
     tankCapacityLiters: 55,
     currentKm: 68100,
+    maintenanceControlType: 'QUILOMETRAGEM',
+    maintenanceIntervalKm: 10000,
+    maintenanceWarningAdvanceKm: 1000,
+    lastMaintenanceKm: 60000,
+    nextMaintenanceKm: 70000,
     status: 'ATIVO',
     assignedOperatorId: 'usr-003',
     assignedOperatorName: 'João Silva',
@@ -133,6 +148,11 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     fuelType: 'DIESEL_S10',
     tankCapacityLiters: 500,
     currentKm: 124800,
+    maintenanceControlType: 'QUILOMETRAGEM',
+    maintenanceIntervalKm: 15000,
+    maintenanceWarningAdvanceKm: 1500,
+    lastMaintenanceKm: 120000,
+    nextMaintenanceKm: 135000,
     status: 'ATIVO',
     assignedOperatorId: 'usr-003',
     assignedOperatorName: 'João Silva',
@@ -159,10 +179,22 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     ],
     currentKm: 0,
     currentHourmeter: 3420,
+    maintenanceControlType: 'HORAS',
+    maintenanceIntervalHours: 300,
+    maintenanceWarningAdvanceHours: 50,
+    lastMaintenanceHourmeter: 3200,
+    lastMaintenanceDate: '2026-06-10',
+    nextMaintenanceHourmeter: 3500,
     lastOilChangeHourmeter: 3200,
     lastOilChangeDate: '2026-06-10',
     nextOilChangeHourmeter: 3500,
     oilChangeIntervalHours: 300,
+    scheduledServices: [
+      { id: 'srv-004-1', name: 'Troca de Óleo do Motor', type: 'TROCA_OLEO', controlType: 'HORAS', intervalHours: 300, warningAdvanceHours: 50, lastServiceDate: '2026-06-10', lastServiceMeter: 3200, nextScheduledMeter: 3500, notes: 'Óleo Plus-50 II 15W-40' },
+      { id: 'srv-004-2', name: 'Filtros de Combustível & Ar', type: 'TROCA_FILTROS', controlType: 'HORAS', intervalHours: 500, warningAdvanceHours: 50, lastServiceDate: '2026-05-01', lastServiceMeter: 3000, nextScheduledMeter: 3500, notes: 'Filtro primário e secundário' },
+      { id: 'srv-004-3', name: 'Revisão Geral e Hidráulica', type: 'REVISAO', controlType: 'HORAS', intervalHours: 1000, warningAdvanceHours: 50, lastServiceDate: '2026-04-15', lastServiceMeter: 3000, nextScheduledMeter: 4000, notes: 'Checagem de bombas e válvulas' },
+      { id: 'srv-004-4', name: 'Lubrificação Geral (Engraxamento)', type: 'REVISAO', controlType: 'HORAS', intervalHours: 100, warningAdvanceHours: 20, lastServiceDate: '2026-07-20', lastServiceMeter: 3400, nextScheduledMeter: 3500, notes: 'Graxa de alta pressão' }
+    ],
     status: 'ATIVO',
     assignedOperatorId: 'usr-004',
     assignedOperatorName: 'Marcos Oliveira',
@@ -189,6 +221,15 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     ],
     currentKm: 0,
     currentHourmeter: 4890,
+    maintenanceControlType: 'HORAS',
+    maintenanceIntervalHours: 500,
+    maintenanceWarningAdvanceHours: 50,
+    lastMaintenanceHourmeter: 4500,
+    lastMaintenanceDate: '2026-05-18',
+    nextMaintenanceHourmeter: 5000,
+    scheduledServices: [
+      { id: 'srv-005-1', name: 'Revisão e Troca de Óleo', type: 'TROCA_OLEO', controlType: 'HORAS', intervalHours: 500, warningAdvanceHours: 50, lastServiceDate: '2026-05-18', lastServiceMeter: 4500, nextScheduledMeter: 5000 }
+    ],
     status: 'ATIVO',
     assignedOperatorId: 'usr-004',
     assignedOperatorName: 'Marcos Oliveira',
@@ -216,6 +257,15 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     ],
     currentKm: 0,
     currentHourmeter: 2150,
+    maintenanceControlType: 'HORAS',
+    maintenanceIntervalHours: 250,
+    maintenanceWarningAdvanceHours: 50,
+    lastMaintenanceHourmeter: 2000,
+    lastMaintenanceDate: '2026-07-05',
+    nextMaintenanceHourmeter: 2250,
+    scheduledServices: [
+      { id: 'srv-006-1', name: 'Troca de Óleo e Filtros do Rotor', type: 'TROCA_OLEO', controlType: 'HORAS', intervalHours: 250, warningAdvanceHours: 50, lastServiceDate: '2026-07-05', lastServiceMeter: 2000, nextScheduledMeter: 2250 }
+    ],
     status: 'ATIVO',
     assignedOperatorId: 'usr-004',
     assignedOperatorName: 'Marcos Oliveira',
@@ -236,23 +286,32 @@ export const INITIAL_VEHICLES: Vehicle[] = [
     color: 'Laranja Stara',
     sector: 'PULVERIZACAO',
     fuelType: 'DIESEL_S10',
-    tankCapacityLiters: 400,
+    tankCapacityLiters: 440,
     sprayingTankCapacityLiters: 4000,
     hasSprayingTank: true,
     operationalCapacities: [
-      { id: 'cap-007-1', type: 'PULVERIZACAO', name: 'Tanque de Pulverização (Calda)', value: 4000, unit: 'L', notes: 'Tanque central de calda com agitador mecânico' },
-      { id: 'cap-007-2', type: 'COMBUSTIVEL', name: 'Tanque de Combustível', value: 400, unit: 'L', notes: 'Diesel S10' },
-      { id: 'cap-007-3', type: 'RESERVATORIO', name: 'Reservatório de Água Limpa', value: 400, unit: 'L', notes: 'Para lavagem de circuito e tríplice lavagem' }
+      { id: 'cap-007-1', type: 'PULVERIZACAO', name: 'Tanque de Calda Pulverização', value: 4000, unit: 'L', notes: 'Calda pronta com agitador mecânico' },
+      { id: 'cap-007-2', type: 'COMBUSTIVEL', name: 'Tanque de Combustível', value: 440, unit: 'L', notes: 'Autonomia estimada 14 horas' },
+      { id: 'cap-007-3', type: 'AGUA_LIMPA', name: 'Reservatório de Água Limpa', value: 400, unit: 'L', notes: 'Lavagem de circuito e frascos' }
     ],
     currentKm: 0,
-    currentHourmeter: 1180,
+    currentHourmeter: 1350,
+    maintenanceControlType: 'HORAS',
+    maintenanceIntervalHours: 250,
+    maintenanceWarningAdvanceHours: 50,
+    lastMaintenanceHourmeter: 1200,
+    lastMaintenanceDate: '2026-06-25',
+    nextMaintenanceHourmeter: 1450,
+    scheduledServices: [
+      { id: 'srv-007-1', name: 'Revisão do Circuito Hidráulico de Pulverização', type: 'REVISAO', controlType: 'HORAS', intervalHours: 250, warningAdvanceHours: 50, lastServiceDate: '2026-06-25', lastServiceMeter: 1200, nextScheduledMeter: 1450 }
+    ],
     status: 'ATIVO',
-    assignedOperatorId: 'usr-003',
-    assignedOperatorName: 'João Silva',
-    photoUrl: 'https://images.unsplash.com/photo-1530267981600-70f443b74305?w=600&auto=format&fit=crop&q=80',
+    assignedOperatorId: 'usr-004',
+    assignedOperatorName: 'Marcos Oliveira',
+    photoUrl: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=600&auto=format&fit=crop&q=80',
     lastFuelingDate: '2026-08-01',
-    nextRevisionKmOrHour: 1250,
-    notes: 'Pulverização de defensivos com sistema barra dupla.'
+    nextRevisionKmOrHour: 1500,
+    notes: 'Pulverizador de alta precisão com bicos ponta dupla e corte seção a seção.'
   },
   {
     id: 'veh-008',
@@ -331,14 +390,107 @@ export const INITIAL_VEHICLES: Vehicle[] = [
   }
 ];
 
+export const INITIAL_CENTRAL_TANKS: CentralTank[] = [
+  {
+    id: 'tank-quadra',
+    name: 'Tanque Central - Quadra',
+    location: 'Sede Quadra',
+    capacityLiters: 10000,
+    currentStockLiters: 6500,
+    minStockAlertLiters: 2000,
+    fuelType: 'DIESEL_S10',
+    status: 'ATIVO',
+    stockBaseUpdatedAt: new Date().toISOString(),
+    notes: 'Tanque principal da Sede Quadra com bomba digital acoplada.'
+  },
+  {
+    id: 'tank-itapeva',
+    name: 'Tanque Central - Itapeva',
+    location: 'Sede Itapeva',
+    capacityLiters: 15000,
+    currentStockLiters: 9000,
+    minStockAlertLiters: 2000,
+    fuelType: 'DIESEL_S10',
+    status: 'ATIVO',
+    stockBaseUpdatedAt: new Date().toISOString(),
+    notes: 'Tanque de alta capacidade da Sede Itapeva para colheita pesada.'
+  }
+];
+
+export const INITIAL_TANK_MOVEMENTS: TankMovement[] = [
+  {
+    id: 'mov-001',
+    tankId: 'tank-quadra',
+    dateTime: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+    type: 'ENTRADA',
+    liters: 5000,
+    previousStock: 2500,
+    afterStock: 7500,
+    userId: 'usr-001',
+    userName: 'Carlos Eduardo Andrade',
+    notes: 'Recebimento de combustível BR Distribuidora (NF 10492).'
+  },
+  {
+    id: 'mov-002',
+    tankId: 'tank-itapeva',
+    dateTime: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
+    type: 'ENTRADA',
+    liters: 8000,
+    previousStock: 3200,
+    afterStock: 11200,
+    userId: 'usr-001',
+    userName: 'Carlos Eduardo Andrade',
+    notes: 'Recebimento de combustível Petrobras Distribuidora (NF 8831).'
+  }
+];
+
 export const INITIAL_GAS_STATIONS: GasStation[] = [
   {
+    id: 'tank-quadra',
+    name: 'Tanque Central - Quadra',
+    type: 'INTERNO',
+    supplierName: 'Tanque Central Quadra',
+    cnpj: '01.234.567/0001-89',
+    location: 'Sede Quadra',
+    tankId: 'tank-quadra',
+    pricePerLiter: {
+      DIESEL_S10: 5.79,
+      DIESEL_S500: 5.59,
+      GASOLINA_COMUM: 5.99,
+      GASOLINA_GRID: 6.29,
+      ETANOL: 3.89,
+      ARLA_32: 2.50,
+      NENHUM: 0
+    },
+    active: true
+  },
+  {
+    id: 'tank-itapeva',
+    name: 'Tanque Central - Itapeva',
+    type: 'INTERNO',
+    supplierName: 'Tanque Central Itapeva',
+    cnpj: '01.234.567/0002-70',
+    location: 'Sede Itapeva',
+    tankId: 'tank-itapeva',
+    pricePerLiter: {
+      DIESEL_S10: 5.79,
+      DIESEL_S500: 5.59,
+      GASOLINA_COMUM: 5.99,
+      GASOLINA_GRID: 6.29,
+      ETANOL: 3.89,
+      ARLA_32: 2.50,
+      NENHUM: 0
+    },
+    active: true
+  },
+  {
     id: 'stn-001',
-    name: 'Posto Interno Fazenda Andrade (Sede)',
+    name: 'Tanque Central - Quadra (Sede Quadra)',
     type: 'INTERNO',
     supplierName: 'BR Distribuidora - Vibra',
     cnpj: '01.234.567/0001-89',
-    location: 'Fazenda Andrade - Sede (Sorriso/MT)',
+    location: 'Sede Quadra',
+    tankId: 'tank-quadra',
     pricePerLiter: {
       DIESEL_S10: 5.79,
       DIESEL_S500: 5.59,

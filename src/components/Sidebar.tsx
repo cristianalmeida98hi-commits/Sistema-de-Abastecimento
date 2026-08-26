@@ -42,7 +42,7 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
       : [
           { id: 'dashboard', label: 'Visão Geral', icon: LayoutDashboard, badge: null },
           { id: 'fuel-logs', label: 'Abastecimentos', icon: Fuel, badge: null },
-          { id: 'fleet', label: 'Veículos & Máquinas', icon: Truck, badge: '160' },
+          { id: 'fleet', label: 'Veículos & Máquinas', icon: Truck, badge: null },
           { id: 'digital-sheets', label: 'Fichas Digitais', icon: FileSpreadsheet, badge: null },
           { id: 'qr-codes', label: 'Módulo QR Code', icon: QrCode, badge: 'QR' },
           { id: 'maintenance', label: 'Manutenções Gerais', icon: Wrench, badge: null },

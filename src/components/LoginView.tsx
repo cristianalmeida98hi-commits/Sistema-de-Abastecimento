@@ -21,6 +21,7 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
   const [rememberMe, setRememberMe] = useState(() => !!getRememberedEmail());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loggingInUserId, setLoggingInUserId] = useState<string | null>(null);
   
   // Quick Access Management
   const [allUsers, setAllUsers] = useState<User[]>(() => getUsers());
@@ -57,10 +58,22 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
     }, 250);
   };
 
-  const handleQuickSelect = (userEmail: string, userPass?: string) => {
-    setEmail(userEmail);
-    setPassword(userPass || '123456');
+  // Direct 1-Click Login for Quick Access Shortcuts
+  const handleQuickLogin = (user: User) => {
+    if (isLoading || loggingInUserId) return;
     setErrorMessage(null);
+    setLoggingInUserId(user.id);
+
+    setTimeout(() => {
+      const res = loginUser(user.email, user.password || '123456', rememberMe);
+      setLoggingInUserId(null);
+
+      if (res.success && res.user) {
+        onLoginSuccess(res.user);
+      } else {
+        setErrorMessage(res.error || 'Não foi possível autenticar o usuário.');
+      }
+    }, 200);
   };
 
   const handleRemoveShortcut = async (userId: string, e: React.MouseEvent) => {
@@ -196,10 +209,15 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
           {/* Quick Select Cards - Atalhos de Seleção Rápida */}
           <div className="pt-6 border-t border-emerald-900/60 mt-6 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-extrabold uppercase text-emerald-300 tracking-wider flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-[#FACC15]" />
-                Atalhos Rápidos de Acesso ({visibleShortcuts.length}):
-              </p>
+              <div>
+                <p className="text-[11px] font-extrabold uppercase text-emerald-300 tracking-wider flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-[#FACC15]" />
+                  Atalhos Rápidos de Acesso ({visibleShortcuts.length}):
+                </p>
+                <span className="text-[10px] text-emerald-400/80">
+                  Clique diretamente no perfil para entrar
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowManageModal(true)}
@@ -231,33 +249,49 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                       Administradores (Painel Completo)
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                      {adminShortcuts.map(user => (
-                        <div
-                          key={user.id}
-                          onClick={() => handleQuickSelect(user.email, user.password || '123456')}
-                          className="p-2.5 rounded-2xl border text-left transition-all hover:border-[#FACC15] bg-emerald-950/60 border-emerald-900 cursor-pointer relative group"
-                        >
-                          <button
-                            type="button"
-                            onClick={(e) => handleRemoveShortcut(user.id, e)}
-                            title="Remover este atalho"
-                            className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-900/80 hover:bg-red-500/80 text-emerald-400 hover:text-white flex items-center justify-center opacity-70 group-hover:opacity-100 transition-all"
+                      {adminShortcuts.map(user => {
+                        const isThisLoggingIn = loggingInUserId === user.id;
+                        return (
+                          <div
+                            key={user.id}
+                            onClick={() => handleQuickLogin(user)}
+                            title={`Clique para entrar imediatamente como ${user.name}`}
+                            className={`p-2.5 rounded-2xl border text-left transition-all hover:border-[#FACC15] hover:bg-emerald-900/70 bg-emerald-950/60 border-emerald-900 cursor-pointer relative group ${
+                              isThisLoggingIn ? 'ring-2 ring-[#FACC15] bg-emerald-900/90' : ''
+                            } ${loggingInUserId && !isThisLoggingIn ? 'opacity-50 pointer-events-none' : ''}`}
                           >
-                            <X className="w-3 h-3" />
-                          </button>
-                          <div className="flex items-center justify-between pr-5">
-                            <span className="font-extrabold text-[#FACC15] truncate">
-                              {user.name}
-                            </span>
-                            <span className="text-[9px] font-bold bg-[#FACC15]/20 text-[#FACC15] px-1.5 py-0.5 rounded shrink-0">
-                              ADMIN
-                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleRemoveShortcut(user.id, e)}
+                              title="Remover este atalho"
+                              className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-900/80 hover:bg-red-500/80 text-emerald-400 hover:text-white flex items-center justify-center opacity-70 group-hover:opacity-100 transition-all z-10"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                            <div className="flex items-center justify-between pr-5">
+                              <span className="font-extrabold text-[#FACC15] truncate flex items-center gap-1.5">
+                                {isThisLoggingIn && (
+                                  <div className="w-3 h-3 border-2 border-[#FACC15] border-t-transparent rounded-full animate-spin shrink-0"></div>
+                                )}
+                                <span className="truncate">{user.name}</span>
+                              </span>
+                              <span className="text-[9px] font-bold bg-[#FACC15]/20 text-[#FACC15] px-1.5 py-0.5 rounded shrink-0">
+                                ADMIN
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between mt-0.5">
+                              <p className="text-[10px] text-emerald-300/80 truncate">
+                                {user.email}
+                              </p>
+                              {isThisLoggingIn && (
+                                <span className="text-[9px] font-bold text-[#FACC15] animate-pulse">
+                                  Entrando...
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <p className="text-[10px] text-emerald-300/80 truncate mt-0.5">
-                            {user.email}
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -270,33 +304,51 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                       Operadores & Funcionários (Campo)
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                      {employeeShortcuts.map(user => (
-                        <div
-                          key={user.id}
-                          onClick={() => handleQuickSelect(user.email, user.password || '123456')}
-                          className="p-2 rounded-2xl border text-left transition-all hover:border-[#FACC15] bg-emerald-950/60 border-emerald-900 cursor-pointer relative group"
-                        >
-                          <button
-                            type="button"
-                            onClick={(e) => handleRemoveShortcut(user.id, e)}
-                            title="Remover este atalho"
-                            className="absolute top-1 right-1 w-4 h-4 rounded-full bg-emerald-900/80 hover:bg-red-500/80 text-emerald-400 hover:text-white flex items-center justify-center opacity-70 group-hover:opacity-100 transition-all"
+                      {employeeShortcuts.map(user => {
+                        const isThisLoggingIn = loggingInUserId === user.id;
+                        return (
+                          <div
+                            key={user.id}
+                            onClick={() => handleQuickLogin(user)}
+                            title={`Clique para entrar imediatamente como ${user.name}`}
+                            className={`p-2 rounded-2xl border text-left transition-all hover:border-[#FACC15] hover:bg-emerald-900/70 bg-emerald-950/60 border-emerald-900 cursor-pointer relative group ${
+                              isThisLoggingIn ? 'ring-2 ring-[#FACC15] bg-emerald-900/90' : ''
+                            } ${loggingInUserId && !isThisLoggingIn ? 'opacity-50 pointer-events-none' : ''}`}
                           >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                          <div className="flex items-center justify-between pr-4">
-                            <span className="font-extrabold text-[#FACC15] truncate">
-                              {user.name.split(' ')[0]} {user.name.split(' ')[1] ? user.name.split(' ')[1][0] + '.' : ''}
-                            </span>
-                            <span className="text-[8px] font-bold bg-amber-500/10 text-amber-400 px-1 py-0.5 rounded shrink-0 uppercase">
-                              {user.department || user.role}
-                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleRemoveShortcut(user.id, e)}
+                              title="Remover este atalho"
+                              className="absolute top-1 right-1 w-4 h-4 rounded-full bg-emerald-900/80 hover:bg-red-500/80 text-emerald-400 hover:text-white flex items-center justify-center opacity-70 group-hover:opacity-100 transition-all z-10"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                            <div className="flex items-center justify-between pr-4">
+                              <span className="font-extrabold text-[#FACC15] truncate flex items-center gap-1">
+                                {isThisLoggingIn && (
+                                  <div className="w-2.5 h-2.5 border-2 border-[#FACC15] border-t-transparent rounded-full animate-spin shrink-0"></div>
+                                )}
+                                <span className="truncate">
+                                  {user.name.split(' ')[0]} {user.name.split(' ')[1] ? user.name.split(' ')[1][0] + '.' : ''}
+                                </span>
+                              </span>
+                              <span className="text-[8px] font-bold bg-amber-500/10 text-amber-400 px-1 py-0.5 rounded shrink-0 uppercase">
+                                {user.department || user.role}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between mt-0.5">
+                              <p className="text-[9px] text-emerald-300/80 truncate">
+                                {user.email}
+                              </p>
+                              {isThisLoggingIn && (
+                                <span className="text-[8px] font-bold text-[#FACC15] animate-pulse">
+                                  Entrando...
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <p className="text-[9px] text-emerald-300/80 truncate mt-0.5">
-                            {user.email}
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

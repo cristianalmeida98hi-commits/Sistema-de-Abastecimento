@@ -1,15 +1,17 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Fuel, DollarSign, Calendar, TrendingUp, Truck, Users, 
-  BarChart2, PieChart, ArrowUpRight, AlertCircle, Plus, FileText, CheckCircle2, ChevronRight
+  BarChart2, PieChart, ArrowUpRight, AlertCircle, Plus, FileText, CheckCircle2, ChevronRight,
+  Settings, AlertTriangle
 } from 'lucide-react';
-import { FuelLog, Vehicle, Sector, SystemSettings } from '../types';
+import { FuelLog, Vehicle, Sector, SystemSettings, CentralTank, User } from '../types';
 import { formatCurrency, formatDateTimeBR, getSectorName, getFuelTypeName } from '../utils/calculations';
-import { getTankStatus } from '../utils/storage';
+import { getTankStatus, getCentralTanks, getCurrentUser, updateCentralTank } from '../utils/storage';
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, 
   PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar, CartesianGrid, Legend 
 } from 'recharts';
+import { EditCentralTankModal } from './EditCentralTankModal';
 
 interface DashboardViewProps {
   fuelLogs: FuelLog[];
@@ -35,12 +37,23 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
   vehicles = [],
   settings,
   onOpenFuelingModal,
-  onNavigate
+  onNavigate,
+  darkMode = true
 }) => {
-  // Tank status memoized based on settings and fuel logs
-  const tankStatus = useMemo(() => {
-    return getTankStatus();
-  }, [settings, fuelLogs]);
+  const [selectedTankForConfig, setSelectedTankForConfig] = useState<CentralTank | null>(null);
+  const currentUser = getCurrentUser() || { id: 'usr-admin', name: 'Administrador', role: 'ADMIN' } as User;
+
+  // Central Tanks statuses memoized
+  const centralTanks = useMemo(() => {
+    return getCentralTanks();
+  }, [settings]);
+
+  const centralTanksStatus = useMemo(() => {
+    return centralTanks.map(tank => ({
+      tank,
+      status: getTankStatus(tank.id)
+    }));
+  }, [centralTanks, settings, fuelLogs]);
 
   // Date calculations & metrics memoized
   const metrics = useMemo(() => {
@@ -422,96 +435,163 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
 
       </div>
 
-      {/* Secondary Bento Grid Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Tanques Centrais Section - Side by Side (Quadra & Itapeva) */}
+      <div className="rounded-3xl border p-6 shadow-sm bg-[#042d23] border-emerald-900/60">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xl">⛽</span>
+              <h3 className="font-extrabold text-lg text-slate-100">Tanques Centrais</h3>
+            </div>
+            <p className="text-xs text-emerald-200 font-medium mt-0.5">
+              Gestão e monitoramento de estoque em tempo real das sedes operacionais
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onNavigate('refills')}
+              className="px-3.5 py-1.5 bg-emerald-800/80 hover:bg-emerald-700 text-[#FACC15] text-xs font-extrabold rounded-xl border border-emerald-700/60 transition-colors flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Entrada de Combustível
+            </button>
+            <button
+              onClick={() => onNavigate('stations')}
+              className="px-3.5 py-1.5 bg-[#064E3B] hover:bg-[#08634c] text-white text-xs font-extrabold rounded-xl border border-emerald-600/40 transition-colors flex items-center gap-1"
+            >
+              Ver Detalhes
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {centralTanksStatus.map(({ tank, status }) => {
+            const isCritical = status.isCritical;
+            const isLow = status.isLow;
+            const statusLabel = isCritical ? '🔴 Estoque Crítico' : (isLow ? '⚠️ Estoque Baixo' : '🟢 Normal');
+            const statusBadgeClass = isCritical 
+              ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
+              : (isLow 
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
+                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40');
+            
+            const progressColor = isCritical ? 'bg-red-500' : (isLow ? 'bg-amber-500' : 'bg-[#FACC15]');
+
+            return (
+              <div 
+                key={tank.id} 
+                className="p-5 rounded-2xl bg-emerald-950/70 border border-emerald-900/60 flex flex-col justify-between space-y-4 hover:border-emerald-700/60 transition-all shadow-sm"
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">⛽</span>
+                      <h4 className="font-extrabold text-base text-slate-100">
+                        {tank.name}
+                      </h4>
+                    </div>
+                    <p className="text-xs text-emerald-300 font-semibold mt-0.5">
+                      Localização: <span className="text-slate-200 font-bold">{tank.location}</span> • <span className="text-[#FACC15]">{tank.fuelType}</span>
+                    </p>
+                  </div>
+                  <span className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-full border shrink-0 ${statusBadgeClass}`}>
+                    {statusLabel}
+                  </span>
+                </div>
+
+                {/* Progress & Metrics */}
+                <div className="space-y-2.5">
+                  <div className="flex items-baseline justify-between">
+                    <div>
+                      <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider block">Estoque Atual / Capacidade</span>
+                      <span className="text-xl font-black text-slate-100">
+                        {Math.round(status.currentStock).toLocaleString('pt-BR')} L <span className="text-sm font-bold text-emerald-300">/ {status.capacity.toLocaleString('pt-BR')} L</span>
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[11px] text-emerald-300 font-bold uppercase tracking-wider block">Ocupação</span>
+                      <span className="text-2xl font-black text-[#FACC15]">
+                        {status.percentage}% <span className="text-xs font-bold text-emerald-300">da capacidade</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="w-full h-3.5 bg-emerald-900/90 rounded-full overflow-hidden border border-emerald-800/60 p-0.5">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${progressColor}`}
+                      style={{ width: `${Math.min(100, Math.max(0, status.percentage))}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-emerald-200 font-semibold pt-1">
+                    <span>Capacidade Máxima: <strong className="text-slate-100 font-extrabold">{status.capacity.toLocaleString('pt-BR')} L</strong></span>
+                    <span>Mínimo de Alerta: <strong className="text-amber-300 font-extrabold">{status.minStockAlert.toLocaleString('pt-BR')} L</strong></span>
+                  </div>
+
+                  {/* Low / Critical Stock Alert Notice */}
+                  {isLow && (
+                    <div className={`p-2.5 rounded-xl border flex items-center gap-2 text-xs font-bold ${
+                      isCritical ? 'bg-red-950/80 border-red-700/80 text-red-200' : 'bg-amber-950/80 border-amber-700/80 text-amber-200'
+                    }`}>
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>
+                        🔴 Estoque baixo (Estoque atual: <strong>{Math.round(status.currentStock).toLocaleString('pt-BR')} L</strong> • Estoque mínimo: <strong>{status.minStockAlert.toLocaleString('pt-BR')} L</strong>)
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer details & actions */}
+                <div className="pt-3 border-t border-emerald-900/60 flex items-center justify-between text-xs">
+                  <button
+                    onClick={() => setSelectedTankForConfig(tank)}
+                    className="text-[#FACC15] hover:text-amber-300 font-extrabold flex items-center gap-1.5 transition-colors"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>Configurar Tanque</span>
+                  </button>
+
+                  <button
+                    onClick={() => onNavigate('refills')}
+                    className="text-emerald-200 hover:text-white font-bold flex items-center gap-1 transition-colors"
+                  >
+                    <span>Movimentações</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Secondary Bento Grid Row (Alerts & Top Consumer) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         
         {/* Maintenance Alerts Bento Box */}
         <div className="bg-red-950/40 rounded-3xl border border-red-900/60 p-6 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 mb-2">
               <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
-              <h4 className="text-red-100 font-extrabold text-sm">Alertas Críticos & Manutenção</h4>
+              <h4 className="text-red-100 font-extrabold text-sm">Alertas Críticos & Manutenção Preventiva</h4>
             </div>
             <p className="text-red-200 text-xs font-bold mt-3">
               {vehicles.filter(v => v.status === 'MANUTENCAO').length} Veículos em Manutenção Ativa
             </p>
-            <p className="text-red-300 text-[11px] mt-1 font-medium">
-              Revisão de filtros, óleos lubrificantes e bicos injetores pendentes.
+            <p className="text-red-300 text-[11px] mt-1 font-medium leading-relaxed">
+              Controle flexível por horímetro ou quilometragem para tratores, caminhões e máquinas agrícolas com planos individualizados.
             </p>
           </div>
           <button
             onClick={() => onNavigate('maintenance')}
-            className="text-red-200 text-xs font-extrabold uppercase tracking-wider mt-5 flex items-center gap-1 hover:underline"
+            className="text-red-200 text-xs font-extrabold uppercase tracking-wider mt-5 flex items-center gap-1 hover:underline self-start"
           >
-            Resolver Agora
+            Resolver & Gerenciar
             <ChevronRight className="w-4 h-4" />
           </button>
-        </div>
-
-        {/* Central Tank Inventory Quick View */}
-        <div className="rounded-3xl border p-6 shadow-sm flex flex-col justify-between bg-[#042d23] border-emerald-900/60">
-          <div>
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <h4 className="text-slate-100 font-bold text-sm">Tanque Central (Fazenda)</h4>
-                <p className="text-xs text-emerald-200 mt-0.5 font-medium">Posto interno com medição em tempo real</p>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {tankStatus.isCritical ? (
-                  <span className="text-red-400 font-extrabold text-[10px] uppercase tracking-wider bg-red-500/20 px-2 py-0.5 rounded-full border border-red-500/30 animate-pulse">
-                    Nível Crítico
-                  </span>
-                ) : tankStatus.isLow ? (
-                  <span className="text-amber-400 font-extrabold text-[10px] uppercase tracking-wider bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/30">
-                    Nível Baixo
-                  </span>
-                ) : null}
-                <span className="text-[#FACC15] font-extrabold text-xs uppercase tracking-wider bg-[#FACC15]/10 px-2.5 py-1 rounded-full border border-[#FACC15]/20">
-                  Diesel S10
-                </span>
-              </div>
-            </div>
-            
-            <div className="space-y-2 mt-4">
-              <div className="flex justify-between items-baseline">
-                <span className="text-xs text-emerald-300 font-bold">Combustível Disponível:</span>
-                <span className="text-base font-black text-slate-100">
-                  {Math.round(tankStatus.currentStock).toLocaleString('pt-BR')} L
-                </span>
-              </div>
-
-              <div className="w-full h-3 bg-emerald-950/80 rounded-full overflow-hidden border border-emerald-800/40">
-                <div 
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    tankStatus.isCritical 
-                      ? 'bg-red-500' 
-                      : tankStatus.isLow 
-                        ? 'bg-amber-500' 
-                        : 'bg-[#FACC15]'
-                  }`} 
-                  style={{ width: `${Math.min(100, Math.max(0, tankStatus.percentage))}%` }} 
-                />
-              </div>
-
-              <div className="flex justify-between text-[11px] text-emerald-200/90 font-semibold pt-1">
-                <span>Capacidade: <strong>{tankStatus.capacity.toLocaleString('pt-BR')} L</strong></span>
-                <span className="text-[#FACC15] font-bold">{tankStatus.percentage}% preenchido</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-emerald-900/50 mt-4 flex items-center justify-between text-[11px]">
-            <span className="text-emerald-300/80">
-              Total consumido: <strong>{Math.round(tankStatus.totalDispensed).toLocaleString('pt-BR')} L</strong>
-            </span>
-            <button
-              onClick={() => onNavigate('stations')}
-              className="text-[#FACC15] font-bold hover:underline flex items-center gap-1"
-            >
-              Ver Tanques
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
         </div>
 
         {/* Top Equipment Highlight Bento Box */}
@@ -525,7 +605,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               <div className="bg-emerald-950/60 p-3.5 rounded-2xl border border-emerald-900/40">
                 <p className="font-extrabold text-xs text-slate-100">{topVehicle.name}</p>
                 <p className="text-[11px] text-emerald-200 font-semibold mt-1">
-                  Placa: <span className="font-bold text-slate-100">{topVehicle.plate}</span> • <span className="text-[#FACC15] font-bold">{topVehicle.liters} Litros</span> ({formatCurrency(topVehicle.cost)})
+                  Placa/Código: <span className="font-bold text-slate-100">{topVehicle.plate}</span> • <span className="text-[#FACC15] font-bold">{topVehicle.liters} Litros</span> ({formatCurrency(topVehicle.cost)})
                 </p>
               </div>
             ) : (
@@ -534,7 +614,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
           </div>
           <button
             onClick={() => onNavigate('fleet')}
-            className="text-[#FACC15] text-xs font-bold hover:underline flex items-center gap-1 mt-4"
+            className="text-[#FACC15] text-xs font-bold hover:underline flex items-center gap-1 mt-4 self-start"
           >
             Ver Frotas & Máquinas
             <ChevronRight className="w-4 h-4" />
@@ -582,6 +662,20 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
           })}
         </div>
       </div>
+
+      {/* Edit Central Tank Modal when clicked from Dashboard */}
+      {selectedTankForConfig && (
+        <EditCentralTankModal
+          isOpen={!!selectedTankForConfig}
+          tank={selectedTankForConfig}
+          currentUser={currentUser}
+          onClose={() => setSelectedTankForConfig(null)}
+          onSave={async (tankId, updates, reason) => {
+            await updateCentralTank(tankId, updates, reason);
+          }}
+          darkMode={darkMode}
+        />
+      )}
 
     </div>
   );

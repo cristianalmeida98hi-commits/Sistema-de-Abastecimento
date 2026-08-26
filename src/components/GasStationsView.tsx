@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
-import { Fuel, Plus, Edit3, CheckCircle2, DollarSign, MapPin, Building, X, Trash2 } from 'lucide-react';
-import { GasStation, FuelType } from '../types';
+import { Fuel, Plus, Edit3, CheckCircle2, DollarSign, MapPin, Building, X, Trash2, Settings } from 'lucide-react';
+import { GasStation, FuelType, CentralTank, User } from '../types';
 import { formatCurrency, getFuelTypeName } from '../utils/calculations';
+import { getCentralTanks, updateCentralTank, getCurrentUser, getTankStatus } from '../utils/storage';
+import { EditCentralTankModal } from './EditCentralTankModal';
 
 interface GasStationsViewProps {
   gasStations: GasStation[];
@@ -20,6 +22,9 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [editingStation, setEditingStation] = useState<GasStation | null>(null);
+  const [selectedTankForModal, setSelectedTankForModal] = useState<CentralTank | null>(null);
+  const currentUser = getCurrentUser() || { id: 'usr-admin', name: 'Administrador', role: 'ADMIN' } as User;
+  const centralTanks = getCentralTanks();
 
   // Form states
   const [name, setName] = useState('');
@@ -170,6 +175,48 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
                 )}
               </div>
             </div>
+
+            {/* If Internal Station, show Tank status and quick config button */}
+            {stn.type === 'INTERNO' && (() => {
+              const matchedTank = centralTanks.find(t => 
+                t.id === stn.tankId || 
+                (stn.id === 'tank-quadra' || stn.name.toLowerCase().includes('quadra') ? t.id === 'tank-quadra' : false) ||
+                (stn.id === 'tank-itapeva' || stn.name.toLowerCase().includes('itapeva') ? t.id === 'tank-itapeva' : false)
+              ) || centralTanks[0];
+
+              if (!matchedTank) return null;
+              const status = getTankStatus(matchedTank.id);
+
+              return (
+                <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-800/80 space-y-2 text-xs">
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="text-emerald-300 flex items-center gap-1.5">
+                      <Fuel className="w-3.5 h-3.5 text-[#FACC15]" />
+                      Estoque Físico
+                    </span>
+                    <span className="text-[#FACC15] font-black">{status.percentage}%</span>
+                  </div>
+
+                  <div className="w-full h-2 bg-emerald-900 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full ${status.isCritical ? 'bg-red-500' : (status.isLow ? 'bg-amber-500' : 'bg-[#FACC15]')}`}
+                      style={{ width: `${Math.min(100, Math.max(0, status.percentage))}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-emerald-200">
+                    <span>{Math.round(status.currentStock).toLocaleString('pt-BR')} L / {status.capacity.toLocaleString('pt-BR')} L</span>
+                    <button
+                      onClick={() => setSelectedTankForModal(matchedTank)}
+                      className="text-[#FACC15] hover:underline font-bold flex items-center gap-1"
+                    >
+                      <Settings className="w-3 h-3" />
+                      Configurar
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Price Table */}
             <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/15 space-y-1.5 text-xs">
@@ -325,6 +372,20 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Edit Central Tank Modal when clicked */}
+      {selectedTankForModal && (
+        <EditCentralTankModal
+          isOpen={!!selectedTankForModal}
+          tank={selectedTankForModal}
+          currentUser={currentUser}
+          onClose={() => setSelectedTankForModal(null)}
+          onSave={async (tankId, updates, reason) => {
+            await updateCentralTank(tankId, updates, reason);
+          }}
+          darkMode={darkMode}
+        />
       )}
 
     </div>

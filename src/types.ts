@@ -42,6 +42,7 @@ export type OperationalCapacityType =
   | 'SEMENTE'        // Depósito de Sementes / Graneleiro (kg, t, L, sacas)
   | 'CACAMBA'        // Caçamba de Carga / Basculante (kg, t, m³)
   | 'RESERVATORIO'   // Reservatório de Água / Óleo / Outros Fluidos (L, m³)
+  | 'AGUA_LIMPA'     // Tanque de Água Limpa (L)
   | 'CARGA'          // Capacidade de Carga Operacional / Tração (kg, t)
   | 'OUTRO';         // Capacidade Personalizada
 
@@ -52,6 +53,24 @@ export interface OperationalCapacity {
   value: number; // Valor numérico da capacidade
   unit: string; // Unidade de medida (L, kg, t, m³, sacas, etc.)
   notes?: string; // Observações opcionais (ex: 'Barra 36m', 'Granulado', 'Coroada')
+}
+
+export type MaintenanceControlType = 'HORAS' | 'QUILOMETRAGEM' | 'DATA' | 'HORAS_E_DATA' | 'PERSONALIZADO';
+
+export interface ScheduledServiceItem {
+  id: string;
+  name: string; // Ex: 'Troca de Óleo do Motor', 'Filtros de Combustível e Ar', 'Revisão Geral 1000h', 'Lubrificação Geral'
+  type: MaintenanceType;
+  controlType: MaintenanceControlType;
+  intervalHours?: number; // Ex: 300h, 500h, 1000h, 100h
+  intervalKm?: number;    // Ex: 10000 km
+  intervalMonths?: number; // Ex: 12 meses
+  warningAdvanceHours?: number; // Antecedência para alerta (ex: 50h)
+  warningAdvanceKm?: number;
+  lastServiceDate?: string;
+  lastServiceMeter: number; // Horímetro ou Km no momento do último serviço
+  nextScheduledMeter: number; // lastServiceMeter + interval
+  notes?: string;
 }
 
 export interface Vehicle {
@@ -71,10 +90,29 @@ export interface Vehicle {
   operationalCapacities?: OperationalCapacity[]; // Lista detalhada de capacidades operacionais da máquina
   currentKm: number;
   currentHourmeter?: number;
-  lastOilChangeHourmeter?: number; // Horímetro no momento da última troca de óleo
+  
+  // Controle de Manutenção & Troca de Óleo por Horímetro (Padrão 300h)
+  oilChangeControlActive?: boolean; // Se o controle por horas está ativo (padrão true para máquinas/tratores)
+  oilChangeIntervalHours?: number; // Intervalo configurável por equipamento (padrão inicial: 300h)
+  oilChangeWarningAdvanceHours?: number; // Quantidade de horas antes da troca para acionar alerta amarelo (padrão: 50h)
+  lastOilChangeHourmeter?: number; // Horímetro no momento da última troca de óleo realizada ou referência inicial
   lastOilChangeDate?: string;      // Data da última troca de óleo
-  nextOilChangeHourmeter?: number; // Próximo limite (ex: última + 300h)
-  oilChangeIntervalHours?: number; // Intervalo padrão: 300h
+  nextOilChangeHourmeter?: number; // Próximo limite calculado automaticamente (última + intervalo)
+
+  // Controle de Manutenção Personalizado por Equipamento
+  maintenanceControlType?: MaintenanceControlType; // 'HORAS' | 'QUILOMETRAGEM' | 'DATA' | 'HORAS_E_DATA' | 'PERSONALIZADO'
+  maintenanceIntervalHours?: number; // Intervalo configurável por equipamento (ex: 300, 500, 250)
+  maintenanceIntervalKm?: number; // Ex: 10000 km
+  maintenanceIntervalMonths?: number; // Ex: 12 meses
+  maintenanceWarningAdvanceHours?: number; // Antecedência para aviso de manutenção próxima (padrão: 50h)
+  maintenanceWarningAdvanceKm?: number;
+  lastMaintenanceHourmeter?: number; // Horímetro na última manutenção realizada
+  lastMaintenanceKm?: number;
+  lastMaintenanceDate?: string;
+  nextMaintenanceHourmeter?: number; // Próximo limite individual (última + intervalo)
+  nextMaintenanceKm?: number;
+  scheduledServices?: ScheduledServiceItem[]; // Lista de manutenções programadas com intervalos próprios
+
   photoUrl?: string;
   status: 'ATIVO' | 'EM_MANUTENCAO' | 'INATIVO';
   assignedOperatorId?: string;
@@ -87,6 +125,40 @@ export interface Vehicle {
   notes?: string;
 }
 
+export interface CentralTank {
+  id: string; // 'tank-quadra' | 'tank-itapeva'
+  name: string; // 'Tanque Central - Quadra' | 'Tanque Central - Itapeva'
+  location: string; // 'Sede Quadra' | 'Sede Itapeva'
+  capacityLiters: number; // ex: 10000 ou 15000
+  currentStockLiters: number; // Saldo base atual calibrado
+  minStockAlertLiters: number; // Padrão: 2000 L (configurável)
+  fuelType: FuelType; // Padrão: 'DIESEL_S10'
+  status: 'ATIVO' | 'MANUTENCAO' | 'INATIVO';
+  stockBaseUpdatedAt?: string;
+  notes?: string;
+}
+
+export type TankMovementType = 'ENTRADA' | 'SAIDA_ABASTECIMENTO' | 'AJUSTE_MANUAL';
+
+export interface TankMovement {
+  id: string;
+  tankId: string; // 'tank-quadra' | 'tank-itapeva'
+  dateTime: string;
+  type: TankMovementType;
+  liters: number;
+  previousStock: number;
+  afterStock: number;
+  difference?: number; // Diferença (+/- L)
+  userId: string;
+  userName: string;
+  equipmentId?: string;
+  equipmentName?: string;
+  fuelLogId?: string;
+  refillId?: string;
+  reason?: string; // Motivo / Justificativa do ajuste manual
+  notes?: string;
+}
+
 export interface GasStation {
   id: string;
   name: string;
@@ -96,6 +168,7 @@ export interface GasStation {
   location: string;
   pricePerLiter: Record<FuelType, number>;
   active: boolean;
+  tankId?: string; // Vinculação opcional ao Tanque Central ('tank-quadra' | 'tank-itapeva')
 }
 
 export type OperationType = 'GRAMA' | 'COLHEITA' | 'PLANTIO' | 'TRANSPORTE' | 'CANA' | 'OUTROS';
@@ -186,9 +259,14 @@ export interface MaintenanceLog {
   status: 'AGENDADO' | 'EM_ANDAMENTO' | 'CONCLUIDO' | 'CANCELADO';
   attachments?: string[];
   notes?: string;
+  // Detalhes Específicos da Troca de Óleo
+  oilType?: string; // ex: '15W40 Mineral', '15W40 Semi-Sintético', '10W40'
+  oilQuantityLiters?: number; // ex: 24 Litros
+  filtersReplaced?: string; // ex: 'Filtro Lubrificante Motor, Filtro Combustível Separador'
+  intervalHoursApplied?: number; // ex: 300h
 }
 
-export type AlertType = 'SUSPICIOUS_FUEL' | 'MAINTENANCE_DUE' | 'IDLE_VEHICLE' | 'DOCUMENT_EXPIRING' | 'LOW_TANK_LEVEL' | 'OIL_CHANGE_DUE' | 'MACHINE_ISSUE';
+export type AlertType = 'SUSPICIOUS_FUEL' | 'MAINTENANCE_DUE' | 'IDLE_VEHICLE' | 'DOCUMENT_EXPIRING' | 'LOW_TANK_LEVEL' | 'OIL_CHANGE_DUE' | 'PREVENTIVE_MAINTENANCE' | 'MACHINE_ISSUE';
 
 export interface FuelRefill {
   id: string;
@@ -266,7 +344,7 @@ export interface AuditLog {
   dateTime: string;
   userId: string;
   userName: string;
-  action: 'CRIAR' | 'EDITAR' | 'EXCLUIR' | 'EXPORTAR' | 'LOGIN' | 'CONFIGURACAO';
+  action: 'CRIAR' | 'EDITAR' | 'EXCLUIR' | 'EXPORTAR' | 'LOGIN' | 'LOGOUT' | 'CONFIGURACAO';
   entity: string;
   details: string;
   ipAddress?: string;

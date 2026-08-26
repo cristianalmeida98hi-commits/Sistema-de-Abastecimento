@@ -54,8 +54,12 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
       const eq = vehicles.find(v => v.id === equipmentId);
       if (eq) {
         const val = eq.currentHourmeter || eq.currentKm || 0;
+        const isKm = eq.category === 'VEICULO' || eq.maintenanceControlType === 'QUILOMETRAGEM';
+        const interval = isKm 
+          ? (Number(eq.maintenanceIntervalKm) || 10000)
+          : (Number(eq.maintenanceIntervalHours) || Number(eq.oilChangeIntervalHours) || 300);
         setKmOrHourAtService(val);
-        setNextServiceKmOrHour(val + 250);
+        setNextServiceKmOrHour(val + interval);
       }
     }
   }, [equipmentId, editingId, vehicles]);
@@ -64,13 +68,18 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
     setEditingId(null);
     const firstEq = vehicles[0];
     const initialMeter = firstEq ? (firstEq.currentHourmeter || firstEq.currentKm || 0) : 0;
+    const isKm = firstEq?.category === 'VEICULO' || firstEq?.maintenanceControlType === 'QUILOMETRAGEM';
+    const interval = isKm 
+      ? (Number(firstEq?.maintenanceIntervalKm) || 10000)
+      : (Number(firstEq?.maintenanceIntervalHours) || Number(firstEq?.oilChangeIntervalHours) || 300);
+
     setEquipmentId(firstEq?.id || '');
     setDate(new Date().toISOString().slice(0, 10));
     setType('REVISAO');
     setTitle('');
     setDescription('');
     setKmOrHourAtService(initialMeter);
-    setNextServiceKmOrHour(initialMeter + 250);
+    setNextServiceKmOrHour(initialMeter + interval);
     setCost(0);
     setSupplierOrWorkshop('Oficina Interna AndradeAgro');
     setPerformedBy(currentUser.name || 'Técnico Responsável');
@@ -80,6 +89,12 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
 
   const handleOpenEdit = (m: MaintenanceLog) => {
     if (!isAdmin) return;
+    const eq = vehicles.find(v => v.id === m.equipmentId);
+    const isKm = eq?.category === 'VEICULO' || eq?.maintenanceControlType === 'QUILOMETRAGEM';
+    const interval = isKm 
+      ? (Number(eq?.maintenanceIntervalKm) || 10000)
+      : (Number(eq?.maintenanceIntervalHours) || Number(eq?.oilChangeIntervalHours) || 300);
+
     setEditingId(m.id);
     setEquipmentId(m.equipmentId);
     setDate(m.date);
@@ -87,7 +102,7 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
     setTitle(m.title);
     setDescription(m.description);
     setKmOrHourAtService(m.kmOrHourAtService);
-    setNextServiceKmOrHour(m.nextServiceKmOrHour || m.kmOrHourAtService + 250);
+    setNextServiceKmOrHour(m.nextServiceKmOrHour || (m.kmOrHourAtService + interval));
     setCost(m.cost);
     setSupplierOrWorkshop(m.supplierOrWorkshop || 'Oficina Interna');
     setPerformedBy(m.performedBy || currentUser.name);

@@ -10,7 +10,7 @@ import {
   getMachineIssues, getPreventiveItems, addMachineIssue, resolveMachineIssue, recordPreventiveService,
   addFuelLog, updateFuelLog, deleteFuelLog, addVehicle, updateVehicle, deleteVehicle,
   addMaintenance, updateMaintenance, deleteMaintenance, addGasStation, updateGasStation, deleteGasStation, addUser,
-  updateUser, deleteUser, resolveAlert, updateSettings, logoutUser
+  updateUser, deleteUser, resetUserPassword, resolveAlert, updateSettings, logoutUser
 } from './utils/storage';
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
 import { Header } from './components/Header';
@@ -400,6 +400,7 @@ export default function App() {
                 onAddUser={(u) => addUser(u)}
                 onUpdateUser={(id, fields) => updateUser(id, fields)}
                 onDeleteUser={(id) => deleteUser(id)}
+                onResetPassword={(id, newPass) => resetUserPassword(id, newPass)}
                 darkMode={darkMode}
               />
             )}

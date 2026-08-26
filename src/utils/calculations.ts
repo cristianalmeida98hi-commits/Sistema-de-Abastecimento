@@ -324,5 +324,10 @@ export {
   getActivitiesForOperation, 
   getOperationTypeName, 
   getOperationTypeLabelOnly, 
-  getActivityTypeName 
+  getActivityTypeName,
+  getEffectiveActivityName,
+  getEffectiveCategoryName,
+  getConsumptionByCategory,
+  getConsumptionByActivity,
+  CATEGORY_PALETTE
 } from './operations';

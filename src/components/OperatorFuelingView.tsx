@@ -447,16 +447,29 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
           </select>
         </div>
 
-        {/* 7. Observações */}
+        {/* 7. Observações / Atividade Personalizada */}
         <div>
-          <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-1">
-            Observação (Opcional)
+          <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-1 flex items-center justify-between">
+            <span>
+              {activityType === 'OUTRAS' || operationType === 'OUTROS'
+                ? '⭐ Atividade Personalizada / Observação'
+                : 'Observação (Opcional)'}
+            </span>
+            {(activityType === 'OUTRAS' || operationType === 'OUTROS') && (
+              <span className="text-[10px] text-amber-600 dark:text-[#FACC15] font-bold">
+                Aparecerá nos gráficos de consumo por atividade
+              </span>
+            )}
           </label>
           <textarea
             rows={2}
             value={observations}
             onChange={(e) => setObservations(e.target.value)}
-            placeholder="Ex: Abastecimento em talhão 04, troca de óleo verificada..."
+            placeholder={
+              activityType === 'OUTRAS' || operationType === 'OUTROS'
+                ? 'Descreva a atividade específica (Ex: Poda especial de cerca, Manutenção de drenos, etc.)'
+                : 'Ex: Abastecimento em talhão 04, troca de óleo verificada...'
+            }
             className={`w-full px-4 py-3 text-xs font-medium rounded-2xl border outline-none ${
               darkMode 
                 ? 'bg-emerald-950 border-emerald-800 text-slate-100 placeholder-emerald-400/60' 

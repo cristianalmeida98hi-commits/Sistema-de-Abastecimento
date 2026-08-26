@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Fuel, Lock, Mail, CheckCircle2, AlertCircle, 
-  ArrowRight, UserCheck, X, Settings2, RotateCcw, Shield, Users
+  ArrowRight, UserCheck, X, Settings2, RotateCcw, Shield, Users, Wrench
 } from 'lucide-react';
 import { User } from '../types';
 import { 
-  loginUser, getRememberedEmail, clearRememberedEmail, getUsers, 
+  loginUser, loginUserById, getRememberedEmail, clearRememberedEmail, getUsers, 
   getQuickAccessUserIds, setQuickAccessUserIds, toggleQuickAccessUser 
 } from '../utils/storage';
 
@@ -65,7 +65,7 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
     setLoggingInUserId(user.id);
 
     setTimeout(() => {
-      const res = loginUser(user.email, user.password || '123456', rememberMe);
+      const res = loginUserById(user.id, rememberMe);
       setLoggingInUserId(null);
 
       if (res.success && res.user) {
@@ -97,7 +97,8 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
   const activeUsers = allUsers.filter(u => u.active !== false);
   const visibleShortcuts = activeUsers.filter(u => quickAccessIds.includes(u.id));
   const adminShortcuts = visibleShortcuts.filter(u => u.role === 'ADMIN');
-  const employeeShortcuts = visibleShortcuts.filter(u => u.role !== 'ADMIN');
+  const maintenanceShortcuts = visibleShortcuts.filter(u => u.role === 'MANUTENCAO');
+  const employeeShortcuts = visibleShortcuts.filter(u => u.role === 'FUNCIONARIO');
 
   return (
     <div className="min-h-screen flex items-center justify-center p-3 sm:p-6 bg-gradient-to-br from-emerald-950 via-[#064E3B] to-emerald-950">
@@ -296,6 +297,62 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                   </div>
                 )}
 
+                {/* Seção Manutenção */}
+                {maintenanceShortcuts.length > 0 && (
+                  <div className="space-y-1 pt-1">
+                    <span className="text-[10px] font-bold text-amber-300 uppercase tracking-widest flex items-center gap-1">
+                      <Wrench className="w-3 h-3 text-amber-300" />
+                      Manutenção (Gestão & Edição de Dados)
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {maintenanceShortcuts.map(user => {
+                        const isThisLoggingIn = loggingInUserId === user.id;
+                        return (
+                          <div
+                            key={user.id}
+                            onClick={() => handleQuickLogin(user)}
+                            title={`Clique para entrar imediatamente como ${user.name}`}
+                            className={`p-2.5 rounded-2xl border text-left transition-all hover:border-amber-400 hover:bg-emerald-900/70 bg-emerald-950/60 border-amber-500/30 cursor-pointer relative group ${
+                              isThisLoggingIn ? 'ring-2 ring-amber-400 bg-emerald-900/90' : ''
+                            } ${loggingInUserId && !isThisLoggingIn ? 'opacity-50 pointer-events-none' : ''}`}
+                          >
+                            <button
+                              type="button"
+                              onClick={(e) => handleRemoveShortcut(user.id, e)}
+                              title="Remover este atalho"
+                              className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-900/80 hover:bg-red-500/80 text-emerald-400 hover:text-white flex items-center justify-center opacity-70 group-hover:opacity-100 transition-all z-10"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                            <div className="flex items-center justify-between pr-5">
+                              <span className="font-extrabold text-amber-300 truncate flex items-center gap-1.5">
+                                {isThisLoggingIn && (
+                                  <div className="w-3 h-3 border-2 border-amber-300 border-t-transparent rounded-full animate-spin shrink-0"></div>
+                                )}
+                                <span className="truncate">{user.name}</span>
+                              </span>
+                              <span className="text-[9px] font-bold bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1">
+                                <Wrench className="w-2.5 h-2.5" />
+                                MANUTENÇÃO
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between mt-0.5">
+                              <p className="text-[10px] text-emerald-300/80 truncate">
+                                {user.email}
+                              </p>
+                              {isThisLoggingIn && (
+                                <span className="text-[9px] font-bold text-amber-300 animate-pulse">
+                                  Entrando...
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Seção Funcionários */}
                 {employeeShortcuts.length > 0 && (
                   <div className="space-y-1 pt-1">
@@ -406,10 +463,10 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                       <div>
                         <div className="flex items-center gap-1.5">
                           <strong className="text-xs text-white">{user.name}</strong>
-                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
-                            user.role === 'ADMIN' ? 'bg-[#FACC15]/20 text-[#FACC15]' : 'bg-emerald-500/20 text-emerald-300'
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                            user.role === 'ADMIN' ? 'bg-[#FACC15]/20 text-[#FACC15]' : user.role === 'MANUTENCAO' ? 'bg-amber-400/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
                           }`}>
-                            {user.role}
+                            {user.role === 'MANUTENCAO' ? 'MANUTENÇÃO' : user.role}
                           </span>
                         </div>
                         <p className="text-[10px] text-emerald-300/70">{user.email}</p>

@@ -3,7 +3,7 @@ import {
   Fuel, Search, Filter, Download, FileSpreadsheet, FileText, Printer, 
   Trash2, Edit3, Eye, AlertCircle, CheckCircle2, ChevronRight, X, Calendar, User as UserIcon
 } from 'lucide-react';
-import { FuelLog, Vehicle, GasStation, User, UserRole, SystemSettings, OperationType, ActivityType } from '../types';
+import { FuelLog, Vehicle, GasStation, User, UserRole, SystemSettings, OperationType, ActivityType, canEditSystemData } from '../types';
 import { 
   formatCurrency, formatDateTimeBR, getFuelTypeName, exportFuelLogsPDF, exportFuelLogsCSV,
   getOperationTypeName, getActivityTypeName, OPERATION_OPTIONS, getActivitiesForOperation
@@ -120,7 +120,7 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
 
   // Check if user can edit this log
   const canEditLog = (log: FuelLog): boolean => {
-    if (currentUser.role === 'ADMIN') return true;
+    if (canEditSystemData(currentUser.role)) return true;
     
     // Employee edit restriction window
     const createdAtTime = new Date(log.createdAt).getTime();
@@ -462,7 +462,7 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
                         )}
-                        {currentUser.role === 'ADMIN' && (
+                        {canEditSystemData(currentUser.role) && (
                           <button
                             onClick={() => {
                               if (confirm('Tem certeza que deseja excluir este registro de abastecimento?')) {
@@ -470,7 +470,7 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
                               }
                             }}
                             className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-400"
-                            title="Excluir Registro (Admin)"
+                            title="Excluir Registro"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>

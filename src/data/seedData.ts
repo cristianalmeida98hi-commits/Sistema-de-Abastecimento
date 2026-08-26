@@ -3,13 +3,14 @@ import {
   SystemSettings, MachineIssue, PreventiveMaintenanceItem, FuelRefill,
   CentralTank, TankMovement 
 } from '../types';
+import { hashPassword } from '../utils/security';
 
 export const INITIAL_USERS: User[] = [
   {
     id: 'usr-001',
     name: 'Carlos Eduardo Andrade',
     email: 'admin@andradeagro.com.br',
-    password: '123456',
+    password: hashPassword('123456'),
     role: 'ADMIN',
     department: 'Diretoria Executiva',
     phone: '(66) 99988-1234',
@@ -24,7 +25,7 @@ export const INITIAL_USERS: User[] = [
     id: 'usr-002',
     name: 'Patrícia Lima',
     email: 'patricia.gestao@andradeagro.com.br',
-    password: '123456',
+    password: hashPassword('123456'),
     role: 'ADMIN',
     department: 'Gestão de Frotas',
     phone: '(66) 99877-4321',
@@ -39,7 +40,7 @@ export const INITIAL_USERS: User[] = [
     id: 'usr-003',
     name: 'João Silva',
     email: 'joao.silva@andradeagro.com.br',
-    password: '123456',
+    password: hashPassword('123456'),
     role: 'FUNCIONARIO',
     department: 'Agrícola',
     phone: '(66) 99655-8822',
@@ -54,7 +55,7 @@ export const INITIAL_USERS: User[] = [
     id: 'usr-004',
     name: 'Marcos Oliveira',
     email: 'marcos.operador@andradeagro.com.br',
-    password: '123456',
+    password: hashPassword('123456'),
     role: 'FUNCIONARIO',
     department: 'Colheita',
     phone: '(66) 99711-3344',
@@ -69,7 +70,7 @@ export const INITIAL_USERS: User[] = [
     id: 'usr-005',
     name: 'Roberto Santos',
     email: 'roberto.frentista@andradeagro.com.br',
-    password: '123456',
+    password: hashPassword('123456'),
     role: 'FUNCIONARIO',
     department: 'Oficina / Posto Interno',
     phone: '(66) 99822-6677',
@@ -79,6 +80,21 @@ export const INITIAL_USERS: User[] = [
     cnhExpiration: '2028-08-01',
     active: true,
     avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80'
+  },
+  {
+    id: 'usr-006',
+    name: 'Carlos Oliveira (Oficina)',
+    email: 'manutencao@andradeagro.com.br',
+    password: hashPassword('123456'),
+    role: 'MANUTENCAO',
+    department: 'Oficina & Manutenção',
+    phone: '(66) 99833-5599',
+    cpf: '678.901.234-55',
+    cnh: '09988776655',
+    cnhCategory: 'D',
+    cnhExpiration: '2028-12-31',
+    active: true,
+    avatar: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=150&auto=format&fit=crop&q=80'
   }
 ];
 

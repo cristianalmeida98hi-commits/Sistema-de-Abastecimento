@@ -6,7 +6,7 @@ import {
 import { FuelLog, Vehicle, GasStation, User, SystemSettings } from '../types';
 import { 
   formatCurrency, formatDateTimeBR, getFuelTypeName, getSectorName, 
-  exportFuelLogsPDF, exportFuelLogsCSV 
+  exportFuelLogsPDF, exportFuelLogsCSV, getConsumptionByCategory, getConsumptionByActivity 
 } from '../utils/calculations';
 
 interface ReportsViewProps {
@@ -53,6 +53,14 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
   }, [filteredLogs]);
 
   const { totalLiters, totalCost, avgPricePerLiter } = summaryMetrics;
+
+  const categoryBreakdown = useMemo(() => {
+    return getConsumptionByCategory(filteredLogs);
+  }, [filteredLogs]);
+
+  const activityBreakdown = useMemo(() => {
+    return getConsumptionByActivity(filteredLogs);
+  }, [filteredLogs]);
 
   const handleExportPDF = () => {
     exportFuelLogsPDF(
@@ -225,6 +233,52 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
             <div>
               <span className="text-[10px] font-bold text-gray-500 dark:text-emerald-400 block">Investimento Total</span>
               <span className="text-xl font-black text-amber-600 dark:text-amber-400">{formatCurrency(totalCost)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Category & Activity Breakdown in Report */}
+        <div className="mt-4 pt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Categoria */}
+          <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-900/60 space-y-2">
+            <span className="text-[11px] font-black uppercase text-amber-400 block">
+              🏷️ Consumo por Categoria (Litros & %)
+            </span>
+            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 custom-scrollbar">
+              {categoryBreakdown.map(c => (
+                <div key={c.key} className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-200 truncate">{c.label}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-extrabold text-slate-100">{c.liters.toLocaleString('pt-BR')} L</span>
+                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300">
+                      {c.percentage}%
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Atividade */}
+          <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-900/60 space-y-2">
+            <span className="text-[11px] font-black uppercase text-emerald-300 block">
+              ⚙️ Consumo por Atividade / Serviço
+            </span>
+            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 custom-scrollbar">
+              {activityBreakdown.map(a => (
+                <div key={a.key} className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="font-bold text-slate-200 truncate">{a.activity}</span>
+                    {a.isCustom && <span className="text-[9px] text-amber-400 font-bold shrink-0">⭐</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="font-extrabold text-slate-100">{a.liters.toLocaleString('pt-BR')} L</span>
+                    <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-800 text-emerald-200">
+                      {a.percentage}%
+                    </span>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>

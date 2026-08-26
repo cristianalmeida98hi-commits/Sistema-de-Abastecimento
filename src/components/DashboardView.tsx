@@ -4,8 +4,11 @@ import {
   BarChart2, PieChart, ArrowUpRight, AlertCircle, Plus, FileText, CheckCircle2, ChevronRight,
   Settings, AlertTriangle
 } from 'lucide-react';
-import { FuelLog, Vehicle, Sector, SystemSettings, CentralTank, User } from '../types';
-import { formatCurrency, formatDateTimeBR, getSectorName, getFuelTypeName } from '../utils/calculations';
+import { FuelLog, Vehicle, Sector, SystemSettings, CentralTank, User, OperationType } from '../types';
+import { 
+  formatCurrency, formatDateTimeBR, getSectorName, getFuelTypeName,
+  getConsumptionByCategory, getConsumptionByActivity, OPERATION_OPTIONS, CATEGORY_PALETTE 
+} from '../utils/calculations';
 import { getTankStatus, getCentralTanks, getCurrentUser, updateCentralTank } from '../utils/storage';
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, 
@@ -41,6 +44,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
   darkMode = true
 }) => {
   const [selectedTankForConfig, setSelectedTankForConfig] = useState<CentralTank | null>(null);
+  const [selectedCategoryForActivity, setSelectedCategoryForActivity] = useState<string>('ALL');
   const currentUser = getCurrentUser() || { id: 'usr-admin', name: 'Administrador', role: 'ADMIN' } as User;
 
   // Central Tanks statuses memoized
@@ -211,6 +215,24 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       ...data
     })).sort((a, b) => b.liters - a.liters);
   }, [fuelLogs]);
+
+  // Consumo por Categoria (Gráfico 1: Litros e Porcentagem)
+  const categoryConsumption = useMemo(() => {
+    return getConsumptionByCategory(fuelLogs);
+  }, [fuelLogs]);
+
+  const totalCategoryLiters = useMemo(() => {
+    return categoryConsumption.reduce((acc, c) => acc + c.liters, 0);
+  }, [categoryConsumption]);
+
+  // Consumo por Atividade / Serviço (Gráfico 2: Serviço existente / Atividade personalizada + Litros)
+  const activityConsumption = useMemo(() => {
+    return getConsumptionByActivity(fuelLogs, selectedCategoryForActivity);
+  }, [fuelLogs, selectedCategoryForActivity]);
+
+  const totalActivityLiters = useMemo(() => {
+    return activityConsumption.reduce((acc, a) => acc + a.liters, 0);
+  }, [activityConsumption]);
 
   // Executive summary narrative line
   const executiveSummaryText = useMemo(() => {
@@ -660,6 +682,271 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* NOVA SEÇÃO: Análise de Consumo (Gráfico 1: Por Categoria | Gráfico 2: Por Atividade / Serviço) */}
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-lg">📊</span>
+              <h3 className="font-black text-lg text-slate-100">
+                Análise Avançada de Consumo (Categoria & Atividade)
+              </h3>
+            </div>
+            <p className="text-xs text-emerald-300 font-medium">
+              Detalhamento de combustível pelo fluxo oficial: Categoria → Serviço / Atividade Personalizada → Abastecimento
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-[#FACC15] bg-emerald-950 px-3 py-1.5 rounded-xl border border-emerald-800">
+              Total Analisado: {totalCategoryLiters.toLocaleString('pt-BR')} L
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          {/* GRÁFICO 1: Consumo por Categoria (Litros e Porcentagem) - 5 cols */}
+          <div className="lg:col-span-5 rounded-3xl border p-6 shadow-sm flex flex-col justify-between bg-[#042d23] border-emerald-900/60">
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">🏷️</span>
+                    <h4 className="font-extrabold text-base text-slate-100">
+                      1. Consumo por Categoria
+                    </h4>
+                  </div>
+                  <p className="text-[11px] text-emerald-300 font-medium">
+                    Volume em litros e representatividade percentual (%)
+                  </p>
+                </div>
+                <span className="text-[10px] font-black uppercase text-[#FACC15] bg-[#FACC15]/10 px-2 py-1 rounded-md border border-[#FACC15]/20">
+                  Gráfico 1
+                </span>
+              </div>
+
+              {/* Donut Chart Visual */}
+              <div className="h-52 w-full flex items-center justify-center my-2">
+                {categoryConsumption.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RechartsPieChart>
+                      <Pie
+                        data={categoryConsumption}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={75}
+                        paddingAngle={4}
+                        dataKey="liters"
+                        nameKey="label"
+                      >
+                        {categoryConsumption.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color || '#10B981'} stroke="#042d23" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(val: any, name: any, item: any) => [
+                          `${Number(val).toLocaleString('pt-BR')} L (${item.payload.percentage}%)`,
+                          item.payload.label
+                        ]}
+                        contentStyle={{
+                          backgroundColor: '#022c22',
+                          borderColor: '#065f46',
+                          borderRadius: '16px',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          color: '#f8fafc',
+                        }}
+                      />
+                    </RechartsPieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center text-xs text-emerald-300 font-medium">
+                    Nenhum abastecimento para exibir no gráfico.
+                  </div>
+                )}
+              </div>
+
+              {/* Detailed Category Progress List */}
+              <div className="space-y-2.5 mt-2">
+                {categoryConsumption.map((cat) => (
+                  <div 
+                    key={cat.key} 
+                    className="p-3 rounded-2xl bg-emerald-950/70 border border-emerald-900/50 space-y-1.5 transition-colors hover:bg-emerald-900/40"
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div 
+                          className="w-3 h-3 rounded-full shrink-0" 
+                          style={{ backgroundColor: cat.color || '#10B981' }} 
+                        />
+                        <span className="font-extrabold text-slate-100 truncate">{cat.label}</span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-black text-slate-100">{cat.liters.toLocaleString('pt-BR')} L</span>
+                        <span className="px-2 py-0.5 rounded-md bg-[#FACC15]/20 text-[#FACC15] font-black text-[11px] border border-[#FACC15]/30">
+                          {cat.percentage}%
+                        </span>
+                      </div>
+                    </div>
+                    {/* Progress bar */}
+                    <div className="w-full h-2 bg-emerald-900/90 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full rounded-full transition-all duration-500" 
+                        style={{ 
+                          width: `${Math.min(100, Math.max(0, cat.percentage))}%`,
+                          backgroundColor: cat.color || '#FACC15'
+                        }} 
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-emerald-900/60 flex items-center justify-between text-[11px] text-emerald-300 font-bold">
+              <span>Total de Categorias: {categoryConsumption.length}</span>
+              <span className="text-[#FACC15]">{totalCategoryLiters.toLocaleString('pt-BR')} L (100%)</span>
+            </div>
+          </div>
+
+          {/* GRÁFICO 2: Consumo por Atividade & Serviços (Serviço + Atividade Personalizada + Litros) - 7 cols */}
+          <div className="lg:col-span-7 rounded-3xl border p-6 shadow-sm flex flex-col justify-between bg-[#042d23] border-emerald-900/60">
+            <div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">⚙️</span>
+                    <h4 className="font-extrabold text-base text-slate-100">
+                      2. Consumo por Atividade / Serviço
+                    </h4>
+                  </div>
+                  <p className="text-[11px] text-emerald-300 font-medium">
+                    Serviços cadastrados e atividades personalizadas ("Outros" + observação)
+                  </p>
+                </div>
+                <span className="self-start sm:self-auto text-[10px] font-black uppercase text-[#FACC15] bg-[#FACC15]/10 px-2 py-1 rounded-md border border-[#FACC15]/20">
+                  Gráfico 2
+                </span>
+              </div>
+
+              {/* Interactive Category Filter Pills */}
+              <div className="flex items-center gap-1.5 flex-wrap pb-3 mb-3 border-b border-emerald-900/50">
+                <button
+                  onClick={() => setSelectedCategoryForActivity('ALL')}
+                  className={`px-3 py-1 rounded-xl text-xs font-black transition-all ${
+                    selectedCategoryForActivity === 'ALL'
+                      ? 'bg-[#FACC15] text-[#064E3B] shadow-sm'
+                      : 'bg-emerald-950/80 text-emerald-300 hover:bg-emerald-900/60 border border-emerald-900'
+                  }`}
+                >
+                  Todas ({activityConsumption.length})
+                </button>
+                {OPERATION_OPTIONS.map((op) => {
+                  const isSel = selectedCategoryForActivity === op.id;
+                  return (
+                    <button
+                      key={op.id}
+                      onClick={() => setSelectedCategoryForActivity(op.id)}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
+                        isSel
+                          ? 'bg-[#FACC15] text-[#064E3B] font-black shadow-sm'
+                          : 'bg-emerald-950/80 text-emerald-300 hover:bg-emerald-900/60 border border-emerald-900'
+                      }`}
+                    >
+                      <span>{op.emoji}</span>
+                      <span>{op.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Bar Chart Visual of Top Activities */}
+              <div className="h-44 w-full mb-3">
+                {activityConsumption.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={activityConsumption.slice(0, 6)}
+                      layout="vertical"
+                      margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#064e3b" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 10, fill: '#a7f3d0' }} />
+                      <YAxis 
+                        dataKey="activity" 
+                        type="category" 
+                        tick={{ fontSize: 10, fill: '#f8fafc', fontWeight: 'bold' }} 
+                        width={95}
+                      />
+                      <Tooltip
+                        formatter={(val: any, name: any, item: any) => [
+                          `${Number(val).toLocaleString('pt-BR')} Litros (${item.payload.percentage}%)`,
+                          item.payload.isCustom ? `⭐ ${item.payload.activity} (Personalizada)` : item.payload.activity
+                        ]}
+                        contentStyle={{
+                          backgroundColor: '#022c22',
+                          borderColor: '#065f46',
+                          borderRadius: '16px',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          color: '#f8fafc',
+                        }}
+                      />
+                      <Bar dataKey="liters" fill="#FACC15" radius={[0, 8, 8, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-xs text-emerald-300 font-medium">
+                    Nenhuma atividade encontrada para a categoria selecionada.
+                  </div>
+                )}
+              </div>
+
+              {/* Activities List with Custom Tag highlight */}
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+                {activityConsumption.map((act, index) => (
+                  <div
+                    key={act.key || index}
+                    className="p-3 rounded-2xl bg-emerald-950/70 border border-emerald-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-emerald-900/40 transition-colors"
+                  >
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-extrabold text-xs text-slate-100 truncate">
+                          {act.activity}
+                        </span>
+                        {act.isCustom && (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-[#FACC15]/20 text-[#FACC15] border border-[#FACC15]/30">
+                            ⭐ Atividade Personalizada
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-emerald-300 font-semibold">
+                        Categoria: <span className="text-slate-200">{act.categoryLabel}</span> • {act.count} abastecimento(s)
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                      <span className="text-sm font-black text-slate-100">
+                        {act.liters.toLocaleString('pt-BR')} <span className="text-xs text-emerald-400 font-bold">L</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-900 text-emerald-200 font-black text-[11px] border border-emerald-700">
+                        {act.percentage}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-emerald-900/60 flex items-center justify-between text-[11px] text-emerald-300 font-bold">
+              <span>Atividades listadas: {activityConsumption.length}</span>
+              <span className="text-[#FACC15]">Volume total: {totalActivityLiters.toLocaleString('pt-BR')} L</span>
+            </div>
+          </div>
+
         </div>
       </div>
 

@@ -4,7 +4,7 @@ import {
   Clock, AlertTriangle, DollarSign, X, FileText, ChevronRight,
   Edit, Trash2, Droplets
 } from 'lucide-react';
-import { MaintenanceLog, MaintenanceType, Vehicle, User } from '../types';
+import { MaintenanceLog, MaintenanceType, Vehicle, User, canEditSystemData } from '../types';
 import { formatCurrency, formatDateBR } from '../utils/calculations';
 
 interface MaintenanceViewProps {
@@ -28,7 +28,7 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
   onDeleteMaintenance,
   darkMode
 }) => {
-  const isAdmin = currentUser.role === 'ADMIN';
+  const canEdit = canEditSystemData(currentUser.role);
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -88,7 +88,7 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
   };
 
   const handleOpenEdit = (m: MaintenanceLog) => {
-    if (!isAdmin) return;
+    if (!canEdit) return;
     const eq = vehicles.find(v => v.id === m.equipmentId);
     const isKm = eq?.category === 'VEICULO' || eq?.maintenanceControlType === 'QUILOMETRAGEM';
     const interval = isKm 
@@ -111,7 +111,7 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
   };
 
   const handleDelete = (id: string) => {
-    if (!isAdmin) return;
+    if (!canEdit) return;
     if (confirm('Tem certeza que deseja excluir esta manutenção?')) {
       if (onDeleteMaintenance) {
         onDeleteMaintenance(id);
@@ -201,13 +201,15 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto transition-transform active:scale-95"
-        >
-          <Plus className="w-4 h-4 text-[#FACC15]" />
-          <span>Cadastrar Manutenção</span>
-        </button>
+        {canEdit && (
+          <button
+            onClick={handleOpenAdd}
+            className="bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto transition-transform active:scale-95"
+          >
+            <Plus className="w-4 h-4 text-[#FACC15]" />
+            <span>Cadastrar Manutenção</span>
+          </button>
+        )}
       </div>
 
       {/* Summary Cards */}
@@ -335,8 +337,8 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
                     {m.status}
                   </span>
 
-                  {/* Admin Only Controls */}
-                  {isAdmin && (
+                  {/* Maintenance role Controls */}
+                  {canEdit && (
                     <div className="flex items-center gap-1 pl-2 border-l border-emerald-800/20">
                       <button
                         onClick={() => handleOpenEdit(m)}

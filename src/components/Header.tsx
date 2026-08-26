@@ -49,7 +49,11 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
               </button>
             )}
             <h1 className="text-base sm:text-xl font-bold text-slate-100 truncate">
-              {currentUser.role === 'FUNCIONARIO' ? 'Módulo do Operador' : 'Painel Administrativo'}
+              {currentUser.role === 'FUNCIONARIO' 
+                ? 'Módulo do Operador' 
+                : currentUser.role === 'MANUTENCAO' 
+                  ? 'Painel de Manutenção & Frotas' 
+                  : 'Painel de Gestão & Auditoria'}
             </h1>
           </div>
 
@@ -79,8 +83,8 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
               <span className="hidden sm:inline">Novo Abastecimento</span>
             </button>
 
-            {/* Notifications Bell (Only for ADMINs) */}
-            {currentUser.role === 'ADMIN' && (
+            {/* Notifications Bell (ADMINs and MANUTENCAO) */}
+            {currentUser.role !== 'FUNCIONARIO' && (
               <div className="relative">
                 <button
                   onClick={() => setShowAlertsDropdown(!showAlertsDropdown)}
@@ -154,7 +158,7 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
               <div className="text-left hidden sm:block">
                 <p className="text-xs font-bold leading-none text-slate-100">{currentUser.name}</p>
                 <p className="text-[9px] font-bold text-[#C5A059] mt-0.5 uppercase tracking-wider">
-                  {currentUser.role === 'ADMIN' ? 'Administrador' : 'Operador'}
+                  {currentUser.role === 'ADMIN' ? 'Administrador' : currentUser.role === 'MANUTENCAO' ? 'Manutenção' : 'Operador'}
                 </p>
               </div>
             </div>

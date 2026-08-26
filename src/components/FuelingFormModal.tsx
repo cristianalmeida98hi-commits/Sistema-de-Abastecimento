@@ -578,16 +578,29 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
               </div>
             )}
 
-            {/* 6. Observations Field */}
+            {/* 6. Observations / Custom Activity Field */}
             <div className="space-y-1">
-              <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200">
-                Observações / Localização do Talhão (Opcional)
+              <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200 flex items-center justify-between">
+                <span>
+                  {activityType === 'OUTRAS' || operationType === 'OUTROS'
+                    ? '⭐ Atividade Personalizada / Observações'
+                    : 'Observações / Localização do Talhão (Opcional)'}
+                </span>
+                {(activityType === 'OUTRAS' || operationType === 'OUTROS') && (
+                  <span className="text-[10px] text-[#FACC15] font-bold">
+                    Aparecerá nos gráficos de consumo por atividade
+                  </span>
+                )}
               </label>
               <input
                 type="text"
                 value={observations}
                 onChange={(e) => setObservations(e.target.value)}
-                placeholder="Ex: Talhão 04 / Corte de grama bermuda / Início da manhã..."
+                placeholder={
+                  activityType === 'OUTRAS' || operationType === 'OUTROS'
+                    ? 'Descreva a atividade específica (Ex: Poda especial de cerca, Manutenção de drenos, etc.)'
+                    : 'Ex: Talhão 04 / Corte de grama bermuda / Início da manhã...'
+                }
                 className="w-full px-4 py-2.5 rounded-2xl border border-emerald-700/80 bg-[#04281f] text-white text-xs font-medium outline-none focus:border-[#FACC15] placeholder-emerald-300/40 transition-all"
               />
             </div>

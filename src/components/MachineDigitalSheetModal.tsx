@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { 
   Vehicle, FuelLog, MaintenanceLog, MachineIssue, 
-  PreventiveMaintenanceItem, PreventiveItemKey, User, MaintenanceType 
+  PreventiveMaintenanceItem, PreventiveItemKey, User, MaintenanceType, canEditSystemData 
 } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
 import { getConsolidatedCapacities, getCapacityTypeEmoji, getMachineSubtypeName } from '../utils/capacities';
@@ -62,7 +62,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
 }) => {
   if (!isOpen || !vehicle) return null;
 
-  const isAdmin = currentUser?.role === 'ADMIN';
+  const canEdit = canEditSystemData(currentUser?.role);
 
   const [activeTab, setActiveTab] = useState<'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES'>(initialTab);
   const [isReportProblemOpen, setIsReportProblemOpen] = useState(false);
@@ -394,9 +394,9 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
     setIsMntFormOpen(true);
   };
 
-  // Open form to edit maintenance (Admin only)
+  // Open form to edit maintenance
   const handleOpenEditMaintenance = (m: MaintenanceLog) => {
-    if (!isAdmin) return;
+    if (!canEdit) return;
     setEditingMntId(m.id);
     setMntType(m.type);
     setMntTitle(m.title);
@@ -465,7 +465,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
   };
 
   const handleDeleteMnt = (id: string) => {
-    if (!isAdmin) return;
+    if (!canEdit) return;
     if (confirm('Tem certeza que deseja excluir este registro de manutenção?')) {
       if (onDeleteMaintenance) {
         onDeleteMaintenance(id);
@@ -952,35 +952,37 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                           </div>
                         )}
 
-                        {/* Action buttons */}
-                        <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-                          <button
-                            onClick={() => {
-                              setOilConfigActive(vehicle.oilChangeControlActive !== false);
-                              setOilConfigInterval(vehicle.oilChangeIntervalHours || vehicle.maintenanceIntervalHours || 300);
-                              setOilConfigAdvance(vehicle.oilChangeWarningAdvanceHours !== undefined ? vehicle.oilChangeWarningAdvanceHours : 50);
-                              setOilConfigRefHourmeter(vehicle.lastOilChangeHourmeter !== undefined ? vehicle.lastOilChangeHourmeter : (vehicle.currentHourmeter || 0));
-                              setIsOilConfigOpen(true);
-                            }}
-                            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-emerald-900/50 hover:bg-slate-100 dark:hover:bg-emerald-800 text-slate-700 dark:text-emerald-200 border border-emerald-800/30 flex items-center gap-1.5 transition-colors"
-                          >
-                            <Wrench className="w-3.5 h-3.5 text-amber-500" />
-                            <span>Configurar Intervalo & Referência</span>
-                          </button>
+                        {/* Action buttons (MANUTENCAO only) */}
+                        {canEdit && (
+                          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                            <button
+                              onClick={() => {
+                                setOilConfigActive(vehicle.oilChangeControlActive !== false);
+                                setOilConfigInterval(vehicle.oilChangeIntervalHours || vehicle.maintenanceIntervalHours || 300);
+                                setOilConfigAdvance(vehicle.oilChangeWarningAdvanceHours !== undefined ? vehicle.oilChangeWarningAdvanceHours : 50);
+                                setOilConfigRefHourmeter(vehicle.lastOilChangeHourmeter !== undefined ? vehicle.lastOilChangeHourmeter : (vehicle.currentHourmeter || 0));
+                                setIsOilConfigOpen(true);
+                              }}
+                              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-emerald-900/50 hover:bg-slate-100 dark:hover:bg-emerald-800 text-slate-700 dark:text-emerald-200 border border-emerald-800/30 flex items-center gap-1.5 transition-colors"
+                            >
+                              <Wrench className="w-3.5 h-3.5 text-amber-500" />
+                              <span>Configurar Intervalo & Referência</span>
+                            </button>
 
-                          <button
-                            onClick={() => {
-                              setDirectOilHourmeter(vehicle.currentHourmeter || 0);
-                              setDirectOilDate(new Date().toISOString().slice(0, 10));
-                              setDirectOilPerformedBy(currentUser?.name || '');
-                              setIsDirectOilChangeOpen(true);
-                            }}
-                            className="px-4 py-2 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-400 text-gray-950 flex items-center gap-1.5 shadow-md transition-transform active:scale-95"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                            <span>Registrar Troca de Óleo Realizada</span>
-                          </button>
-                        </div>
+                            <button
+                              onClick={() => {
+                                setDirectOilHourmeter(vehicle.currentHourmeter || 0);
+                                setDirectOilDate(new Date().toISOString().slice(0, 10));
+                                setDirectOilPerformedBy(currentUser?.name || '');
+                                setIsDirectOilChangeOpen(true);
+                              }}
+                              className="px-4 py-2 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-400 text-gray-950 flex items-center gap-1.5 shadow-md transition-transform active:scale-95"
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>Registrar Troca de Óleo Realizada</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -1340,13 +1342,15 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                         />
                       </div>
 
-                      <button
-                        onClick={() => setRecordingItem(item)}
-                        className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition-colors flex items-center justify-center gap-1.5 shadow-sm"
-                      >
-                        <Check className="w-3.5 h-3.5 text-[#FACC15]" />
-                        <span>Registrar Troca / Serviço Realizado</span>
-                      </button>
+                      {canEdit && (
+                        <button
+                          onClick={() => setRecordingItem(item)}
+                          className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                        >
+                          <Check className="w-3.5 h-3.5 text-[#FACC15]" />
+                          <span>Registrar Troca / Serviço Realizado</span>
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -1420,13 +1424,15 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                   </p>
                 </div>
 
-                <button
-                  onClick={handleOpenAddMaintenance}
-                  className="px-3.5 py-2 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center gap-1.5 shadow-md transition-transform active:scale-95"
-                >
-                  <Plus className="w-4 h-4 text-[#FACC15]" />
-                  <span>+ Adicionar Registro de Manutenção</span>
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={handleOpenAddMaintenance}
+                    className="px-3.5 py-2 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center gap-1.5 shadow-md transition-transform active:scale-95"
+                  >
+                    <Plus className="w-4 h-4 text-[#FACC15]" />
+                    <span>+ Adicionar Registro de Manutenção</span>
+                  </button>
+                )}
               </div>
 
               {/* Section 1: Special Highlight for Oil & Filter Changes */}
@@ -1527,8 +1533,8 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                               🗓️ {new Date(log.date).toLocaleDateString('pt-BR')}
                             </span>
 
-                            {/* Admin-only controls */}
-                            {isAdmin && (
+                            {/* Maintenance role controls */}
+                            {canEdit && (
                               <div className="flex items-center gap-1 ml-2">
                                 <button
                                   onClick={() => handleOpenEditMaintenance(log)}

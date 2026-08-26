@@ -1,4 +1,14 @@
-export type UserRole = 'ADMIN' | 'FUNCIONARIO';
+export type UserRole = 'ADMIN' | 'FUNCIONARIO' | 'MANUTENCAO';
+
+export const canEditSystemData = (role?: UserRole | string | null): boolean => {
+  if (!role) return false;
+  return role === 'MANUTENCAO';
+};
+
+export const canManageUsers = (role?: UserRole | string | null): boolean => {
+  if (!role) return false;
+  return role === 'MANUTENCAO';
+};
 
 export interface User {
   id: string;

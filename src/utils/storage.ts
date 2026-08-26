@@ -13,6 +13,9 @@ import {
   INITIAL_AUDIT_LOGS, INITIAL_SETTINGS, INITIAL_MACHINE_ISSUES, INITIAL_PREVENTIVE_ITEMS,
   INITIAL_CENTRAL_TANKS, INITIAL_TANK_MOVEMENTS 
 } from '../data/seedData';
+import { 
+  hashPassword, verifyPassword, canManageUsers, sanitizeUserForClient 
+} from './security';
 
 const SESSION_KEYS = {
   SESSION_USER: 'andradeagro_session_user_v1',
@@ -324,15 +327,26 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
   }
 
   if (user.active === false) {
-    return { success: false, error: 'Este usuário está inativo no sistema. Fale com a administração.' };
+    return { success: false, error: 'Este usuário está inativo no sistema. Fale com a equipe de manutenção/administração.' };
   }
 
-  if (user.password !== password) {
+  const isValidPassword = verifyPassword(password, user.password);
+
+  if (!isValidPassword) {
     return { success: false, error: 'Senha incorreta. Verifique suas credenciais.' };
   }
 
-  // Update session
-  setCurrentUserSession(user);
+  // If password was in legacy unhashed format, upgrade it transparently to salted SHA-256
+  if (user.password && !user.password.startsWith('$sha256$')) {
+    const upgradedHash = hashPassword(password);
+    user.password = upgradedHash;
+    updateDoc(doc(db, 'users', user.id), { password: upgradedHash }).catch(console.error);
+  }
+
+  const safeUser = sanitizeUserForClient(user);
+
+  // Update session with sanitized user
+  setCurrentUserSession(safeUser);
 
   // Handle remember email
   if (typeof window !== 'undefined') {
@@ -346,7 +360,33 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
   // Register audit
   logAuditEvent('LOGIN', 'Autenticação', `Usuário ${user.name} (${user.role}) realizou login no sistema.`);
 
-  return { success: true, user };
+  return { success: true, user: safeUser };
+}
+
+export function loginUserById(userId: string, rememberMe: boolean): { success: boolean; user?: User; error?: string } {
+  const users = getUsers();
+  const user = users.find(u => u.id === userId);
+
+  if (!user) {
+    return { success: false, error: 'Usuário não encontrado no sistema.' };
+  }
+
+  if (user.active === false) {
+    return { success: false, error: 'Este usuário está inativo no sistema.' };
+  }
+
+  const safeUser = sanitizeUserForClient(user);
+
+  setCurrentUserSession(safeUser);
+
+  if (typeof window !== 'undefined') {
+    if (rememberMe && user.email) {
+      localStorage.setItem(SESSION_KEYS.REMEMBERED_EMAIL, user.email.toLowerCase());
+    }
+  }
+
+  logAuditEvent('LOGIN', 'Autenticação', `Usuário ${user.name} (${user.role}) acessou o sistema.`);
+  return { success: true, user: safeUser };
 }
 
 export function logoutUser(): void {
@@ -367,10 +407,11 @@ export function logoutUser(): void {
 export function setCurrentUserSession(user: User): void {
   try {
     if (typeof window !== 'undefined') {
-      sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(user));
+      const safe = sanitizeUserForClient(user);
+      sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(safe));
     }
   } catch (err) {
-    console.error('Error setting current user:', err);
+    console.error('Error setting current user session:', err);
   }
 }
 
@@ -1016,10 +1057,19 @@ export async function deleteGasStation(id: string): Promise<void> {
   logAuditEvent('EXCLUIR', 'Posto', `Excluiu o posto ID ${id}.`);
 }
 
-// User Mutators
+// User Mutators - STRICT RBAC: ONLY MANUTENCAO ALLOWED
 export async function addUser(user: Omit<User, 'id'>): Promise<User> {
+  const caller = getCurrentUser();
+  if (!caller || !canManageUsers(caller.role)) {
+    throw new Error('Acesso negado: Somente o perfil Manutenção possui permissão para cadastrar novos usuários.');
+  }
+
+  const rawPassword = (user.password && user.password.trim()) || '123456';
+  const securePassword = hashPassword(rawPassword);
+
   const newUser: User = {
     ...user,
+    password: securePassword,
     id: `usr-${Date.now()}`
   };
   const cleaned = cleanUndefined(newUser);
@@ -1027,25 +1077,80 @@ export async function addUser(user: Omit<User, 'id'>): Promise<User> {
   notifyDataUpdated();
 
   await setDoc(doc(db, 'users', cleaned.id), cleaned);
-  logAuditEvent('CRIAR', 'Usuário', `Cadastrou funcionário/usuário ${cleaned.name}.`);
-  return cleaned;
+  logAuditEvent('CRIAR', 'Usuário', `Manutenção (${caller.name}) cadastrou o usuário ${cleaned.name} (${cleaned.role}).`);
+  return sanitizeUserForClient(cleaned);
 }
 
 export async function updateUser(id: string, fields: Partial<User>): Promise<void> {
-  const cleaned = cleanUndefined(fields);
+  const caller = getCurrentUser();
+  if (!caller || !canManageUsers(caller.role)) {
+    throw new Error('Acesso negado: Somente o perfil Manutenção possui permissão para editar usuários.');
+  }
+
+  const fieldsCopy = { ...fields };
+  
+  // If password was explicitly passed and non-empty, hash it securely; otherwise, omit it from updates
+  if (fieldsCopy.password) {
+    const trimmed = fieldsCopy.password.trim();
+    if (trimmed.length > 0) {
+      fieldsCopy.password = hashPassword(trimmed);
+    } else {
+      delete fieldsCopy.password;
+    }
+  } else {
+    delete fieldsCopy.password;
+  }
+
+  const cleaned = cleanUndefined(fieldsCopy);
   cache.users = cache.users.map(u => u.id === id ? { ...u, ...cleaned } : u);
   notifyDataUpdated();
 
   await updateDoc(doc(db, 'users', id), cleaned);
-  logAuditEvent('EDITAR', 'Usuário', `Atualizou dados do usuário ID ${id}.`);
+  const targetUser = cache.users.find(u => u.id === id);
+  logAuditEvent('EDITAR', 'Usuário', `Manutenção (${caller.name}) atualizou os dados do usuário ${targetUser?.name || id}.`);
+}
+
+export async function resetUserPassword(id: string, newPassword: string): Promise<void> {
+  const caller = getCurrentUser();
+  if (!caller || !canManageUsers(caller.role)) {
+    throw new Error('Acesso negado: Somente o perfil Manutenção possui permissão para redefinir senhas.');
+  }
+
+  if (!newPassword || newPassword.trim().length < 6) {
+    throw new Error('A nova senha deve possuir no mínimo 6 caracteres.');
+  }
+
+  const target = cache.users.find(u => u.id === id);
+  if (!target) {
+    throw new Error('Usuário não encontrado no sistema.');
+  }
+
+  const securePassword = hashPassword(newPassword.trim());
+  cache.users = cache.users.map(u => u.id === id ? { ...u, password: securePassword } : u);
+  notifyDataUpdated();
+
+  await updateDoc(doc(db, 'users', id), { password: securePassword });
+  logAuditEvent('EDITAR', 'Usuário', `Manutenção (${caller.name}) redefiniu a senha de acesso do usuário ${target.name}.`);
 }
 
 export async function deleteUser(id: string): Promise<void> {
+  const caller = getCurrentUser();
+  if (!caller || !canManageUsers(caller.role)) {
+    throw new Error('Acesso negado: Somente o perfil Manutenção possui permissão para excluir usuários.');
+  }
+
+  if (caller.id === id) {
+    throw new Error('Você não pode excluir o seu próprio usuário enquanto está conectado.');
+  }
+
+  const target = cache.users.find(u => u.id === id);
+  const targetName = target ? target.name : id;
+
   cache.users = cache.users.filter(u => u.id !== id);
   notifyDataUpdated();
 
   await deleteDoc(doc(db, 'users', id));
-  logAuditEvent('EXCLUIR', 'Usuário', `Excluiu o usuário ID ${id}.`);
+  logAuditEvent('EXCLUIR', 'Usuário', `Manutenção (${caller.name}) excluiu o usuário ${targetName}.`);
 }
 
 // Alerts Mutator

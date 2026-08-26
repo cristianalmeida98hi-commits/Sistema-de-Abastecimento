@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Fuel, Plus, Edit3, CheckCircle2, DollarSign, MapPin, Building, X, Trash2, Settings } from 'lucide-react';
-import { GasStation, FuelType, CentralTank, User } from '../types';
+import { GasStation, FuelType, CentralTank, User, canEditSystemData } from '../types';
 import { formatCurrency, getFuelTypeName } from '../utils/calculations';
 import { getCentralTanks, updateCentralTank, getCurrentUser, getTankStatus } from '../utils/storage';
 import { EditCentralTankModal } from './EditCentralTankModal';
@@ -24,6 +24,7 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
   const [editingStation, setEditingStation] = useState<GasStation | null>(null);
   const [selectedTankForModal, setSelectedTankForModal] = useState<CentralTank | null>(null);
   const currentUser = getCurrentUser() || { id: 'usr-admin', name: 'Administrador', role: 'ADMIN' } as User;
+  const canEdit = canEditSystemData(currentUser.role);
   const centralTanks = getCentralTanks();
 
   // Form states
@@ -117,13 +118,15 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4 text-amber-400" />
-          <span>Cadastrar Posto</span>
-        </button>
+        {canEdit && (
+          <button
+            onClick={handleOpenAdd}
+            className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto"
+          >
+            <Plus className="w-4 h-4 text-amber-400" />
+            <span>Cadastrar Posto</span>
+          </button>
+        )}
       </div>
 
       {/* Gas Stations Cards Grid */}
@@ -152,28 +155,30 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
                 </p>
               </div>
 
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => handleOpenEdit(stn)}
-                  className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
-                  title="Editar Posto e Preços"
-                >
-                  <Edit3 className="w-4 h-4" />
-                </button>
-                {onDeleteStation && (
+              {canEdit && (
+                <div className="flex items-center gap-1">
                   <button
-                    onClick={() => {
-                      if (confirm(`Tem certeza que deseja excluir o posto "${stn.name}"? Esta ação não pode ser desfeita.`)) {
-                        onDeleteStation(stn.id);
-                      }
-                    }}
-                    className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20"
-                    title="Excluir Posto"
+                    onClick={() => handleOpenEdit(stn)}
+                    className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                    title="Editar Posto e Preços"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Edit3 className="w-4 h-4" />
                   </button>
-                )}
-              </div>
+                  {onDeleteStation && (
+                    <button
+                      onClick={() => {
+                        if (confirm(`Tem certeza que deseja excluir o posto "${stn.name}"? Esta ação não pode ser desfeita.`)) {
+                          onDeleteStation(stn.id);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                      title="Excluir Posto"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* If Internal Station, show Tank status and quick config button */}
@@ -206,13 +211,15 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
 
                   <div className="flex items-center justify-between text-[11px] text-emerald-200">
                     <span>{Math.round(status.currentStock).toLocaleString('pt-BR')} L / {status.capacity.toLocaleString('pt-BR')} L</span>
-                    <button
-                      onClick={() => setSelectedTankForModal(matchedTank)}
-                      className="text-[#FACC15] hover:underline font-bold flex items-center gap-1"
-                    >
-                      <Settings className="w-3 h-3" />
-                      Configurar
-                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => setSelectedTankForModal(matchedTank)}
+                        className="text-[#FACC15] hover:underline font-bold flex items-center gap-1"
+                      >
+                        <Settings className="w-3 h-3" />
+                        Configurar
+                      </button>
+                    )}
                   </div>
                 </div>
               );

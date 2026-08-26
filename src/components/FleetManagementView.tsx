@@ -3,7 +3,7 @@ import {
   Truck, Plus, Search, Filter, QrCode, Wrench, Fuel, CheckCircle2, 
   AlertTriangle, Clock, Calendar, Shield, X, Edit3, Trash2, Printer, Eye, Droplet, Layers, Sparkles
 } from 'lucide-react';
-import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, FuelLog, OperationalCapacity, MachineSubtype } from '../types';
+import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, FuelLog, OperationalCapacity, MachineSubtype, canEditSystemData } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
 import { MachineCapacitiesEditor } from './MachineCapacitiesEditor';
 import { getConsolidatedCapacities, getCapacityTypeEmoji, getMachineSubtypeName } from '../utils/capacities';
@@ -39,6 +39,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   onOpenDigitalSheet,
   darkMode
 }) => {
+  const canEdit = canEditSystemData(currentUser.role);
   const [activeTab, setActiveTab] = useState<EquipmentCategory>('VEICULO');
   const [search, setSearch] = useState('');
   const [sectorFilter, setSectorFilter] = useState<string>('ALL');
@@ -380,7 +381,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
           </p>
         </div>
 
-        {currentUser.role === 'ADMIN' && (
+        {canEdit && (
           <button
             onClick={() => setShowAddModal(true)}
             className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto"
@@ -618,7 +619,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 </button>
 
                 {/* Quick Oil Change Button for Tractors & Machines */}
-                {v.category !== 'VEICULO' && (
+                {v.category !== 'VEICULO' && canEdit && (
                   <button
                     onClick={() => handleOpenOilModal(v)}
                     className="px-2.5 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-700 text-[#FACC15] text-xs font-bold flex items-center gap-1 min-h-[36px]"
@@ -645,7 +646,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   <QrCode className="w-4 h-4 text-amber-500" />
                 </button>
 
-                {currentUser.role === 'ADMIN' && (
+                {canEdit && (
                   <>
                     <button
                       onClick={() => handleOpenEditModal(v)}

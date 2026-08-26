@@ -156,8 +156,8 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
           {(!collapsed || isMobileOpen) && (
             <div className="overflow-hidden min-w-0">
               <p className="text-white text-xs font-bold truncate">{currentUser.name}</p>
-              <p className="text-[#FACC15] text-[10px] uppercase tracking-wider font-extrabold">
-                {currentUser.role === 'ADMIN' ? 'Administrador' : 'Operador'}
+              <p className="text-[#FACC15] text-[10px] uppercase tracking-wider font-extrabold flex items-center gap-1">
+                {currentUser.role === 'ADMIN' ? '👑 Administrador' : currentUser.role === 'MANUTENCAO' ? '🔧 Manutenção' : '👷 Operador'}
               </p>
             </div>
           )}

@@ -2,7 +2,7 @@ export type UserRole = 'ADMIN' | 'FUNCIONARIO' | 'MANUTENCAO';
 
 export const canEditSystemData = (role?: UserRole | string | null): boolean => {
   if (!role) return false;
-  return role === 'MANUTENCAO';
+  return role === 'ADMIN' || role === 'MANUTENCAO';
 };
 
 export const canManageUsers = (role?: UserRole | string | null): boolean => {
@@ -101,13 +101,17 @@ export interface Vehicle {
   currentKm: number;
   currentHourmeter?: number;
   
-  // Controle de Manutenção & Troca de Óleo por Horímetro (Padrão 300h)
-  oilChangeControlActive?: boolean; // Se o controle por horas está ativo (padrão true para máquinas/tratores)
-  oilChangeIntervalHours?: number; // Intervalo configurável por equipamento (padrão inicial: 300h)
-  oilChangeWarningAdvanceHours?: number; // Quantidade de horas antes da troca para acionar alerta amarelo (padrão: 50h)
-  lastOilChangeHourmeter?: number; // Horímetro no momento da última troca de óleo realizada ou referência inicial
+  // Controle de Manutenção & Troca de Óleo por Horímetro (Padrão 300h) ou KM (Padrão 10.000 km)
+  oilChangeControlActive?: boolean; // Se o controle de óleo está ativo (para máquinas, tratores e veículos)
+  oilChangeIntervalHours?: number; // Intervalo configurável por horas (padrão tratores: 300h)
+  oilChangeIntervalKm?: number;    // Intervalo configurável por km (padrão veículos: 10.000 km)
+  oilChangeWarningAdvanceHours?: number; // Antecedência em horas para acionar alerta amarelo (padrão: 50h)
+  oilChangeWarningAdvanceKm?: number;    // Antecedência em km para acionar alerta amarelo (padrão: 1.000 km)
+  lastOilChangeHourmeter?: number; // Horímetro na última troca de óleo
+  lastOilChangeKm?: number;        // KM na última troca de óleo
   lastOilChangeDate?: string;      // Data da última troca de óleo
-  nextOilChangeHourmeter?: number; // Próximo limite calculado automaticamente (última + intervalo)
+  nextOilChangeHourmeter?: number; // Próximo limite em horas (última + intervalo)
+  nextOilChangeKm?: number;        // Próximo limite em km (última + intervalo)
 
   // Controle de Manutenção Personalizado por Equipamento
   maintenanceControlType?: MaintenanceControlType; // 'HORAS' | 'QUILOMETRAGEM' | 'DATA' | 'HORAS_E_DATA' | 'PERSONALIZADO'

@@ -852,8 +852,13 @@ export async function updateVehicle(id: string, updatedFields: Partial<Vehicle>)
   cache.vehicles = cache.vehicles.map(v => v.id === id ? { ...v, ...cleaned } : v);
   notifyDataUpdated();
 
-  await updateDoc(doc(db, 'vehicles', id), cleaned);
-  logAuditEvent('EDITAR', 'Equipamento', `Atualizou equipamento ID ${id}.`);
+  try {
+    await setDoc(doc(db, 'vehicles', id), cleaned, { merge: true });
+    logAuditEvent('EDITAR', 'Equipamento', `Atualizou equipamento ID ${id}.`);
+  } catch (err) {
+    console.error(`[Firestore Error updating vehicle ${id}]`, err);
+    throw err;
+  }
 }
 
 export async function deleteVehicle(id: string): Promise<void> {
@@ -1217,10 +1222,9 @@ export async function deleteFuelRefill(id: string): Promise<void> {
 }
 
 // Dedicated Oil Change / Maintenance Service Recorder
-// Dedicated Oil Change / Maintenance Service Recorder
 export async function recordOilChange(
   equipmentId: string,
-  recordedHourmeter: number,
+  recordedMeter: number,
   date?: string,
   cost: number = 0,
   notes?: string,
@@ -1230,33 +1234,50 @@ export async function recordOilChange(
     filtersReplaced?: string;
     performedBy?: string;
     supplierOrWorkshop?: string;
+    isKm?: boolean;
   }
 ): Promise<void> {
   const serviceDate = date || new Date().toISOString().slice(0, 10);
   const vehicles = getVehicles();
   const targetVehicle = vehicles.find(v => v.id === equipmentId);
+  const isKm = extra?.isKm ?? (targetVehicle?.category === 'VEICULO' || targetVehicle?.maintenanceControlType === 'QUILOMETRAGEM');
   
-  // Use equipment specific interval (default 300h only if not specified)
-  const interval = Number(targetVehicle?.oilChangeIntervalHours) || Number(targetVehicle?.maintenanceIntervalHours) || 300;
-  const nextScheduled = recordedHourmeter + interval;
+  const interval = isKm
+    ? (Number(targetVehicle?.oilChangeIntervalKm) || Number(targetVehicle?.maintenanceIntervalKm) || 10000)
+    : (Number(targetVehicle?.oilChangeIntervalHours) || Number(targetVehicle?.maintenanceIntervalHours) || 300);
+    
+  const nextScheduled = recordedMeter + interval;
   const performedBy = extra?.performedBy || getCurrentUser()?.name || 'Mecânico Responsável';
   const supplierOrWorkshop = extra?.supplierOrWorkshop || 'Oficina Interna AndradeAgro';
-  const oilType = extra?.oilType || 'Óleo Motor 15W40';
+  const oilType = extra?.oilType || (isKm ? 'Óleo Motor 5W30 / 15W40' : 'Óleo Motor 15W40');
   const oilQuantityLiters = extra?.oilQuantityLiters;
   const filtersReplaced = extra?.filtersReplaced;
 
   if (targetVehicle) {
     const updatedVehicle: Partial<Vehicle> = {
       oilChangeControlActive: true,
-      lastMaintenanceHourmeter: recordedHourmeter,
-      lastMaintenanceDate: serviceDate,
-      nextMaintenanceHourmeter: nextScheduled,
-      lastOilChangeHourmeter: recordedHourmeter,
       lastOilChangeDate: serviceDate,
-      nextOilChangeHourmeter: nextScheduled,
-      oilChangeIntervalHours: interval,
-      currentHourmeter: Math.max(targetVehicle.currentHourmeter || 0, recordedHourmeter)
+      lastMaintenanceDate: serviceDate,
     };
+
+    if (isKm) {
+      updatedVehicle.lastOilChangeKm = recordedMeter;
+      updatedVehicle.nextOilChangeKm = nextScheduled;
+      updatedVehicle.lastMaintenanceKm = recordedMeter;
+      updatedVehicle.nextMaintenanceKm = nextScheduled;
+      updatedVehicle.oilChangeIntervalKm = interval;
+      updatedVehicle.maintenanceIntervalKm = interval;
+      updatedVehicle.currentKm = Math.max(targetVehicle.currentKm || 0, recordedMeter);
+    } else {
+      updatedVehicle.lastOilChangeHourmeter = recordedMeter;
+      updatedVehicle.nextOilChangeHourmeter = nextScheduled;
+      updatedVehicle.lastMaintenanceHourmeter = recordedMeter;
+      updatedVehicle.nextMaintenanceHourmeter = nextScheduled;
+      updatedVehicle.oilChangeIntervalHours = interval;
+      updatedVehicle.maintenanceIntervalHours = interval;
+      updatedVehicle.currentHourmeter = Math.max(targetVehicle.currentHourmeter || 0, recordedMeter);
+    }
+
     await updateVehicle(targetVehicle.id, updatedVehicle);
   }
 
@@ -1267,23 +1288,27 @@ export async function recordOilChange(
     const updatedItem = cleanUndefined({
       ...oilPrevItem,
       lastServiceDate: serviceDate,
-      lastServiceHourmeter: recordedHourmeter,
-      nextScheduledHourmeter: nextScheduled,
-      intervalHours: interval,
+      lastServiceHourmeter: !isKm ? recordedMeter : undefined,
+      nextScheduledHourmeter: !isKm ? nextScheduled : undefined,
+      intervalHours: !isKm ? interval : undefined,
       notes: notes || oilPrevItem.notes
     });
     cache.preventiveItems = cache.preventiveItems.map(p => p.id === oilPrevItem.id ? updatedItem : p);
     await setDoc(doc(db, 'preventive_items', oilPrevItem.id), updatedItem);
   }
 
-  // Resolve any existing maintenance alert for this machine
-  const existingAlert = cache.alerts.find(a => a.id === `alt-oil-${equipmentId}` || (a.equipmentId === equipmentId && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')));
+  // Resolve existing alerts for this machine
+  const existingAlert = cache.alerts.find(a => 
+    a.id === `alt-oil-${equipmentId}` || 
+    a.id === `alt-km-${equipmentId}` || 
+    (a.equipmentId === equipmentId && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE'))
+  );
   if (existingAlert && !existingAlert.resolved) {
     await resolveAlert(existingAlert.id);
   }
 
-  // Build full description
-  let desc = `Troca de óleo realizada no horímetro ${recordedHourmeter}h. Intervalo: ${interval}h. Próxima troca programada para ${nextScheduled}h.`;
+  const unitLabel = isKm ? 'km' : 'h';
+  let desc = `Troca de óleo realizada no ${isKm ? 'odômetro' : 'horímetro'} ${recordedMeter.toLocaleString('pt-BR')} ${unitLabel}. Intervalo: ${interval.toLocaleString('pt-BR')} ${unitLabel}. Próxima troca programada para ${nextScheduled.toLocaleString('pt-BR')} ${unitLabel}.`;
   if (oilType) desc += ` Tipo: ${oilType}.`;
   if (oilQuantityLiters) desc += ` Volume: ${oilQuantityLiters}L.`;
   if (filtersReplaced) desc += ` Filtros: ${filtersReplaced}.`;
@@ -1291,13 +1316,13 @@ export async function recordOilChange(
   // Add Maintenance Log
   await addMaintenance({
     equipmentId,
-    equipmentName: targetVehicle?.model || 'Máquina Agrícola',
-    equipmentPlateOrCode: targetVehicle?.patrimonyCode || targetVehicle?.licensePlate || equipmentId,
+    equipmentName: targetVehicle?.model || (isKm ? 'Veículo' : 'Máquina Agrícola'),
+    equipmentPlateOrCode: targetVehicle?.licensePlate || targetVehicle?.patrimonyCode || equipmentId,
     date: serviceDate,
     type: 'TROCA_OLEO',
-    title: `Troca de Óleo do Motor (${recordedHourmeter}h)`,
+    title: `Troca de Óleo do Motor (${recordedMeter.toLocaleString('pt-BR')} ${unitLabel})`,
     description: desc,
-    kmOrHourAtService: recordedHourmeter,
+    kmOrHourAtService: recordedMeter,
     nextServiceKmOrHour: nextScheduled,
     cost,
     supplierOrWorkshop,
@@ -1307,10 +1332,10 @@ export async function recordOilChange(
     oilType,
     oilQuantityLiters,
     filtersReplaced,
-    intervalHoursApplied: interval
+    intervalHoursApplied: !isKm ? interval : undefined
   });
 
-  logAuditEvent('CRIAR', 'Troca de Óleo', `Registrou troca de óleo em ${targetVehicle?.model || equipmentId} no horímetro ${recordedHourmeter}h (Próxima: ${nextScheduled}h).`);
+  logAuditEvent('CRIAR', 'Troca de Óleo', `Registrou troca de óleo em ${targetVehicle?.model || equipmentId} no ${isKm ? 'km' : 'horímetro'} ${recordedMeter.toLocaleString('pt-BR')} ${unitLabel} (Próxima: ${nextScheduled.toLocaleString('pt-BR')} ${unitLabel}).`);
   checkAutomatedAlerts();
   notifyDataUpdated();
 }
@@ -1320,49 +1345,77 @@ export async function setOilChangeConfigAndReference(
   equipmentId: string,
   config: {
     active: boolean;
-    intervalHours: number;
-    warningAdvanceHours: number;
+    intervalHours?: number;
+    intervalKm?: number;
+    warningAdvanceHours?: number;
+    warningAdvanceKm?: number;
     referenceHourmeter?: number;
+    referenceKm?: number;
     lastServiceDate?: string;
+    isKm?: boolean;
   }
 ): Promise<void> {
   const vehicles = getVehicles();
   const target = vehicles.find(v => v.id === equipmentId);
   if (!target) return;
 
+  const isKm = config.isKm ?? (target.category === 'VEICULO' || target.maintenanceControlType === 'QUILOMETRAGEM');
   const active = config.active !== false;
-  const interval = Math.max(1, Number(config.intervalHours) || 300);
-  const advance = Math.max(0, Number(config.warningAdvanceHours) || 50);
-  const refMeter = config.referenceHourmeter !== undefined 
-    ? Number(config.referenceHourmeter) 
-    : (target.lastOilChangeHourmeter !== undefined ? Number(target.lastOilChangeHourmeter) : (target.currentHourmeter || 0));
-  
-  const nextScheduled = refMeter + interval;
 
   const vehicleUpdates: Partial<Vehicle> = {
     oilChangeControlActive: active,
-    oilChangeIntervalHours: interval,
-    oilChangeWarningAdvanceHours: advance,
-    lastOilChangeHourmeter: refMeter,
     lastOilChangeDate: config.lastServiceDate || target.lastOilChangeDate || new Date().toISOString().slice(0, 10),
-    nextOilChangeHourmeter: nextScheduled,
-    maintenanceIntervalHours: interval,
-    maintenanceWarningAdvanceHours: advance,
-    lastMaintenanceHourmeter: refMeter,
-    nextMaintenanceHourmeter: nextScheduled,
   };
+
+  if (isKm) {
+    const intervalKm = Math.max(1, Number(config.intervalKm) || Number(config.intervalHours) || 10000);
+    const advanceKm = Math.max(0, Number(config.warningAdvanceKm) || Number(config.warningAdvanceHours) || 1000);
+    const refKm = config.referenceKm !== undefined 
+      ? Number(config.referenceKm)
+      : (target.lastOilChangeKm !== undefined ? Number(target.lastOilChangeKm) : (target.lastMaintenanceKm !== undefined ? Number(target.lastMaintenanceKm) : (target.currentKm || 0)));
+    const nextKm = refKm + intervalKm;
+
+    vehicleUpdates.oilChangeIntervalKm = intervalKm;
+    vehicleUpdates.oilChangeWarningAdvanceKm = advanceKm;
+    vehicleUpdates.lastOilChangeKm = refKm;
+    vehicleUpdates.nextOilChangeKm = nextKm;
+    vehicleUpdates.maintenanceIntervalKm = intervalKm;
+    vehicleUpdates.maintenanceWarningAdvanceKm = advanceKm;
+    vehicleUpdates.lastMaintenanceKm = refKm;
+    vehicleUpdates.nextMaintenanceKm = nextKm;
+  } else {
+    const intervalHours = Math.max(1, Number(config.intervalHours) || 300);
+    const advanceHours = Math.max(0, Number(config.warningAdvanceHours) || 50);
+    const refMeter = config.referenceHourmeter !== undefined 
+      ? Number(config.referenceHourmeter) 
+      : (target.lastOilChangeHourmeter !== undefined ? Number(target.lastOilChangeHourmeter) : (target.currentHourmeter || 0));
+    const nextHours = refMeter + intervalHours;
+
+    vehicleUpdates.oilChangeIntervalHours = intervalHours;
+    vehicleUpdates.oilChangeWarningAdvanceHours = advanceHours;
+    vehicleUpdates.lastOilChangeHourmeter = refMeter;
+    vehicleUpdates.nextOilChangeHourmeter = nextHours;
+    vehicleUpdates.maintenanceIntervalHours = intervalHours;
+    vehicleUpdates.maintenanceWarningAdvanceHours = advanceHours;
+    vehicleUpdates.lastMaintenanceHourmeter = refMeter;
+    vehicleUpdates.nextMaintenanceHourmeter = nextHours;
+  }
 
   await updateVehicle(target.id, vehicleUpdates);
 
   // If deactivated, resolve pending alerts for this equipment
   if (!active) {
-    const existingAlert = cache.alerts.find(a => a.id === `alt-oil-${equipmentId}` || (a.equipmentId === equipmentId && a.type === 'OIL_CHANGE_DUE'));
+    const existingAlert = cache.alerts.find(a => 
+      a.id === `alt-oil-${equipmentId}` || 
+      a.id === `alt-km-${equipmentId}` || 
+      (a.equipmentId === equipmentId && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE'))
+    );
     if (existingAlert && !existingAlert.resolved) {
       await resolveAlert(existingAlert.id);
     }
   }
 
-  logAuditEvent('CONFIGURACAO', 'Troca de Óleo', `Configurou troca de óleo de ${target.model}: Intervalo ${interval}h, Alerta ${advance}h antes, Horímetro ref: ${refMeter}h, Ativo: ${active ? 'Sim' : 'Não'}.`);
+  logAuditEvent('CONFIGURACAO', 'Troca de Óleo', `Configurou troca de óleo de ${target.model}: Intervalo ${isKm ? `${vehicleUpdates.oilChangeIntervalKm} km` : `${vehicleUpdates.oilChangeIntervalHours} h`}, Ativo: ${active ? 'Sim' : 'Não'}.`);
   checkAutomatedAlerts();
   notifyDataUpdated();
 }
@@ -1525,27 +1578,43 @@ export function checkAutomatedAlerts() {
           }
         }
       } else {
-        // Km-based maintenance control
+        // Km-based maintenance / oil change control for vehicles
+        const isOilControlActive = v.oilChangeControlActive !== false;
         const curKm = Number(v.currentKm) || 0;
-        const lastKm = Number(v.lastMaintenanceKm) || 0;
-        const intervalKm = Number(v.maintenanceIntervalKm) || 10000;
-        const warningAdvanceKm = Number(v.maintenanceWarningAdvanceKm) || 1000;
-        const nextKm = v.nextMaintenanceKm !== undefined
-          ? Number(v.nextMaintenanceKm)
-          : (lastKm > 0 ? lastKm + intervalKm : intervalKm);
+        const lastKm = Number(v.lastOilChangeKm) || Number(v.lastMaintenanceKm) || 0;
+        const intervalKm = Number(v.oilChangeIntervalKm) || Number(v.maintenanceIntervalKm) || 10000;
+        const warningAdvanceKm = v.oilChangeWarningAdvanceKm !== undefined ? Number(v.oilChangeWarningAdvanceKm) : (Number(v.maintenanceWarningAdvanceKm) || 1000);
+        const nextKm = v.nextOilChangeKm !== undefined
+          ? Number(v.nextOilChangeKm)
+          : (v.nextMaintenanceKm !== undefined ? Number(v.nextMaintenanceKm) : (lastKm > 0 ? lastKm + intervalKm : intervalKm));
 
-        const kmAlertId = `alt-km-${v.id}`;
-        const existingKmAlert = cache.alerts.find(a => a.id === kmAlertId);
+        const kmAlertId = `alt-oil-${v.id}`;
+        const existingKmAlert = cache.alerts.find(a => a.id === kmAlertId || (a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')));
+
+        if (!isOilControlActive) {
+          if (existingKmAlert && !existingKmAlert.resolved) {
+            const resolvedAlert: SmartAlert = cleanUndefined({
+              ...existingKmAlert,
+              resolved: true,
+              resolvedBy: 'Sistema (Controle Desativado)'
+            });
+            cache.alerts = cache.alerts.map(a => a.id === existingKmAlert.id ? resolvedAlert : a);
+            setDoc(doc(db, 'alerts', existingKmAlert.id), resolvedAlert).catch(console.error);
+          }
+          return;
+        }
 
         if (curKm > 0) {
           if (curKm >= nextKm) {
-            const title = `⚠️ Revisão Vencida: ${v.model} (${v.licensePlate})`;
-            const desc = `Veículo atingiu ${curKm.toLocaleString('pt-BR')} km (limite: ${nextKm.toLocaleString('pt-BR')} km, intervalo de ${intervalKm.toLocaleString('pt-BR')} km).`;
-            
-            if (!existingKmAlert) {
+            // Overdue: 🔴 Troca de óleo / Revisão vencida
+            const delayKm = curKm - nextKm;
+            const title = `🔴 Troca de óleo vencida: ${v.model} (${v.licensePlate || 'Placa'})`;
+            const desc = `Veículo: ${v.model} (${v.licensePlate}). Odômetro atual: ${curKm.toLocaleString('pt-BR')} km. Troca prevista: ${nextKm.toLocaleString('pt-BR')} km. Atraso: ${delayKm.toLocaleString('pt-BR')} km (Intervalo: ${intervalKm.toLocaleString('pt-BR')} km).`;
+
+            if (!existingKmAlert || existingKmAlert.severity !== 'ALTA') {
               const alertObj: SmartAlert = cleanUndefined({
                 id: kmAlertId,
-                type: 'PREVENTIVE_MAINTENANCE',
+                type: 'OIL_CHANGE_DUE',
                 severity: 'ALTA',
                 title,
                 description: desc,
@@ -1554,18 +1623,28 @@ export function checkAutomatedAlerts() {
                 date: new Date().toISOString().slice(0, 10),
                 resolved: false
               });
-              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId)];
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId && !(a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')))];
               setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
+            } else if (!existingKmAlert.resolved && existingKmAlert.description !== desc) {
+              const updated = cleanUndefined({
+                ...existingKmAlert,
+                title,
+                description: desc,
+                severity: 'ALTA' as const
+              }) as SmartAlert;
+              cache.alerts = cache.alerts.map(a => a.id === existingKmAlert.id ? updated : a);
+              setDoc(doc(db, 'alerts', existingKmAlert.id), updated).catch(console.error);
             }
           } else if (curKm >= (nextKm - warningAdvanceKm)) {
+            // Warning: 🟡 Troca de óleo próxima
             const diffKm = nextKm - curKm;
-            const title = `🟡 Revisão Próxima: ${v.model}`;
-            const desc = `Faltam ${diffKm.toLocaleString('pt-BR')} km para a revisão programada de ${nextKm.toLocaleString('pt-BR')} km.`;
+            const title = `🟡 Troca de óleo próxima: ${v.model} (${v.licensePlate || 'Placa'})`;
+            const desc = `Veículo: ${v.model} (${v.licensePlate}). Próxima troca: ${nextKm.toLocaleString('pt-BR')} km. Odômetro atual: ${curKm.toLocaleString('pt-BR')} km. Faltam: ${diffKm.toLocaleString('pt-BR')} km (Intervalo: ${intervalKm.toLocaleString('pt-BR')} km).`;
 
-            if (!existingKmAlert) {
+            if (!existingKmAlert || existingKmAlert.severity !== 'MEDIA') {
               const alertObj: SmartAlert = cleanUndefined({
                 id: kmAlertId,
-                type: 'PREVENTIVE_MAINTENANCE',
+                type: 'OIL_CHANGE_DUE',
                 severity: 'MEDIA',
                 title,
                 description: desc,
@@ -1574,15 +1653,15 @@ export function checkAutomatedAlerts() {
                 date: new Date().toISOString().slice(0, 10),
                 resolved: false
               });
-              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId)];
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId && !(a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')))];
               setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
             }
           } else if (existingKmAlert && !existingKmAlert.resolved) {
-            // Vehicle review has been completed or is well within safe bounds
+            // In day
             const resolvedAlert: SmartAlert = cleanUndefined({
               ...existingKmAlert,
               resolved: true,
-              resolvedBy: 'Sistema (Revisão em Dia)'
+              resolvedBy: 'Sistema (Troca de Óleo em Dia)'
             });
             cache.alerts = cache.alerts.map(a => a.id === existingKmAlert.id ? resolvedAlert : a);
             setDoc(doc(db, 'alerts', existingKmAlert.id), resolvedAlert).catch(console.error);
@@ -1602,7 +1681,7 @@ export async function updateSettings(newSettings: Partial<SystemSettings>): Prom
   cache.settings = { ...cache.settings, ...cleaned };
   notifyDataUpdated();
 
-  await updateDoc(doc(db, 'settings', 'config'), cleaned);
+  await setDoc(doc(db, 'settings', 'config'), cleaned, { merge: true });
   logAuditEvent('CONFIGURACAO', 'Sistema', 'Atualizou as configurações gerais do AndradeAgro.');
   checkAutomatedAlerts();
 }

@@ -18,9 +18,9 @@ interface FleetManagementViewProps {
   currentUser: User;
   maintenanceLogs: MaintenanceLog[];
   fuelLogs: FuelLog[];
-  onAddVehicle: (v: Omit<Vehicle, 'id'>) => void;
-  onUpdateVehicle: (id: string, v: Partial<Vehicle>) => void;
-  onDeleteVehicle: (id: string) => void;
+  onAddVehicle: (v: Omit<Vehicle, 'id'>) => Promise<void> | void;
+  onUpdateVehicle: (id: string, v: Partial<Vehicle>) => Promise<void> | void;
+  onDeleteVehicle: (id: string) => Promise<void> | void;
   onOpenFuelingModalWithEquipment: (equipmentId: string) => void;
   onOpenDigitalSheet?: (vehicle: Vehicle) => void;
   darkMode: boolean;
@@ -50,6 +50,9 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   // New & Edit Equipment Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+  const [isSavingEquipment, setIsSavingEquipment] = useState(false);
+  const [equipmentSaveError, setEquipmentSaveError] = useState<string | null>(null);
+
   const [model, setModel] = useState('');
   const [manufacturer, setManufacturer] = useState('');
   const [year, setYear] = useState(2024);
@@ -73,6 +76,11 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   const [oilChangeWarningAdvanceHours, setOilChangeWarningAdvanceHours] = useState(50);
   const [lastOilChangeHourmeter, setLastOilChangeHourmeter] = useState<number>(0);
 
+  // KM-based Oil Change Configuration State (for Vehicles)
+  const [oilChangeIntervalKm, setOilChangeIntervalKm] = useState(10000);
+  const [oilChangeWarningAdvanceKm, setOilChangeWarningAdvanceKm] = useState(1000);
+  const [lastOilChangeKm, setLastOilChangeKm] = useState<number>(0);
+
   // Quick Oil Change Modal State
   const [oilChangeVehicle, setOilChangeVehicle] = useState<Vehicle | null>(null);
   const [oilHourmeter, setOilHourmeter] = useState<number>(0);
@@ -88,13 +96,24 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
 
   const handleOpenOilModal = (v: Vehicle) => {
     setOilChangeVehicle(v);
-    setOilHourmeter(v.currentHourmeter || 0);
+    const isKm = v.category === 'VEICULO' || v.maintenanceControlType === 'QUILOMETRAGEM';
+    
+    if (isKm) {
+      setOilHourmeter(v.currentKm || 0);
+      setOilNotes('Troca de óleo de motor e filtros do veículo realizada conforme ciclo preventivo.');
+      setOilType('Óleo 5W30 / 15W40 Sintético');
+      setOilQuantityLiters(6);
+      setFiltersReplaced('Filtro de Óleo + Filtro de Ar + Filtro de Combustível');
+    } else {
+      setOilHourmeter(v.currentHourmeter || 0);
+      setOilNotes('Troca de óleo de motor e filtros realizada conforme ciclo preventivo.');
+      setOilType('15W40 Mineral');
+      setOilQuantityLiters(20);
+      setFiltersReplaced('Filtro de Óleo Lubrificante + Filtro de Combustível');
+    }
+
     setOilDate(new Date().toISOString().slice(0, 10));
     setOilCost(0);
-    setOilNotes('Troca de óleo de motor e filtros realizada conforme ciclo preventivo.');
-    setOilType('15W40 Mineral');
-    setOilQuantityLiters(20);
-    setFiltersReplaced('Filtro de Óleo Lubrificante + Filtro de Combustível');
     setOilPerformedBy(currentUser.name || 'Mecânico Responsável');
     setOilSupplier('Oficina Interna AndradeAgro');
   };
@@ -103,6 +122,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     e.preventDefault();
     if (!oilChangeVehicle) return;
     setIsSavingOil(true);
+    const isKm = oilChangeVehicle.category === 'VEICULO' || oilChangeVehicle.maintenanceControlType === 'QUILOMETRAGEM';
+
     try {
       await recordOilChange(
         oilChangeVehicle.id,
@@ -115,7 +136,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
           oilQuantityLiters: oilQuantityLiters > 0 ? oilQuantityLiters : undefined,
           filtersReplaced,
           performedBy: oilPerformedBy || currentUser.name,
-          supplierOrWorkshop: oilSupplier
+          supplierOrWorkshop: oilSupplier,
+          isKm
         }
       );
       setOilChangeVehicle(null);
@@ -151,7 +173,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     });
   }, [vehicles, activeTab, search, sectorFilter]);
 
-  const handleCreateEquipment = (e: React.FormEvent) => {
+  const handleCreateEquipment = async (e: React.FormEvent) => {
     e.preventDefault();
     const operator = users.find(u => u.id === assignedOperatorId);
     const cleanPatrimony = patrimonyCode.trim();
@@ -164,64 +186,92 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
 
     const initialHourmeter = !isRoadVehicle ? currentHourmeter : undefined;
     const refOilMeter = lastOilChangeHourmeter > 0 ? lastOilChangeHourmeter : (initialHourmeter || 0);
-    const interval = Math.max(1, oilChangeIntervalHours || 300);
-    const nextOilMeter = refOilMeter + interval;
+    const intervalHours = Math.max(1, oilChangeIntervalHours || 300);
+    const nextOilMeterHours = refOilMeter + intervalHours;
 
-    onAddVehicle({
-      category: activeTab,
-      model: model.trim(),
-      manufacturer: manufacturer.trim(),
-      year,
-      color: 'Verde/Branco',
-      licensePlate: isRoadVehicle ? cleanPlate : (cleanPatrimony ? `AGRO-${cleanPatrimony}` : 'AGRO-000'),
-      patrimonyCode: !isRoadVehicle ? cleanPatrimony : (cleanPatrimony || undefined),
-      sector,
-      fuelType,
-      tankCapacityLiters: fuelType === 'NENHUM' ? 0 : tankCapacityLiters,
-      sprayingTankCapacityLiters: sprayCapacity > 0 ? sprayCapacity : undefined,
-      hasSprayingTank: sprayCapacity > 0,
-      operationalCapacities: operationalCapacities.length > 0 ? operationalCapacities : undefined,
-      machineSubtype: !isRoadVehicle ? (machineSubtype || (activeTab === 'MAQUINA_AGRICOLA' ? 'OUTRO' : undefined)) : undefined,
-      currentKm: isRoadVehicle ? currentKm : 0,
-      currentHourmeter: initialHourmeter,
-      // Oil change program
-      oilChangeControlActive: !isRoadVehicle ? oilChangeControlActive : false,
-      oilChangeIntervalHours: !isRoadVehicle ? interval : undefined,
-      oilChangeWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
-      lastOilChangeHourmeter: !isRoadVehicle ? refOilMeter : undefined,
-      nextOilChangeHourmeter: !isRoadVehicle ? nextOilMeter : undefined,
-      status: 'ATIVO',
-      assignedOperatorId: operator?.id,
-      assignedOperatorName: operator?.name,
-      photoUrl: photoUrl || 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80'
-    });
+    const intervalKm = Math.max(1, oilChangeIntervalKm || 10000);
+    const advanceKm = Math.max(0, oilChangeWarningAdvanceKm !== undefined ? oilChangeWarningAdvanceKm : 1000);
+    const refOilKm = lastOilChangeKm > 0 ? lastOilChangeKm : (currentKm || 0);
+    const nextOilKm = refOilKm + intervalKm;
 
-    setShowAddModal(false);
-    // Reset
-    setModel('');
-    setManufacturer('');
-    setYear(2024);
-    setLicensePlate('');
-    setPatrimonyCode('');
-    setSector('AGRICOLA');
-    setFuelType('DIESEL_S10');
-    setTankCapacityLiters(100);
-    setSprayingTankCapacityLiters(0);
-    setHasSprayingTank(false);
-    setMachineSubtype(undefined);
-    setOperationalCapacities([]);
-    setCurrentKm(0);
-    setCurrentHourmeter(0);
-    setAssignedOperatorId('');
-    setPhotoUrl('');
-    setOilChangeControlActive(true);
-    setOilChangeIntervalHours(300);
-    setOilChangeWarningAdvanceHours(50);
-    setLastOilChangeHourmeter(0);
+    try {
+      await onAddVehicle({
+        category: activeTab,
+        model: model.trim(),
+        manufacturer: manufacturer.trim(),
+        year,
+        color: 'Verde/Branco',
+        licensePlate: isRoadVehicle ? cleanPlate : (cleanPatrimony ? `AGRO-${cleanPatrimony}` : 'AGRO-000'),
+        patrimonyCode: !isRoadVehicle ? cleanPatrimony : (cleanPatrimony || undefined),
+        sector,
+        fuelType,
+        tankCapacityLiters: fuelType === 'NENHUM' ? 0 : tankCapacityLiters,
+        sprayingTankCapacityLiters: sprayCapacity > 0 ? sprayCapacity : 0,
+        hasSprayingTank: sprayCapacity > 0,
+        operationalCapacities: operationalCapacities || [],
+        machineSubtype: !isRoadVehicle ? (machineSubtype || (activeTab === 'MAQUINA_AGRICOLA' ? 'OUTRO' : undefined)) : undefined,
+        currentKm: isRoadVehicle ? currentKm : 0,
+        currentHourmeter: initialHourmeter,
+        // Oil change program (KM for vehicles, Hours for machines)
+        oilChangeControlActive: oilChangeControlActive,
+        oilChangeIntervalHours: !isRoadVehicle ? intervalHours : undefined,
+        oilChangeWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
+        lastOilChangeHourmeter: !isRoadVehicle ? refOilMeter : undefined,
+        nextOilChangeHourmeter: !isRoadVehicle ? nextOilMeterHours : undefined,
+        maintenanceIntervalHours: !isRoadVehicle ? intervalHours : undefined,
+        maintenanceWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
+        lastMaintenanceHourmeter: !isRoadVehicle ? refOilMeter : undefined,
+        nextMaintenanceHourmeter: !isRoadVehicle ? nextOilMeterHours : undefined,
+        // KM fields for vehicles
+        oilChangeIntervalKm: isRoadVehicle ? intervalKm : undefined,
+        oilChangeWarningAdvanceKm: isRoadVehicle ? advanceKm : undefined,
+        lastOilChangeKm: isRoadVehicle ? refOilKm : undefined,
+        nextOilChangeKm: isRoadVehicle ? nextOilKm : undefined,
+        maintenanceIntervalKm: isRoadVehicle ? intervalKm : undefined,
+        maintenanceWarningAdvanceKm: isRoadVehicle ? advanceKm : undefined,
+        lastMaintenanceKm: isRoadVehicle ? refOilKm : undefined,
+        nextMaintenanceKm: isRoadVehicle ? nextOilKm : undefined,
+        maintenanceControlType: isRoadVehicle ? 'QUILOMETRAGEM' : 'HORIMETRO',
+        status: 'ATIVO',
+        assignedOperatorId: operator?.id,
+        assignedOperatorName: operator?.name,
+        photoUrl: photoUrl || 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80'
+      });
+
+      setShowAddModal(false);
+      // Reset
+      setModel('');
+      setManufacturer('');
+      setYear(2024);
+      setLicensePlate('');
+      setPatrimonyCode('');
+      setSector('AGRICOLA');
+      setFuelType('DIESEL_S10');
+      setTankCapacityLiters(100);
+      setSprayingTankCapacityLiters(0);
+      setHasSprayingTank(false);
+      setMachineSubtype(undefined);
+      setOperationalCapacities([]);
+      setCurrentKm(0);
+      setCurrentHourmeter(0);
+      setAssignedOperatorId('');
+      setPhotoUrl('');
+      setOilChangeControlActive(true);
+      setOilChangeIntervalHours(300);
+      setOilChangeWarningAdvanceHours(50);
+      setLastOilChangeHourmeter(0);
+      setOilChangeIntervalKm(10000);
+      setOilChangeWarningAdvanceKm(1000);
+      setLastOilChangeKm(0);
+    } catch (err: any) {
+      console.error('Erro ao adicionar equipamento:', err);
+      alert('Erro ao cadastrar equipamento: ' + (err?.message || 'Falha ao salvar no banco de dados.'));
+    }
   };
 
   const handleOpenEditModal = (v: Vehicle) => {
     setEditingVehicle(v);
+    setEquipmentSaveError(null);
     setModel(v.model || '');
     setManufacturer(v.manufacturer || '');
     setYear(v.year || 2024);
@@ -238,61 +288,90 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     setCurrentHourmeter(v.currentHourmeter || 0);
     setAssignedOperatorId(v.assignedOperatorId || '');
     setPhotoUrl(v.photoUrl || '');
-    // Load oil change config
+    // Load oil change config for hours
     setOilChangeControlActive(v.oilChangeControlActive !== false);
     setOilChangeIntervalHours(v.oilChangeIntervalHours || v.maintenanceIntervalHours || 300);
     setOilChangeWarningAdvanceHours(v.oilChangeWarningAdvanceHours !== undefined ? v.oilChangeWarningAdvanceHours : (v.maintenanceWarningAdvanceHours || 50));
     setLastOilChangeHourmeter(v.lastOilChangeHourmeter !== undefined ? v.lastOilChangeHourmeter : (v.currentHourmeter || 0));
+    // Load oil change config for KM
+    setOilChangeIntervalKm(v.oilChangeIntervalKm || v.maintenanceIntervalKm || 10000);
+    setOilChangeWarningAdvanceKm(v.oilChangeWarningAdvanceKm !== undefined ? v.oilChangeWarningAdvanceKm : (v.maintenanceWarningAdvanceKm || 1000));
+    setLastOilChangeKm(v.lastOilChangeKm !== undefined ? v.lastOilChangeKm : (v.currentKm || 0));
   };
 
-  const handleUpdateEquipment = (e: React.FormEvent) => {
+  const handleUpdateEquipment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingVehicle) return;
 
-    const operator = users.find(u => u.id === assignedOperatorId);
-    const cleanPatrimony = patrimonyCode.trim();
-    const cleanPlate = licensePlate.trim();
-    const isRoadVehicle = editingVehicle.category === 'VEICULO';
+    setIsSavingEquipment(true);
+    setEquipmentSaveError(null);
 
-    // Sync spray capacity from operational capacities if defined
-    const sprayCapObj = operationalCapacities.find(c => c.type === 'PULVERIZACAO');
-    const sprayCapacity = sprayCapObj ? (Number(sprayCapObj.value) || 0) : (hasSprayingTank ? sprayingTankCapacityLiters : 0);
+    try {
+      const operator = users.find(u => u.id === assignedOperatorId);
+      const cleanPatrimony = patrimonyCode.trim();
+      const cleanPlate = licensePlate.trim();
+      const isRoadVehicle = editingVehicle.category === 'VEICULO';
 
-    const interval = Math.max(1, oilChangeIntervalHours || 300);
-    const refMeter = lastOilChangeHourmeter;
-    const nextOilMeter = refMeter + interval;
+      // Sync spray capacity from operational capacities if defined
+      const sprayCapObj = operationalCapacities.find(c => c.type === 'PULVERIZACAO');
+      const sprayCapacity = sprayCapObj ? (Number(sprayCapObj.value) || 0) : (hasSprayingTank ? sprayingTankCapacityLiters : 0);
 
-    onUpdateVehicle(editingVehicle.id, {
-      model: model.trim(),
-      manufacturer: manufacturer.trim(),
-      year,
-      licensePlate: isRoadVehicle ? cleanPlate : (cleanPatrimony ? `AGRO-${cleanPatrimony}` : editingVehicle.licensePlate),
-      patrimonyCode: !isRoadVehicle ? cleanPatrimony : (cleanPatrimony || undefined),
-      sector,
-      fuelType,
-      tankCapacityLiters: fuelType === 'NENHUM' ? 0 : tankCapacityLiters,
-      sprayingTankCapacityLiters: sprayCapacity > 0 ? sprayCapacity : undefined,
-      hasSprayingTank: sprayCapacity > 0,
-      operationalCapacities: operationalCapacities.length > 0 ? operationalCapacities : undefined,
-      machineSubtype: !isRoadVehicle ? machineSubtype : undefined,
-      currentKm: isRoadVehicle ? currentKm : (editingVehicle.currentKm || 0),
-      currentHourmeter: !isRoadVehicle ? currentHourmeter : editingVehicle.currentHourmeter,
-      // Oil change updates
-      oilChangeControlActive: !isRoadVehicle ? oilChangeControlActive : false,
-      oilChangeIntervalHours: !isRoadVehicle ? interval : undefined,
-      oilChangeWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
-      lastOilChangeHourmeter: !isRoadVehicle ? refMeter : undefined,
-      nextOilChangeHourmeter: !isRoadVehicle ? nextOilMeter : undefined,
-      maintenanceIntervalHours: !isRoadVehicle ? interval : undefined,
-      maintenanceWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
-      lastMaintenanceHourmeter: !isRoadVehicle ? refMeter : undefined,
-      nextMaintenanceHourmeter: !isRoadVehicle ? nextOilMeter : undefined,
-      assignedOperatorId: assignedOperatorId || undefined,
-      assignedOperatorName: operator?.name,
-      photoUrl: photoUrl || undefined,
-    });
+      const intervalHours = Math.max(1, oilChangeIntervalHours || 300);
+      const refMeterHours = lastOilChangeHourmeter;
+      const nextOilMeterHours = refMeterHours + intervalHours;
 
-    setEditingVehicle(null);
+      const intervalKm = Math.max(1, oilChangeIntervalKm || 10000);
+      const advanceKm = Math.max(0, oilChangeWarningAdvanceKm !== undefined ? oilChangeWarningAdvanceKm : 1000);
+      const refMeterKm = lastOilChangeKm;
+      const nextOilMeterKm = refMeterKm + intervalKm;
+
+      await onUpdateVehicle(editingVehicle.id, {
+        model: model.trim(),
+        manufacturer: manufacturer.trim(),
+        year,
+        licensePlate: isRoadVehicle ? cleanPlate : (cleanPatrimony ? `AGRO-${cleanPatrimony}` : editingVehicle.licensePlate),
+        patrimonyCode: !isRoadVehicle ? cleanPatrimony : (cleanPatrimony || undefined),
+        sector,
+        fuelType,
+        tankCapacityLiters: fuelType === 'NENHUM' ? 0 : tankCapacityLiters,
+        sprayingTankCapacityLiters: sprayCapacity > 0 ? sprayCapacity : 0,
+        hasSprayingTank: sprayCapacity > 0,
+        operationalCapacities: operationalCapacities || [],
+        machineSubtype: !isRoadVehicle ? machineSubtype : undefined,
+        currentKm: isRoadVehicle ? currentKm : (editingVehicle.currentKm || 0),
+        currentHourmeter: !isRoadVehicle ? currentHourmeter : editingVehicle.currentHourmeter,
+        // Oil change updates
+        oilChangeControlActive: oilChangeControlActive,
+        oilChangeIntervalHours: !isRoadVehicle ? intervalHours : undefined,
+        oilChangeWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
+        lastOilChangeHourmeter: !isRoadVehicle ? refMeterHours : undefined,
+        nextOilChangeHourmeter: !isRoadVehicle ? nextOilMeterHours : undefined,
+        maintenanceIntervalHours: !isRoadVehicle ? intervalHours : undefined,
+        maintenanceWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
+        lastMaintenanceHourmeter: !isRoadVehicle ? refMeterHours : undefined,
+        nextMaintenanceHourmeter: !isRoadVehicle ? nextOilMeterHours : undefined,
+        // KM fields for vehicles
+        oilChangeIntervalKm: isRoadVehicle ? intervalKm : undefined,
+        oilChangeWarningAdvanceKm: isRoadVehicle ? advanceKm : undefined,
+        lastOilChangeKm: isRoadVehicle ? refMeterKm : undefined,
+        nextOilChangeKm: isRoadVehicle ? nextOilMeterKm : undefined,
+        maintenanceIntervalKm: isRoadVehicle ? intervalKm : undefined,
+        maintenanceWarningAdvanceKm: isRoadVehicle ? advanceKm : undefined,
+        lastMaintenanceKm: isRoadVehicle ? refMeterKm : undefined,
+        nextMaintenanceKm: isRoadVehicle ? nextOilMeterKm : undefined,
+        maintenanceControlType: isRoadVehicle ? 'QUILOMETRAGEM' : 'HORIMETRO',
+        assignedOperatorId: assignedOperatorId || '',
+        assignedOperatorName: operator?.name || '',
+        photoUrl: photoUrl || '',
+      });
+
+      setEditingVehicle(null);
+    } catch (err: any) {
+      console.error('Erro ao atualizar equipamento:', err);
+      setEquipmentSaveError(err?.message || 'Falha ao salvar as alterações do equipamento no banco de dados.');
+    } finally {
+      setIsSavingEquipment(false);
+    }
   };
 
   const handlePrintBadge = async (v: Vehicle) => {
@@ -571,36 +650,70 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   </div>
                 )}
 
-                {/* 300h Oil Change Tracker on Tractors & Farm Machines */}
-                {v.category !== 'VEICULO' && (
-                  <div className="pt-1.5 border-t border-emerald-800/20">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-gray-600 dark:text-emerald-300 flex items-center gap-1">
-                        <Droplet className="w-3.5 h-3.5 text-amber-500" /> Troca de Óleo:
-                      </span>
-                      {(() => {
-                        const isOilActive = v.oilChangeControlActive !== false;
-                        if (!isOilActive) {
-                          return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-500/20 text-slate-400">Desativado</span>;
-                        }
-                        const curH = v.currentHourmeter || 0;
-                        const interval = v.oilChangeIntervalHours || v.maintenanceIntervalHours || 300;
-                        const advance = v.oilChangeWarningAdvanceHours !== undefined ? v.oilChangeWarningAdvanceHours : (v.maintenanceWarningAdvanceHours || 50);
-                        const lastH = v.lastOilChangeHourmeter !== undefined ? v.lastOilChangeHourmeter : (v.lastMaintenanceHourmeter || 0);
-                        const nextH = v.nextOilChangeHourmeter !== undefined ? v.nextOilChangeHourmeter : (lastH > 0 ? lastH + interval : interval);
-                        const rem = nextH - curH;
+                {/* Oil Change Tracker for Vehicles (KM) and Machines (Hours) */}
+                {(() => {
+                  const isKm = v.category === 'VEICULO' || v.maintenanceControlType === 'QUILOMETRAGEM';
+                  const isOilActive = v.oilChangeControlActive !== false;
+                  
+                  if (!isOilActive) {
+                    return (
+                      <div className="pt-1.5 border-t border-emerald-800/20 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-gray-600 dark:text-emerald-300 flex items-center gap-1">
+                          <Droplet className="w-3.5 h-3.5 text-amber-500" /> Troca de Óleo:
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-500/20 text-slate-400">Desativado</span>
+                      </div>
+                    );
+                  }
 
-                        if (rem <= 0) {
-                          return <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-500 text-white animate-pulse" title={`Vencida há ${Math.abs(rem)}h (Limite: ${nextH}h)`}>VENCIDA ({Math.abs(rem)}h)</span>;
-                        } else if (rem <= advance) {
-                          return <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-gray-950" title={`Trocar em ${rem}h (Programada: ${nextH}h)`}>Trocar em {rem}h</span>;
-                        } else {
-                          return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-700 dark:text-emerald-300" title={`Próxima em ${nextH}h`}>Em {rem}h ({nextH}h)</span>;
-                        }
-                      })()}
+                  const curMeter = isKm ? (v.currentKm || 0) : (v.currentHourmeter || 0);
+                  const unit = isKm ? 'km' : 'h';
+                  const interval = isKm 
+                    ? (v.oilChangeIntervalKm || v.maintenanceIntervalKm || 10000) 
+                    : (v.oilChangeIntervalHours || v.maintenanceIntervalHours || 300);
+                  const advance = isKm 
+                    ? (v.oilChangeWarningAdvanceKm !== undefined ? v.oilChangeWarningAdvanceKm : (v.maintenanceWarningAdvanceKm || 1000))
+                    : (v.oilChangeWarningAdvanceHours !== undefined ? v.oilChangeWarningAdvanceHours : (v.maintenanceWarningAdvanceHours || 50));
+                  const lastMeter = isKm 
+                    ? (v.lastOilChangeKm !== undefined ? v.lastOilChangeKm : (v.lastMaintenanceKm || 0))
+                    : (v.lastOilChangeHourmeter !== undefined ? v.lastOilChangeHourmeter : (v.lastMaintenanceHourmeter || 0));
+                  const nextMeter = isKm 
+                    ? (v.nextOilChangeKm !== undefined ? v.nextOilChangeKm : (lastMeter > 0 ? lastMeter + interval : interval))
+                    : (v.nextOilChangeHourmeter !== undefined ? v.nextOilChangeHourmeter : (lastMeter > 0 ? lastMeter + interval : interval));
+                  const rem = nextMeter - curMeter;
+
+                  return (
+                    <div className="pt-1.5 border-t border-emerald-800/20">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-gray-600 dark:text-emerald-300 flex items-center gap-1">
+                          <Droplet className="w-3.5 h-3.5 text-amber-500" /> Troca de Óleo:
+                        </span>
+                        {rem <= 0 ? (
+                          <span 
+                            className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-red-500 text-white animate-pulse" 
+                            title={`Vencida há ${Math.abs(rem).toLocaleString('pt-BR')}${unit} (Limite: ${nextMeter.toLocaleString('pt-BR')}${unit})`}
+                          >
+                            VENCIDA ({Math.abs(rem).toLocaleString('pt-BR')}{unit})
+                          </span>
+                        ) : rem <= advance ? (
+                          <span 
+                            className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-gray-950" 
+                            title={`Trocar em ${rem.toLocaleString('pt-BR')}${unit} (Programada: ${nextMeter.toLocaleString('pt-BR')}${unit})`}
+                          >
+                            Trocar em {rem.toLocaleString('pt-BR')}{unit}
+                          </span>
+                        ) : (
+                          <span 
+                            className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-700 dark:text-emerald-300" 
+                            title={`Próxima em ${nextMeter.toLocaleString('pt-BR')}${unit}`}
+                          >
+                            Em {rem.toLocaleString('pt-BR')}{unit} ({nextMeter.toLocaleString('pt-BR')}{unit})
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
               {/* Card Actions */}
@@ -618,12 +731,12 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                   <Eye className="w-3.5 h-3.5" /> Ficha Digital
                 </button>
 
-                {/* Quick Oil Change Button for Tractors & Machines */}
-                {v.category !== 'VEICULO' && canEdit && (
+                {/* Quick Oil Change Button for All Vehicles & Machines */}
+                {canEdit && (
                   <button
                     onClick={() => handleOpenOilModal(v)}
                     className="px-2.5 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-700 text-[#FACC15] text-xs font-bold flex items-center gap-1 min-h-[36px]"
-                    title="Registrar Troca de Óleo (Ciclo 300h)"
+                    title={`Registrar Troca de Óleo / Revisão (${v.category === 'VEICULO' ? 'Quilometragem' : 'Horímetro'})`}
                   >
                     <Wrench className="w-3.5 h-3.5" /> Trocar Óleo
                   </button>
@@ -904,28 +1017,85 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 darkMode={darkMode}
               />
 
-              {/* Plano de Manutenção Preventiva (Troca de Óleo por Horímetro) */}
-              {activeTab !== 'VEICULO' && (
-                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-amber-900 dark:text-amber-200 flex items-center gap-1.5 text-xs">
-                      <Droplet className="w-4 h-4 text-amber-500" />
-                      <span>Plano de Troca de Óleo por Horas</span>
+              {/* Plano de Manutenção Preventiva (Troca de Óleo por Horímetro ou Quilometragem) */}
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-amber-900 dark:text-amber-200 flex items-center gap-1.5 text-xs">
+                    <Droplet className="w-4 h-4 text-amber-500" />
+                    <span>
+                      {activeTab === 'VEICULO' ? 'Plano de Troca de Óleo por Quilometragem (KM)' : 'Plano de Troca de Óleo por Horas'}
                     </span>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={oilChangeControlActive}
-                        onChange={(e) => setOilChangeControlActive(e.target.checked)}
-                        className="rounded border-amber-500 text-amber-600 focus:ring-amber-500"
-                      />
-                      <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
-                        {oilChangeControlActive ? 'Ativo' : 'Desativado'}
-                      </span>
-                    </label>
-                  </div>
+                  </span>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={oilChangeControlActive}
+                      onChange={(e) => setOilChangeControlActive(e.target.checked)}
+                      className="rounded border-amber-500 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                      {oilChangeControlActive ? 'Ativo' : 'Desativado'}
+                    </span>
+                  </label>
+                </div>
 
-                  {oilChangeControlActive && (
+                {oilChangeControlActive && (
+                  activeTab === 'VEICULO' ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                      <div>
+                        <label className="block font-bold text-[11px] mb-1 text-slate-700 dark:text-emerald-200">
+                          Intervalo Padrão (KM)
+                        </label>
+                        <input
+                          type="number"
+                          min="100"
+                          step="500"
+                          value={oilChangeIntervalKm}
+                          onChange={(e) => setOilChangeIntervalKm(parseInt(e.target.value) || 10000)}
+                          className={`w-full p-2 rounded-xl border text-xs font-bold ${
+                            darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
+                          }`}
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">Padrão rodoviário: 10.000 km</p>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-[11px] mb-1 text-slate-700 dark:text-emerald-200">
+                          Alerta Prévio (KM)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="100"
+                          value={oilChangeWarningAdvanceKm}
+                          onChange={(e) => setOilChangeWarningAdvanceKm(parseInt(e.target.value) || 1000)}
+                          className={`w-full p-2 rounded-xl border text-xs font-bold ${
+                            darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
+                          }`}
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com 1.000 km antes</p>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-[11px] mb-1 text-slate-700 dark:text-emerald-200">
+                          KM de Referência da Última Troca
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={lastOilChangeKm}
+                          onChange={(e) => setLastOilChangeKm(parseFloat(e.target.value) || 0)}
+                          placeholder="0 ou da última troca"
+                          className={`w-full p-2 rounded-xl border text-xs font-bold ${
+                            darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
+                          }`}
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          Próxima troca: <strong>{((lastOilChangeKm || 0) + (oilChangeIntervalKm || 10000)).toLocaleString('pt-BR')} km</strong>
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                       <div>
                         <label className="block font-bold text-[11px] mb-1 text-slate-700 dark:text-emerald-200">
@@ -978,9 +1148,9 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         </p>
                       </div>
                     </div>
-                  )}
-                </div>
-              )}
+                  )
+                )}
+              </div>
 
               <div>
                 <label className="block font-bold mb-1">Operador Atribuído (Opcional)</label>
@@ -1148,28 +1318,84 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 darkMode={darkMode}
               />
 
-              {/* Plano de Manutenção Preventiva (Troca de Óleo por Horímetro) */}
-              {editingVehicle.category !== 'VEICULO' && (
-                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-amber-900 dark:text-amber-200 flex items-center gap-1.5 text-xs">
-                      <Droplet className="w-4 h-4 text-amber-500" />
-                      <span>Configurar Troca de Óleo por Horas</span>
+              {/* Plano de Manutenção Preventiva (Troca de Óleo por Horímetro ou KM) */}
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-amber-900 dark:text-amber-200 flex items-center gap-1.5 text-xs">
+                    <Droplet className="w-4 h-4 text-amber-500" />
+                    <span>
+                      {editingVehicle.category === 'VEICULO' ? 'Configurar Troca de Óleo por Quilometragem (KM)' : 'Configurar Troca de Óleo por Horas'}
                     </span>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={oilChangeControlActive}
-                        onChange={(e) => setOilChangeControlActive(e.target.checked)}
-                        className="rounded border-amber-500 text-amber-600 focus:ring-amber-500"
-                      />
-                      <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
-                        {oilChangeControlActive ? 'Ativo' : 'Desativado'}
-                      </span>
-                    </label>
-                  </div>
+                  </span>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={oilChangeControlActive}
+                      onChange={(e) => setOilChangeControlActive(e.target.checked)}
+                      className="rounded border-amber-500 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="text-[11px] font-bold text-amber-900 dark:text-amber-200">
+                      {oilChangeControlActive ? 'Ativo' : 'Desativado'}
+                    </span>
+                  </label>
+                </div>
 
-                  {oilChangeControlActive && (
+                {oilChangeControlActive && (
+                  editingVehicle.category === 'VEICULO' ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                      <div>
+                        <label className="block font-bold text-[11px] mb-1 text-slate-700 dark:text-emerald-200">
+                          Intervalo Padrão (KM)
+                        </label>
+                        <input
+                          type="number"
+                          min="100"
+                          step="500"
+                          value={oilChangeIntervalKm}
+                          onChange={(e) => setOilChangeIntervalKm(parseInt(e.target.value) || 10000)}
+                          className={`w-full p-2 rounded-xl border text-xs font-bold ${
+                            darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
+                          }`}
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">Padrão rodoviário: 10.000 km</p>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-[11px] mb-1 text-slate-700 dark:text-emerald-200">
+                          Alerta Prévio (KM)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="100"
+                          value={oilChangeWarningAdvanceKm}
+                          onChange={(e) => setOilChangeWarningAdvanceKm(parseInt(e.target.value) || 1000)}
+                          className={`w-full p-2 rounded-xl border text-xs font-bold ${
+                            darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
+                          }`}
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com 1.000 km antes</p>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold text-[11px] mb-1 text-slate-700 dark:text-emerald-200">
+                          Odômetro da Última Troca / Ref (KM)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={lastOilChangeKm}
+                          onChange={(e) => setLastOilChangeKm(parseFloat(e.target.value) || 0)}
+                          className={`w-full p-2 rounded-xl border text-xs font-bold ${
+                            darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
+                          }`}
+                        />
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          Próxima troca: <strong>{((lastOilChangeKm || 0) + (oilChangeIntervalKm || 10000)).toLocaleString('pt-BR')} km</strong>
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                       <div>
                         <label className="block font-bold text-[11px] mb-1 text-slate-700 dark:text-emerald-200">
@@ -1217,13 +1443,13 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                           }`}
                         />
                         <p className="text-[10px] text-slate-500 mt-0.5">
-                          Próxima troca calculada: <strong>{(lastOilChangeHourmeter || 0) + (oilChangeIntervalHours || 300)}h</strong>
+                          Próxima troca calculada: <strong>{((lastOilChangeHourmeter || 0) + (oilChangeIntervalHours || 300)).toLocaleString('pt-BR')}h</strong>
                         </p>
                       </div>
                     </div>
-                  )}
-                </div>
-              )}
+                  )
+                )}
+              </div>
 
               <div>
                 <label className="block font-bold mb-1">Operador Atribuído (Opcional)</label>
@@ -1250,19 +1476,28 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 />
               </div>
 
+              {equipmentSaveError && (
+                <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-bold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{equipmentSaveError}</span>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setEditingVehicle(null)}
-                  className="px-3 py-1.5 rounded-xl hover:bg-emerald-500/10"
+                  disabled={isSavingEquipment}
+                  className="px-3 py-1.5 rounded-xl hover:bg-emerald-500/10 disabled:opacity-50"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-amber-500 text-gray-950 font-bold"
+                  disabled={isSavingEquipment}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold disabled:opacity-60 flex items-center gap-1.5 shadow-md"
                 >
-                  Salvar Alterações
+                  {isSavingEquipment ? 'Salvando...' : 'Salvar Alterações'}
                 </button>
               </div>
             </form>
@@ -1283,7 +1518,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 </div>
                 <div>
                   <h3 className="font-extrabold text-sm text-gray-900 dark:text-emerald-100">
-                    Registrar Troca de Óleo
+                    Registrar Troca de Óleo / Manutenção
                   </h3>
                   <p className="text-[11px] text-gray-500 dark:text-emerald-400">
                     {oilChangeVehicle.model} ({oilChangeVehicle.patrimonyCode || oilChangeVehicle.licensePlate})
@@ -1299,24 +1534,42 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
             </div>
 
             <form onSubmit={handleSaveOilChange} className="space-y-3.5 text-xs">
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-1">
-                <div className="flex justify-between items-center">
-                  <p className="font-black text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-amber-500" />
-                    <span>Ciclo Preventivo: {oilChangeVehicle.oilChangeIntervalHours || oilChangeVehicle.maintenanceIntervalHours || 300} Horas</span>
-                  </p>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300">
-                    Última: {oilChangeVehicle.lastOilChangeHourmeter || 0}h
-                  </span>
-                </div>
-                <p className="text-[11px] text-amber-800 dark:text-amber-300">
-                  Ao registrar esta troca, o sistema calculará a próxima manutenção programada para <strong>{oilHourmeter + (oilChangeVehicle.oilChangeIntervalHours || 300)} h</strong> e atualizará o horímetro e histórico do equipamento.
-                </p>
-              </div>
+              {(() => {
+                const isKm = oilChangeVehicle.category === 'VEICULO' || oilChangeVehicle.maintenanceControlType === 'QUILOMETRAGEM';
+                const interval = isKm 
+                  ? (oilChangeVehicle.oilChangeIntervalKm || oilChangeVehicle.maintenanceIntervalKm || 10000)
+                  : (oilChangeVehicle.oilChangeIntervalHours || oilChangeVehicle.maintenanceIntervalHours || 300);
+                const last = isKm 
+                  ? (oilChangeVehicle.lastOilChangeKm !== undefined ? oilChangeVehicle.lastOilChangeKm : (oilChangeVehicle.lastMaintenanceKm || 0))
+                  : (oilChangeVehicle.lastOilChangeHourmeter !== undefined ? oilChangeVehicle.lastOilChangeHourmeter : (oilChangeVehicle.lastMaintenanceHourmeter || 0));
+                const unit = isKm ? 'km' : 'h';
+                const nextCalc = (oilHourmeter || 0) + interval;
+
+                return (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-1">
+                    <div className="flex justify-between items-center">
+                      <p className="font-black text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-amber-500" />
+                        <span>Ciclo Preventivo: {interval.toLocaleString('pt-BR')} {unit === 'km' ? 'Quilômetros (KM)' : 'Horas'}</span>
+                      </p>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                        Última: {last.toLocaleString('pt-BR')}{unit}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                      Ao registrar esta troca, o sistema calculará a próxima manutenção programada para <strong>{nextCalc.toLocaleString('pt-BR')} {unit}</strong> e atualizará o odômetro/horímetro e histórico do equipamento.
+                    </p>
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block font-bold mb-1">Horímetro Atual no Serviço (h) *</label>
+                  <label className="block font-bold mb-1">
+                    {oilChangeVehicle.category === 'VEICULO' || oilChangeVehicle.maintenanceControlType === 'QUILOMETRAGEM'
+                      ? 'Odômetro Atual no Serviço (KM) *'
+                      : 'Horímetro Atual no Serviço (h) *'}
+                  </label>
                   <input
                     type="number"
                     step="0.1"

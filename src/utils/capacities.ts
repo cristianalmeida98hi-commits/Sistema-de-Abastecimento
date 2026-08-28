@@ -101,7 +101,7 @@ export function getMachineSubtypeName(subtype?: MachineSubtype | string): string
  * tankCapacityLiters ou sprayingTankCapacityLiters.
  */
 export function getConsolidatedCapacities(vehicle: Vehicle): OperationalCapacity[] {
-  if (vehicle.operationalCapacities && vehicle.operationalCapacities.length > 0) {
+  if (Array.isArray(vehicle.operationalCapacities)) {
     return vehicle.operationalCapacities;
   }
 

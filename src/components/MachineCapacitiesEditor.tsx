@@ -47,62 +47,69 @@ export const MachineCapacitiesEditor: React.FC<MachineCapacitiesEditorProps> = (
   const isHarvester = machineSubtype === 'COLHEITADEIRA' || sector === 'COLHEITA';
   const isSeeder = machineSubtype === 'PLANTADEIRA_SEMEADORA';
 
-  // Sugestões inteligentes iniciais caso a lista esteja vazia
-  useEffect(() => {
-    if (capacities.length === 0) {
-      const initial: OperationalCapacity[] = [];
+  // Função para carregar sugestões padrão caso o usuário solicite
+  const handleApplyDefaultSuggestions = () => {
+    const suggestions: OperationalCapacity[] = [];
 
-      if (isSprayer) {
-        initial.push({
-          id: `cap-${Date.now()}-spray`,
-          type: 'PULVERIZACAO',
-          name: 'Tanque de Pulverização (Calda)',
-          value: 2000,
-          unit: 'L',
-          notes: 'Capacidade nominal de calda'
-        });
-      } else if (isFertilizerDistributor) {
-        initial.push({
-          id: `cap-${Date.now()}-adubo`,
-          type: 'ADUBO',
-          name: 'Capacidade do Tanque / Caçamba de Adubo',
-          value: 1500,
-          unit: 'kg',
-          notes: 'Adubo granulado e calcário'
-        });
-      } else if (isHarvester) {
-        initial.push({
-          id: `cap-${Date.now()}-grain`,
-          type: 'SEMENTE',
-          name: 'Tanque Graneleiro',
-          value: 10500,
-          unit: 'L',
-          notes: 'Capacidade de grãos'
-        });
-      } else if (isSeeder) {
-        initial.push({
-          id: `cap-${Date.now()}-seed`,
-          type: 'SEMENTE',
-          name: 'Depósito de Sementes',
-          value: 1000,
-          unit: 'kg',
-          notes: 'Sementes'
-        });
-        initial.push({
-          id: `cap-${Date.now()}-adubo-seed`,
-          type: 'ADUBO',
-          name: 'Depósito de Fertilizante',
-          value: 1200,
-          unit: 'kg',
-          notes: 'Adubo no plantio'
-        });
-      }
-
-      if (initial.length > 0) {
-        onChangeCapacities(initial);
-      }
+    if (isSprayer) {
+      suggestions.push({
+        id: `cap-${Date.now()}-spray`,
+        type: 'PULVERIZACAO',
+        name: 'Tanque de Pulverização (Calda)',
+        value: 2000,
+        unit: 'L',
+        notes: 'Capacidade nominal de calda'
+      });
+    } else if (isFertilizerDistributor) {
+      suggestions.push({
+        id: `cap-${Date.now()}-adubo`,
+        type: 'ADUBO',
+        name: 'Capacidade do Tanque / Caçamba de Adubo',
+        value: 1500,
+        unit: 'kg',
+        notes: 'Adubo granulado e calcário'
+      });
+    } else if (isHarvester) {
+      suggestions.push({
+        id: `cap-${Date.now()}-grain`,
+        type: 'SEMENTE',
+        name: 'Tanque Graneleiro',
+        value: 10500,
+        unit: 'L',
+        notes: 'Capacidade de grãos'
+      });
+    } else if (isSeeder) {
+      suggestions.push({
+        id: `cap-${Date.now()}-seed`,
+        type: 'SEMENTE',
+        name: 'Depósito de Sementes',
+        value: 1000,
+        unit: 'kg',
+        notes: 'Sementes'
+      });
+      suggestions.push({
+        id: `cap-${Date.now()}-adubo-seed`,
+        type: 'ADUBO',
+        name: 'Depósito de Fertilizante',
+        value: 1200,
+        unit: 'kg',
+        notes: 'Adubo no plantio'
+      });
+    } else {
+      suggestions.push({
+        id: `cap-${Date.now()}-general`,
+        type: 'OUTRO',
+        name: 'Capacidade de Trabalho',
+        value: 1000,
+        unit: 'L',
+        notes: ''
+      });
     }
-  }, [machineSubtype, sector]);
+
+    if (suggestions.length > 0) {
+      onChangeCapacities(suggestions);
+    }
+  };
 
   // Função para adicionar uma nova capacidade
   const handleAddCapacity = (type: OperationalCapacityType, defaultName?: string, defaultUnit?: string, defaultValue?: number) => {
@@ -328,10 +335,23 @@ export const MachineCapacitiesEditor: React.FC<MachineCapacitiesEditorProps> = (
       {/* 2. CAPACIDADES OPERACIONAIS ADICIONAIS / CUSTOMIZADAS */}
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <label className="text-xs font-extrabold text-slate-800 dark:text-emerald-200 flex items-center gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
-            Capacidades Operacionais Cadastradas ({capacities.length})
-          </label>
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-extrabold text-slate-800 dark:text-emerald-200 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+              Capacidades Operacionais Cadastradas ({capacities.length})
+            </label>
+            {capacities.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onChangeCapacities([])}
+                className="px-2 py-0.5 rounded-md text-[10px] font-bold text-red-600 dark:text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 transition-colors flex items-center gap-1"
+                title="Remover todas as capacidades cadastradas"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Limpar todas</span>
+              </button>
+            )}
+          </div>
 
           {/* Quick preset buttons */}
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -397,14 +417,24 @@ export const MachineCapacitiesEditor: React.FC<MachineCapacitiesEditorProps> = (
 
         {/* Lista de Capacidades Cadastradas */}
         {capacities.length === 0 ? (
-          <div className="p-4 rounded-xl border border-dashed text-center space-y-2 border-slate-300 dark:border-emerald-800">
+          <div className="p-4 rounded-xl border border-dashed text-center space-y-2.5 border-slate-300 dark:border-emerald-800">
             <Package className="w-6 h-6 text-slate-400 mx-auto" />
-            <p className="text-xs text-slate-500 dark:text-emerald-400">
+            <p className="text-xs text-slate-500 dark:text-emerald-400 font-bold">
               Nenhuma capacidade adicional cadastrada para este equipamento.
             </p>
-            <p className="text-[11px] text-slate-400">
-              Clique nos atalhos acima (🧪 Pulverização, 🌾 Adubo, 🌱 Sementes, etc.) para registrar as capacidades de trabalho.
+            <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+              Clique nos atalhos acima (🧪 Pulverização, 🌾 Adubo, 🌱 Sementes, etc.) ou adicione sugestões padrão:
             </p>
+            <div>
+              <button
+                type="button"
+                onClick={handleApplyDefaultSuggestions}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-800 dark:text-emerald-200 border border-emerald-500/40 text-xs font-bold transition-all flex items-center gap-1.5 mx-auto"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Preencher capacidades sugeridas para este tipo</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-2.5">

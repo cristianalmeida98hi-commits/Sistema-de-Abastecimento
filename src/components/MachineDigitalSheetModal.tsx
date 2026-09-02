@@ -414,8 +414,8 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
   // Save Maintenance Form
   const handleSaveMaintenanceForm = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mntTitle.trim() || !mntDesc.trim()) {
-      alert('Por favor, preencha o título e a descrição do serviço.');
+    if (!mntTitle.trim()) {
+      alert('Por favor, preencha o título do serviço.');
       return;
     }
 
@@ -1669,7 +1669,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-900 space-y-1">
+                <div className={`p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-900 space-y-1 ${currentUser?.role === 'FUNCIONARIO' ? 'col-span-2 sm:col-span-3' : ''}`}>
                   <span className="text-[10px] text-slate-500 font-bold block uppercase">Horas / KM Acumulado:</span>
                   <strong className="text-xl font-black text-[#064E3B] dark:text-[#FACC15]">
                     {vehicle.category === 'VEICULO' ? `${vehicle.currentKm} km` : `${vehicle.currentHourmeter || 0} h`}
@@ -1677,21 +1677,25 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                   <p className="text-[10px] text-slate-500">Total trabalhado</p>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-900 space-y-1">
-                  <span className="text-[10px] text-slate-500 font-bold block uppercase">Consumo Mensal:</span>
-                  <strong className="text-xl font-black text-slate-900 dark:text-slate-100">
-                    {litersConsumedMonth.toLocaleString('pt-BR')} L
-                  </strong>
-                  <p className="text-[10px] text-slate-500">{formatCurrency(totalSpentMonth)} no mês</p>
-                </div>
+                {currentUser?.role !== 'FUNCIONARIO' && (
+                  <>
+                    <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-900 space-y-1">
+                      <span className="text-[10px] text-slate-500 font-bold block uppercase">Consumo Mensal:</span>
+                      <strong className="text-xl font-black text-slate-900 dark:text-slate-100">
+                        {litersConsumedMonth.toLocaleString('pt-BR')} L
+                      </strong>
+                      <p className="text-[10px] text-slate-500">{formatCurrency(totalSpentMonth)} no mês</p>
+                    </div>
 
-                <div className="p-4 rounded-2xl bg-[#064E3B] text-white p-4 rounded-2xl space-y-1 col-span-2 sm:col-span-1 shadow-md">
-                  <span className="text-[10px] text-[#FACC15] font-black block uppercase">Custo Acumulado Total:</span>
-                  <strong className="text-xl font-black text-white">
-                    {formatCurrency(totalAccumulatedCost)}
-                  </strong>
-                  <p className="text-[10px] text-slate-200">Somatório Abastecimentos + Manutenções</p>
-                </div>
+                    <div className="p-4 rounded-2xl bg-[#064E3B] text-white p-4 rounded-2xl space-y-1 col-span-2 sm:col-span-1 shadow-md">
+                      <span className="text-[10px] text-[#FACC15] font-black block uppercase">Custo Acumulado Total:</span>
+                      <strong className="text-xl font-black text-white">
+                        {formatCurrency(totalAccumulatedCost)}
+                      </strong>
+                      <p className="text-[10px] text-slate-200">Somatório Abastecimentos + Manutenções</p>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Quick Summary Cards */}
@@ -2012,8 +2016,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                   <label className="block font-bold mb-1">Descrição do Serviço Realizado:</label>
                   <textarea
                     rows={2}
-                    required
-                    placeholder="Descreva detalhadamente o serviço executado..."
+                    placeholder="Descreva detalhadamente o serviço executado (opcional)..."
                     value={mntDesc}
                     onChange={(e) => setMntDesc(e.target.value)}
                     className={`w-full p-2.5 rounded-xl border ${

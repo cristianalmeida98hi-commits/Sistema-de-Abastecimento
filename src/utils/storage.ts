@@ -1,7 +1,7 @@
 import { 
   collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch 
 } from 'firebase/firestore';
-import { db, safeSetDoc, safeUpdateDoc } from '../lib/firebase';
+import { db, safeSetDoc, safeUpdateDoc, ensureFirebaseAuth } from '../lib/firebase';
 import { 
   User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, 
   SystemSettings, MachineIssue, PreventiveMaintenanceItem, PreventiveItemKey, 
@@ -59,23 +59,8 @@ let isInitialized = false;
 let notifyDebounceTimer: any = null;
 let alertCheckDebounceTimer: any = null;
 
-// Initialize Firebase Firestore Real-Time Listeners
-export function initStorage() {
-  if (isInitialized && typeof window !== 'undefined') return;
-  isInitialized = true;
-
-  // Purge any legacy auth keys from previous versions to avoid auto-login glitches
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.removeItem('andradeagro_remembered_user_v1');
-      localStorage.removeItem('andradeagro_remembered_user');
-      localStorage.removeItem('andradeagro_user');
-      localStorage.removeItem('andradeagro_current_user');
-    } catch (e) {
-      // ignore
-    }
-  }
-
+// Internal Firestore Listeners Setup
+function setupFirestoreListeners() {
   try {
     // 1. Users Subscription
     onSnapshot(collection(db, 'users'), (snapshot) => {
@@ -182,6 +167,28 @@ export function initStorage() {
   } catch (err) {
     console.error('[Firestore init error]', err);
   }
+}
+
+// Initialize Firebase Firestore Real-Time Listeners
+export function initStorage() {
+  if (isInitialized && typeof window !== 'undefined') return;
+  isInitialized = true;
+
+  // Purge any legacy auth keys from previous versions to avoid auto-login glitches
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem('andradeagro_remembered_user_v1');
+      localStorage.removeItem('andradeagro_remembered_user');
+      localStorage.removeItem('andradeagro_user');
+      localStorage.removeItem('andradeagro_current_user');
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // Attempt to ensure Firebase Auth session asynchronously without blocking real-time subscriptions
+  ensureFirebaseAuth().catch(() => {});
+  setupFirestoreListeners();
 }
 
 export function notifyDataUpdated(shouldCheckAlerts: boolean = true) {
@@ -307,6 +314,9 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
     }
   }
 
+  // Trigger Firebase Auth in background
+  ensureFirebaseAuth().catch(() => {});
+
   // Register audit
   logAuditEvent('LOGIN', 'Autenticação', `Usuário ${user.name} (${user.role}) realizou login no sistema.`);
 
@@ -334,6 +344,9 @@ export function loginUserById(userId: string, rememberMe: boolean): { success: b
       localStorage.setItem(SESSION_KEYS.REMEMBERED_EMAIL, user.email.toLowerCase());
     }
   }
+
+  // Trigger Firebase Auth in background
+  ensureFirebaseAuth().catch(() => {});
 
   logAuditEvent('LOGIN', 'Autenticação', `Usuário ${user.name} (${user.role}) acessou o sistema.`);
   return { success: true, user: safeUser };

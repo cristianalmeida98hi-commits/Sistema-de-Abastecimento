@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDocFromServer, setDoc, updateDoc, DocumentReference } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 
 export const firebaseConfig = {
   apiKey: "AIzaSyCKLaXPZ3xq5M2CCRVBkwRHS-7dQoBelEY",
@@ -12,6 +13,56 @@ export const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
+export const auth = getAuth(app);
+
+// Log technical diagnostic information (ETAPA 6)
+function logTechnicalDiagnostics() {
+  console.groupCollapsed("[Andrade Agro - Diagnóstico Firebase]");
+  console.log("Firebase Project ID:", firebaseConfig.projectId);
+  console.log("Firebase App ID:", firebaseConfig.appId);
+  console.log("Firestore Database ID:", "(default)");
+  console.log("Firestore Region:", "southamerica-east1");
+  console.log("Firebase Auth currentUser:", auth.currentUser ? auth.currentUser.uid : null);
+  console.log("Firebase Auth UID:", auth.currentUser?.uid || "Não autenticado");
+  console.groupEnd();
+}
+
+logTechnicalDiagnostics();
+
+// Listen to auth state changes to keep diagnostics updated
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    console.log(`[Firebase Auth] Sessão ativa: UID=${user.uid}`);
+  } else {
+    console.log("[Firebase Auth] Nenhuma sessão ativa no momento");
+  }
+});
+
+/**
+ * Ensures a valid Firebase Authentication session is established.
+ * Attempts anonymous sign-in if no currentUser exists.
+ */
+export async function ensureFirebaseAuth(): Promise<FirebaseUser | null> {
+  if (auth.currentUser) {
+    return auth.currentUser;
+  }
+
+  try {
+    const cred = await signInAnonymously(auth);
+    console.log(`[Firebase Auth] Autenticado com sucesso: UID=${cred.user.uid}`);
+    return cred.user;
+  } catch (error: any) {
+    if (error?.code === 'auth/configuration-not-found') {
+      console.warn(
+        "[Firebase Auth] O provedor Anônimo ainda não está ativado no Firebase Console (andrade-agro).\n" +
+        "Para ativar: Firebase Console -> Build -> Authentication -> Sign-in method -> Anonymous -> Ativar."
+      );
+    } else {
+      console.warn("[Firebase Auth] Erro ao autenticar:", error?.message || error);
+    }
+    return null;
+  }
+}
 
 // Helper to remove any undefined properties before writing to Firestore
 export function sanitizeForFirestore<T>(obj: T): T {
@@ -53,3 +104,5 @@ async function testConnection() {
 }
 
 testConnection();
+
+

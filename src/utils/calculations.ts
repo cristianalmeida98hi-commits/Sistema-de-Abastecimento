@@ -75,6 +75,18 @@ export function getSectorName(sector: Sector): string {
   }
 }
 
+export function getCategoryLabel(category?: string | null): string {
+  switch (category) {
+    case 'TRATOR': return 'Trator';
+    case 'VEICULO': return 'Veículo';
+    case 'MAQUINA_AGRICOLA': return 'Máquina Agrícola';
+    case 'IMPLEMENTO': return 'Implemento';
+    default: return category || 'Equipamento';
+  }
+}
+
+export const getCategoryName = getCategoryLabel;
+
 export function calculateFuelLogMetrics(
   liters: number,
   pricePerLiter: number,

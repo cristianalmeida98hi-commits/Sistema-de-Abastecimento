@@ -10,12 +10,13 @@ import {
   getMachineIssues, getPreventiveItems, addMachineIssue, resolveMachineIssue, recordPreventiveService,
   addFuelLog, updateFuelLog, deleteFuelLog, addVehicle, updateVehicle, deleteVehicle,
   addMaintenance, updateMaintenance, deleteMaintenance, addGasStation, updateGasStation, deleteGasStation, addUser,
-  updateUser, deleteUser, resetUserPassword, resolveAlert, updateSettings, logoutUser
+  updateUser, deleteUser, resetUserPassword, resolveAlert, updateSettings, logoutUser,
+  getStorageLoadingState, getFirestoreLoadError, StorageLoadingState
 } from './utils/storage';
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Tractor, AlertTriangle, RefreshCw } from 'lucide-react';
 
 import { DashboardView } from './components/DashboardView';
 import { FuelLogsView } from './components/FuelLogsView';
@@ -48,6 +49,7 @@ export default function App() {
   const [alerts, setAlerts] = useState<SmartAlert[]>(() => getAlerts());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => getAuditLogs());
   const [settings, setSettings] = useState<SystemSettings>(() => getSettings());
+  const [storageStatus, setStorageStatus] = useState<StorageLoadingState>(() => getStorageLoadingState());
 
   // UI State
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -88,6 +90,7 @@ export default function App() {
     setAlerts(getAlerts());
     setAuditLogs(getAuditLogs());
     setSettings(getSettings());
+    setStorageStatus(getStorageLoadingState());
   }, []);
 
   useEffect(() => {
@@ -107,8 +110,10 @@ export default function App() {
     }
   }, [currentUser, activeTab]);
 
-  // 5. Listen for QR code scans or deep links via URL hash
+  // 5. Listen for QR code scans or deep links via URL hash (only when data has finished loading)
   useEffect(() => {
+    if (storageStatus === 'LOADING') return;
+
     const handleHashCheck = () => {
       const hash = window.location.hash;
       if (!hash) return;
@@ -136,7 +141,7 @@ export default function App() {
     handleHashCheck();
     window.addEventListener('hashchange', handleHashCheck);
     return () => window.removeEventListener('hashchange', handleHashCheck);
-  }, [vehicles]);
+  }, [vehicles, storageStatus]);
 
   // Handlers
   const handleLogout = () => {
@@ -212,6 +217,75 @@ export default function App() {
       throw err;
     }
   };
+
+  // If storage is LOADING, render Andrade Agro Loading Screen
+  if (storageStatus === 'LOADING') {
+    const isScanningQR = typeof window !== 'undefined' && (
+      window.location.hash.includes('ficha-maquina') || 
+      window.location.hash.includes('vehicle') ||
+      window.location.hash.includes('ANDRADEAGRO')
+    );
+
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#031d16] text-slate-100 font-sans">
+        <div className="w-full max-w-md p-8 rounded-3xl bg-[#042d23] border border-emerald-800/60 shadow-2xl text-center space-y-6 animate-in fade-in zoom-in-95 duration-300">
+          <div className="w-20 h-20 mx-auto rounded-3xl bg-[#064E3B] border-2 border-[#FACC15]/40 flex items-center justify-center shadow-lg relative">
+            <div className="absolute inset-0 rounded-3xl border-2 border-[#FACC15] animate-ping opacity-20" />
+            <Tractor className="w-10 h-10 text-[#FACC15]" />
+          </div>
+
+          <div className="space-y-2">
+            <div className="inline-block px-3 py-1 rounded-full bg-[#064E3B] text-[#FACC15] text-[10px] font-black tracking-widest uppercase border border-[#FACC15]/30">
+              Andrade Agro
+            </div>
+            <h1 className="text-xl font-black text-white tracking-tight">
+              {isScanningQR ? 'Acessando Ficha da Máquina...' : 'Sincronizando Sistema Andrade Agro'}
+            </h1>
+            <p className="text-xs text-emerald-200/80 leading-relaxed">
+              {isScanningQR
+                ? 'Localizando equipamento e sincronizando histórico de manutenção e abastecimento...'
+                : 'Conectando ao banco de dados e sincronizando frotas, combustíveis e manutenções em tempo real...'}
+            </p>
+          </div>
+
+          <div className="space-y-2 pt-2">
+            <div className="w-full bg-emerald-950/80 rounded-full h-2 overflow-hidden border border-emerald-800/60">
+              <div className="bg-gradient-to-r from-emerald-500 via-[#FACC15] to-emerald-400 h-full w-2/3 rounded-full animate-pulse" />
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-emerald-400/80 font-semibold px-1">
+              <span>Status: Conectando</span>
+              <span>Aguarde um instante</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If storage is ERROR, render Connection Error Screen
+  if (storageStatus === 'ERROR') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#031d16] text-slate-100 font-sans">
+        <div className="w-full max-w-md p-8 rounded-3xl bg-[#042d23] border border-rose-900/60 shadow-2xl text-center space-y-6">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-rose-950/80 border border-rose-800 flex items-center justify-center">
+            <AlertTriangle className="w-8 h-8 text-rose-400" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-lg font-black text-white">Falha na Conexão com o Banco de Dados</h2>
+            <p className="text-xs text-rose-200/80">
+              {getFirestoreLoadError() || 'Não foi possível conectar ao Firestore. Verifique sua conexão com a internet ou tente recarregar.'}
+            </p>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg transition-transform active:scale-95"
+          >
+            Tentar Reconectar
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // If not authenticated, render Login Screen
   if (!currentUser) {

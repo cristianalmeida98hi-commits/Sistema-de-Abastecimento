@@ -4,7 +4,7 @@ import {
   AlertTriangle, Clock, Calendar, Shield, X, Edit3, Trash2, Printer, Eye, Droplet, Layers, Sparkles
 } from 'lucide-react';
 import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, FuelLog, OperationalCapacity, MachineSubtype, canEditSystemData } from '../types';
-import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
+import { formatCurrency, getFuelTypeName, getSectorName, getCategoryLabel } from '../utils/calculations';
 import { MachineCapacitiesEditor } from './MachineCapacitiesEditor';
 import { getConsolidatedCapacities, getCapacityTypeEmoji, getMachineSubtypeName } from '../utils/capacities';
 import { calculateOilChangeStatus } from '../utils/maintenanceCalculations';
@@ -378,65 +378,286 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   const handlePrintBadge = async (v: Vehicle) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app';
     const qrValue = `${origin}/#ficha-maquina/${v.id}`;
-    const qrDataUrl = await generateQRCodeDataUrl(qrValue, 300);
+    const qrDataUrl = await generateQRCodeDataUrl(qrValue, 250);
+    const categoryLabel = getCategoryLabel(v.category);
+    const sectorName = getSectorName(v.sector);
+    const tankInfo = v.fuelType === 'NENHUM' ? 'Não aplica' : `${v.tankCapacityLiters}L (${getFuelTypeName(v.fuelType)})`;
+
+    const singleCardHtml = `
+      <div class="card">
+        <div class="card-header">
+          <span class="brand">ANDRADEAGRO</span>
+          <span class="badge-cat">${categoryLabel}</span>
+        </div>
+        <div class="card-ident">
+          <div class="model" title="${v.model}">${v.model}</div>
+          <div class="code-badge">${v.licensePlate || v.patrimonyCode}</div>
+        </div>
+        <div class="qr-container">
+          <img src="${qrDataUrl}" alt="QR" />
+        </div>
+        <div class="card-footer">
+          <span>📍 ${sectorName}</span>
+          <span>⛽ ${tankInfo}</span>
+        </div>
+      </div>
+    `;
+
+    const fullSheetCardsHtml = Array(12).fill(singleCardHtml).join('');
 
     const htmlContent = `
       <!DOCTYPE html>
-      <html>
+      <html lang="pt-BR">
         <head>
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Ficha do Equipamento QR - ${v.model}</title>
+          <title>Etiqueta QR Code - ${v.model} (${v.licensePlate || v.patrimonyCode})</title>
           <style>
-            body { font-family: sans-serif; padding: 20px; text-align: center; background: #ffffff; color: #0f172a; }
-            .card { border: 3px solid #0f3822; padding: 20px; border-radius: 16px; max-width: 400px; margin: 0 auto; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-            h1 { color: #0f3822; font-size: 22px; margin-bottom: 4px; font-weight: 900; }
-            .tag { background: #d4af37; color: #000; font-weight: bold; padding: 4px 10px; border-radius: 6px; display: inline-block; margin: 8px 0; }
-            .qr { margin: 16px 0; }
-            .no-print { margin-top: 20px; display: flex; justify-content: center; gap: 10px; }
-            .btn { padding: 10px 18px; font-size: 14px; font-weight: 700; border-radius: 8px; cursor: pointer; border: none; }
-            .btn-print { background: #0f3822; color: #ffffff; }
-            .btn-close { background: #e2e8f0; color: #0f172a; }
+            @page {
+              size: A4 portrait;
+              margin: 6mm;
+            }
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+              background: #f8fafc;
+              color: #0f172a;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .no-print {
+              background: #042d23;
+              color: #ffffff;
+              padding: 14px 20px;
+              border-bottom: 2px solid #064E3B;
+              display: flex;
+              flex-wrap: wrap;
+              align-items: center;
+              justify-content: space-between;
+              gap: 12px;
+              box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+              position: sticky;
+              top: 0;
+              z-index: 1000;
+            }
+            .no-print h2 {
+              font-size: 14px;
+              font-weight: 800;
+              color: #FACC15;
+              letter-spacing: 0.5px;
+            }
+            .mode-tabs {
+              display: flex;
+              gap: 6px;
+              background: #021a14;
+              padding: 4px;
+              border-radius: 8px;
+            }
+            .mode-btn {
+              padding: 6px 12px;
+              font-size: 12px;
+              font-weight: 700;
+              border-radius: 6px;
+              border: none;
+              cursor: pointer;
+              background: transparent;
+              color: #94a3b8;
+              transition: all 0.2s;
+            }
+            .mode-btn.active {
+              background: #064E3B;
+              color: #ffffff;
+            }
+            .action-btns {
+              display: flex;
+              gap: 8px;
+            }
+            .btn {
+              padding: 8px 16px;
+              font-size: 13px;
+              font-weight: 800;
+              border-radius: 8px;
+              cursor: pointer;
+              border: none;
+            }
+            .btn-print { background: #FACC15; color: #042d23; }
+            .btn-print:hover { background: #eab308; }
+            .btn-close { background: #334155; color: #ffffff; }
+
+            .page-container {
+              padding: 10mm;
+              display: flex;
+              justify-content: center;
+            }
+
+            /* Single Card Mode */
+            .single-wrapper {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              gap: 10px;
+              padding: 10px;
+              background: #ffffff;
+              border: 1.5px dashed #cbd5e1;
+              border-radius: 12px;
+            }
+            .cut-guide {
+              font-size: 11px;
+              color: #64748b;
+              font-weight: 600;
+            }
+
+            /* Full Sheet 12-up Mode */
+            .grid-12 {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 3.2mm;
+              width: 100%;
+              max-width: 198mm;
+            }
+
+            .card {
+              box-sizing: border-box;
+              width: 100%;
+              height: 67mm;
+              max-height: 67mm;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+              border: 1.5px solid #064E3B;
+              border-radius: 6px;
+              padding: 3.2mm 2.8mm;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              align-items: center;
+              background: #ffffff;
+              overflow: hidden;
+            }
+            .card-header {
+              width: 100%;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              border-bottom: 1px solid #e2e8f0;
+              padding-bottom: 1.2mm;
+            }
+            .brand {
+              font-size: 8.5pt;
+              font-weight: 900;
+              color: #064E3B;
+              letter-spacing: 0.5px;
+            }
+            .badge-cat {
+              font-size: 6.5pt;
+              font-weight: 800;
+              text-transform: uppercase;
+              background: #ecfdf5;
+              color: #064E3B;
+              padding: 1px 4px;
+              border-radius: 3px;
+              border: 0.5px solid #a7f3d0;
+            }
+            .card-ident {
+              width: 100%;
+              text-align: center;
+              margin-top: 1mm;
+            }
+            .model {
+              font-size: 8pt;
+              font-weight: 800;
+              color: #0f172a;
+              line-height: 1.1;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+            .code-badge {
+              background: #064E3B;
+              color: #FACC15;
+              font-weight: 900;
+              font-size: 8.5pt;
+              padding: 1.5px 6px;
+              border-radius: 4px;
+              display: inline-block;
+              margin-top: 1mm;
+              letter-spacing: 0.5px;
+            }
+            .qr-container {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              margin: 1mm 0;
+            }
+            .qr-container img {
+              width: 33mm;
+              height: 33mm;
+              display: block;
+            }
+            .card-footer {
+              width: 100%;
+              border-top: 1px solid #e2e8f0;
+              padding-top: 1.2mm;
+              display: flex;
+              justify-content: space-between;
+              font-size: 6.5pt;
+              font-weight: 700;
+              color: #475569;
+              white-space: nowrap;
+              overflow: hidden;
+            }
+
             @media print {
-              body { padding: 0; }
               .no-print { display: none !important; }
+              body { background: #ffffff !important; padding: 0 !important; margin: 0 !important; }
+              .page-container { padding: 0 !important; }
+              .single-wrapper { border: none !important; padding: 0 !important; }
+              .cut-guide { display: none !important; }
             }
           </style>
         </head>
         <body>
-          <div class="card">
-            <h1>AndradeAgro</h1>
-            <p><strong>${v.model}</strong></p>
-            <p class="tag">${v.licensePlate || v.patrimonyCode}</p>
-            <div class="qr">
-              <img id="qr-img" src="${qrDataUrl}" width="200" height="200" alt="QR Code" />
+          <div class="no-print">
+            <div>
+              <h2>Etiqueta: ${v.model} (${v.licensePlate || v.patrimonyCode})</h2>
             </div>
-            <p>Setor: ${getSectorName(v.sector)}</p>
-            <p>Combustível: ${v.fuelType === 'NENHUM' ? 'Não se aplica' : `${v.tankCapacityLiters} Litros (${getFuelTypeName(v.fuelType)})`}</p>
-            ${(v.sprayingTankCapacityLiters || 0) > 0 ? `<p>🌱 <strong>Tanque de Calda / Pulverização:</strong> ${v.sprayingTankCapacityLiters} Litros</p>` : ''}
+            <div class="mode-tabs">
+              <button class="mode-btn active" id="btn-single" onclick="setMode('single')">1 Etiqueta Avulsa</button>
+              <button class="mode-btn" id="btn-full" onclick="setMode('full')">📋 Folha Completa (12 Etiquetas)</button>
+            </div>
+            <div class="action-btns">
+              <button class="btn btn-print" onclick="window.print()">🖨️ Imprimir</button>
+              <button class="btn btn-close" onclick="window.close()">✕ Fechar</button>
+            </div>
           </div>
 
-          <div class="no-print">
-            <button class="btn btn-print" onclick="window.print()">🖨️ Imprimir</button>
-            <button class="btn btn-close" onclick="window.close()">✕ Fechar</button>
+          <div class="page-container" id="content-container">
+            <div class="single-wrapper" id="single-view" style="width: 67mm;">
+              <span class="cut-guide">✂️ Linha de Corte</span>
+              ${singleCardHtml}
+            </div>
+            <div class="grid-12" id="full-view" style="display: none;">
+              ${fullSheetCardsHtml}
+            </div>
           </div>
 
           <script>
-            let hasPrinted = false;
-            function triggerPrint() {
-              if (hasPrinted) return;
-              hasPrinted = true;
-              setTimeout(function() {
-                window.print();
-              }, 300);
-            }
-            const img = document.getElementById('qr-img');
-            if (img && img.complete) {
-              triggerPrint();
-            } else if (img) {
-              img.onload = triggerPrint;
-            } else {
-              triggerPrint();
+            function setMode(mode) {
+              const singleView = document.getElementById('single-view');
+              const fullView = document.getElementById('full-view');
+              const btnSingle = document.getElementById('btn-single');
+              const btnFull = document.getElementById('btn-full');
+
+              if (mode === 'single') {
+                singleView.style.display = 'flex';
+                fullView.style.display = 'none';
+                btnSingle.classList.add('active');
+                btnFull.classList.remove('active');
+              } else {
+                singleView.style.display = 'none';
+                fullView.style.display = 'grid';
+                btnSingle.classList.remove('active');
+                btnFull.classList.add('active');
+              }
             }
           </script>
         </body>

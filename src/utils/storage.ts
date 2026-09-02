@@ -59,6 +59,33 @@ let isInitialized = false;
 let notifyDebounceTimer: any = null;
 let alertCheckDebounceTimer: any = null;
 
+export type StorageLoadingState = 'LOADING' | 'LOADED_EMPTY' | 'LOADED_WITH_DATA' | 'ERROR';
+
+let storageLoadingState: StorageLoadingState = 'LOADING';
+let firestoreLoadError: string | null = null;
+const loadedCollections = new Set<string>();
+
+function updateLoadingStatus() {
+  if (storageLoadingState === 'ERROR') return;
+  const hasCore = loadedCollections.has('vehicles') && loadedCollections.has('users');
+  if (hasCore) {
+    const hasData = cache.vehicles.length > 0 || cache.users.length > 0;
+    storageLoadingState = hasData ? 'LOADED_WITH_DATA' : 'LOADED_EMPTY';
+  }
+}
+
+export function getStorageLoadingState(): StorageLoadingState {
+  return storageLoadingState;
+}
+
+export function getFirestoreLoadError(): string | null {
+  return firestoreLoadError;
+}
+
+export function isStorageReady(): boolean {
+  return storageLoadingState === 'LOADED_WITH_DATA' || storageLoadingState === 'LOADED_EMPTY';
+}
+
 // Internal Firestore Listeners Setup
 function setupFirestoreListeners() {
   try {
@@ -66,20 +93,36 @@ function setupFirestoreListeners() {
     onSnapshot(collection(db, 'users'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
       cache.users = items;
+      loadedCollections.add('users');
+      updateLoadingStatus();
       notifyDataUpdated();
-    }, (err) => console.warn('[Firestore Users Connection]', err?.message || err));
+    }, (err) => {
+      console.warn('[Firestore Users Connection]', err?.message || err);
+      firestoreLoadError = err?.message || 'Erro ao carregar usuários';
+      storageLoadingState = 'ERROR';
+      notifyDataUpdated();
+    });
 
     // 2. Vehicles / Machines Subscription
     onSnapshot(collection(db, 'vehicles'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Vehicle));
       cache.vehicles = items;
+      loadedCollections.add('vehicles');
+      updateLoadingStatus();
       notifyDataUpdated();
-    }, (err) => console.warn('[Firestore Vehicles Connection]', err?.message || err));
+    }, (err) => {
+      console.warn('[Firestore Vehicles Connection]', err?.message || err);
+      firestoreLoadError = err?.message || 'Erro ao carregar máquinas';
+      storageLoadingState = 'ERROR';
+      notifyDataUpdated();
+    });
 
     // 3. Central Tanks Subscription (Tanques Centrais: Quadra e Itapeva)
     onSnapshot(collection(db, 'central_tanks'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CentralTank));
       cache.centralTanks = items;
+      loadedCollections.add('central_tanks');
+      updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore CentralTanks Connection]', err?.message || err));
 
@@ -88,6 +131,8 @@ function setupFirestoreListeners() {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as TankMovement));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
       cache.tankMovements = items;
+      loadedCollections.add('tank_movements');
+      updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore TankMovements Connection]', err?.message || err));
 
@@ -95,6 +140,8 @@ function setupFirestoreListeners() {
     onSnapshot(collection(db, 'gas_stations'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GasStation));
       cache.gasStations = items;
+      loadedCollections.add('gas_stations');
+      updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore GasStations Connection]', err?.message || err));
 
@@ -103,6 +150,8 @@ function setupFirestoreListeners() {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelLog));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
       cache.fuelLogs = items;
+      loadedCollections.add('fuel_logs');
+      updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore FuelLogs Connection]', err?.message || err));
 
@@ -111,6 +160,8 @@ function setupFirestoreListeners() {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelRefill));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
       cache.fuelRefills = items;
+      loadedCollections.add('fuel_refills');
+      updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore FuelRefills Connection]', err?.message || err));
 
@@ -119,6 +170,8 @@ function setupFirestoreListeners() {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceLog));
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       cache.maintenanceLogs = items;
+      loadedCollections.add('maintenance_logs');
+      updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore MaintenanceLogs Connection]', err?.message || err));
 
@@ -127,6 +180,8 @@ function setupFirestoreListeners() {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MachineIssue));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
       cache.machineIssues = items;
+      loadedCollections.add('machine_issues');
+      updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore Issues Connection]', err?.message || err));
 
@@ -134,6 +189,8 @@ function setupFirestoreListeners() {
     onSnapshot(collection(db, 'preventive_items'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as PreventiveMaintenanceItem));
       cache.preventiveItems = items;
+      loadedCollections.add('preventive_items');
+      updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore Preventive Connection]', err?.message || err));
 
@@ -142,6 +199,7 @@ function setupFirestoreListeners() {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SmartAlert));
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       cache.alerts = items;
+      loadedCollections.add('alerts');
       notifyDataUpdated(false); // don't re-trigger alert check when alerts arrive
     }, (err) => console.warn('[Firestore Alerts Connection]', err?.message || err));
 
@@ -150,6 +208,7 @@ function setupFirestoreListeners() {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
       cache.auditLogs = items;
+      loadedCollections.add('audit_logs');
       notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore AuditLogs Connection]', err?.message || err));
 
@@ -159,6 +218,7 @@ function setupFirestoreListeners() {
         const configDoc = snapshot.docs.find(d => d.id === 'config') || snapshot.docs[0];
         if (configDoc) {
           cache.settings = configDoc.data() as SystemSettings;
+          loadedCollections.add('settings');
           notifyDataUpdated();
         }
       }
@@ -166,6 +226,9 @@ function setupFirestoreListeners() {
 
   } catch (err) {
     console.error('[Firestore init error]', err);
+    firestoreLoadError = String(err);
+    storageLoadingState = 'ERROR';
+    notifyDataUpdated();
   }
 }
 

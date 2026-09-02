@@ -70,18 +70,35 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfYear = new Date(now.getFullYear(), 0, 1);
 
-    const todayLogs = fuelLogs.filter(l => l.dateTime.startsWith(todayStr));
+    const isSameDay = (dateStr: string, refDate: Date = new Date()) => {
+      if (!dateStr) return false;
+      try {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) {
+          return dateStr.startsWith(refDate.toISOString().slice(0, 10));
+        }
+        return (
+          d.getFullYear() === refDate.getFullYear() &&
+          d.getMonth() === refDate.getMonth() &&
+          d.getDate() === refDate.getDate()
+        );
+      } catch {
+        return false;
+      }
+    };
+
+    const todayLogs = fuelLogs.filter(l => isSameDay(l.dateTime, now));
     const weekLogs = fuelLogs.filter(l => new Date(l.dateTime) >= sevenDaysAgo);
     const monthLogs = fuelLogs.filter(l => new Date(l.dateTime) >= startOfMonth);
     const yearLogs = fuelLogs.filter(l => new Date(l.dateTime) >= startOfYear);
 
-    const todayLiters = todayLogs.reduce((acc, l) => acc + l.liters, 0);
-    const todaySpent = todayLogs.reduce((acc, l) => acc + l.totalValue, 0);
+    const todayLiters = todayLogs.reduce((acc, l) => acc + (Number(l.liters) || 0), 0);
+    const todaySpent = todayLogs.reduce((acc, l) => acc + (Number(l.totalValue) || 0), 0);
 
-    const weekSpent = weekLogs.reduce((acc, l) => acc + l.totalValue, 0);
-    const monthSpent = monthLogs.reduce((acc, l) => acc + l.totalValue, 0);
-    const monthLiters = monthLogs.reduce((acc, l) => acc + l.liters, 0);
-    const yearSpent = yearLogs.reduce((acc, l) => acc + l.totalValue, 0);
+    const weekSpent = weekLogs.reduce((acc, l) => acc + (Number(l.totalValue) || 0), 0);
+    const monthSpent = monthLogs.reduce((acc, l) => acc + (Number(l.totalValue) || 0), 0);
+    const monthLiters = monthLogs.reduce((acc, l) => acc + (Number(l.liters) || 0), 0);
+    const yearSpent = yearLogs.reduce((acc, l) => acc + (Number(l.totalValue) || 0), 0);
 
     return {
       now,
@@ -112,7 +129,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
     yearSpent
   } = metrics;
 
-  // Top Consumers Calculations
+  // Top Consumers Calculations (Historical for general charts)
   const equipmentConsumption = useMemo(() => {
     const map = new Map<string, { name: string; plate: string; category: string; liters: number; cost: number }>();
     fuelLogs.forEach(l => {
@@ -123,8 +140,8 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
         liters: 0,
         cost: 0
       };
-      existing.liters += l.liters;
-      existing.cost += l.totalValue;
+      existing.liters += Number(l.liters) || 0;
+      existing.cost += Number(l.totalValue) || 0;
       map.set(l.equipmentId, existing);
     });
     return Array.from(map.values());
@@ -138,12 +155,58 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
     .filter(e => e.category === 'TRATOR' || e.category === 'MAQUINA_AGRICOLA')
     .sort((a, b) => b.liters - a.liters)[0];
 
+  // Top Operator of TODAY (Filtered strictly to today's fuelings)
+  const todayTopOperator = useMemo(() => {
+    if (todayLogs.length === 0) return null;
+    const map = new Map<string, { id: string; name: string; liters: number; cost: number; count: number }>();
+    todayLogs.forEach(l => {
+      const key = l.driverOrOperatorId || l.driverOrOperatorName || 'Operador';
+      const existing = map.get(key) || {
+        id: key,
+        name: l.driverOrOperatorName || 'Operador',
+        liters: 0,
+        cost: 0,
+        count: 0
+      };
+      existing.liters += Number(l.liters) || 0;
+      existing.cost += Number(l.totalValue) || 0;
+      existing.count += 1;
+      map.set(key, existing);
+    });
+    const sorted = Array.from(map.values()).sort((a, b) => b.liters - a.liters);
+    return sorted[0] || null;
+  }, [todayLogs]);
+
+  // Top Equipment of TODAY (Filtered strictly to today's fuelings)
+  const todayTopEquipment = useMemo(() => {
+    if (todayLogs.length === 0) return null;
+    const map = new Map<string, { id: string; name: string; plate: string; category: string; liters: number; cost: number; count: number }>();
+    todayLogs.forEach(l => {
+      const key = l.equipmentId || l.equipmentName;
+      const existing = map.get(key) || {
+        id: key,
+        name: l.equipmentName,
+        plate: l.equipmentPlateOrCode,
+        category: l.equipmentCategory,
+        liters: 0,
+        cost: 0,
+        count: 0
+      };
+      existing.liters += Number(l.liters) || 0;
+      existing.cost += Number(l.totalValue) || 0;
+      existing.count += 1;
+      map.set(key, existing);
+    });
+    const sorted = Array.from(map.values()).sort((a, b) => b.liters - a.liters);
+    return sorted[0] || null;
+  }, [todayLogs]);
+
   const topOperator = useMemo(() => {
     const map = new Map<string, { name: string; count: number; liters: number }>();
     fuelLogs.forEach(l => {
       const existing = map.get(l.driverOrOperatorId) || { name: l.driverOrOperatorName, count: 0, liters: 0 };
       existing.count += 1;
-      existing.liters += l.liters;
+      existing.liters += Number(l.liters) || 0;
       map.set(l.driverOrOperatorId, existing);
     });
     return Array.from(map.values()).sort((a, b) => b.liters - a.liters)[0];
@@ -616,29 +679,49 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
           </button>
         </div>
 
-        {/* Top Equipment Highlight Bento Box */}
+        {/* Top Consumer of TODAY Highlight Bento Box */}
         <div className="rounded-3xl border p-6 shadow-sm flex flex-col justify-between bg-[#042d23] border-emerald-900/60">
           <div>
-            <div className="flex items-center gap-2 mb-3">
-              <Truck className="w-5 h-5 text-[#FACC15]" />
-              <h4 className="text-slate-100 font-bold text-sm">Maior Consumidor de Hoje</h4>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-[#FACC15]" />
+                <h4 className="text-slate-100 font-bold text-sm">Maior Consumidor de Hoje</h4>
+              </div>
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-[#FACC15]/20 text-[#FACC15]">
+                {todayLogs.length} reg. hoje
+              </span>
             </div>
-            {topVehicle ? (
-              <div className="bg-emerald-950/60 p-3.5 rounded-2xl border border-emerald-900/40">
-                <p className="font-extrabold text-xs text-slate-100">{topVehicle.name}</p>
-                <p className="text-[11px] text-emerald-200 font-semibold mt-1">
-                  Placa/Código: <span className="font-bold text-slate-100">{topVehicle.plate}</span> • <span className="text-[#FACC15] font-bold">{topVehicle.liters} Litros</span> ({formatCurrency(topVehicle.cost)})
-                </p>
+
+            {todayTopOperator ? (
+              <div className="bg-emerald-950/70 p-3.5 rounded-2xl border border-emerald-900/40 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-emerald-300">Funcionário / Operador:</span>
+                  <span className="text-xs font-black text-[#FACC15]">{todayTopOperator.liters.toLocaleString('pt-BR')} Litros</span>
+                </div>
+                <p className="font-extrabold text-sm text-slate-100">{todayTopOperator.name}</p>
+                <div className="flex items-center justify-between text-[11px] text-emerald-200 border-t border-emerald-900/40 pt-1.5 mt-1">
+                  <span>{todayTopOperator.count} abastecimento(s) hoje</span>
+                  <span className="font-bold text-slate-200">{formatCurrency(todayTopOperator.cost)}</span>
+                </div>
+                {todayTopEquipment && (
+                  <p className="text-[10px] text-emerald-400/80 truncate">
+                    Equipamento: <strong className="text-slate-200">{todayTopEquipment.name}</strong> ({todayTopEquipment.plate})
+                  </p>
+                )}
               </div>
             ) : (
-              <p className="text-xs text-emerald-200 font-medium">Nenhum registro hoje ainda.</p>
+              <div className="bg-emerald-950/40 p-4 rounded-2xl border border-emerald-900/30 text-center space-y-1">
+                <p className="text-xs font-extrabold text-slate-300">Nenhum abastecimento hoje</p>
+                <p className="text-lg font-black text-[#FACC15]">0 Litros</p>
+                <p className="text-[10px] text-emerald-300/70">Os abastecimentos do dia atual serão computados aqui automaticamente.</p>
+              </div>
             )}
           </div>
           <button
-            onClick={() => onNavigate('fleet')}
+            onClick={() => onNavigate('fuel')}
             className="text-[#FACC15] text-xs font-bold hover:underline flex items-center gap-1 mt-4 self-start"
           >
-            Ver Frotas & Máquinas
+            Ver Abastecimentos de Hoje
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>

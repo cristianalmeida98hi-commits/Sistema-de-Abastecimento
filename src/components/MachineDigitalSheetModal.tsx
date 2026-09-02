@@ -16,6 +16,7 @@ import {
 } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
 import { getConsolidatedCapacities, getCapacityTypeEmoji, getMachineSubtypeName } from '../utils/capacities';
+import { calculateOilChangeStatus, isOilMaintenanceService } from '../utils/maintenanceCalculations';
 import { recordOilChange, setOilChangeConfigAndReference } from '../utils/storage';
 import { ReportProblemModal } from './ReportProblemModal';
 
@@ -825,31 +826,33 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                   darkMode ? 'bg-emerald-950/70 border-amber-500/30' : 'bg-amber-50/70 border-amber-200'
                 }`}>
                   {(() => {
-                    const isOilActive = vehicle.oilChangeControlActive !== false;
-                    const curH = vehicle.currentHourmeter || 0;
-                    const interval = vehicle.oilChangeIntervalHours || vehicle.maintenanceIntervalHours || 300;
-                    const advance = vehicle.oilChangeWarningAdvanceHours !== undefined ? vehicle.oilChangeWarningAdvanceHours : (vehicle.maintenanceWarningAdvanceHours || 50);
-                    const lastH = vehicle.lastOilChangeHourmeter !== undefined ? vehicle.lastOilChangeHourmeter : (vehicle.lastMaintenanceHourmeter || 0);
-                    const nextH = vehicle.nextOilChangeHourmeter !== undefined ? vehicle.nextOilChangeHourmeter : (lastH > 0 ? lastH + interval : interval);
-                    const rem = nextH - curH;
-                    const hoursInCycle = Math.max(0, curH - lastH);
-                    const progressPercent = Math.min(100, Math.max(0, (hoursInCycle / interval) * 100));
+                    const oilStatus = calculateOilChangeStatus(vehicle);
+                    const isOilActive = oilStatus.isOilActive;
+                    const curH = oilStatus.currentMeter;
+                    const interval = oilStatus.interval;
+                    const advance = oilStatus.advance;
+                    const lastH = oilStatus.lastMeter;
+                    const nextH = oilStatus.nextMeter;
+                    const rem = oilStatus.remaining;
+                    const hoursInCycle = oilStatus.metersInCycle;
+                    const progressPercent = oilStatus.progressPercent;
+                    const unit = oilStatus.unit;
 
                     let badgeColor = 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
-                    let badgeLabel = `EM DIA (${rem}h restantes)`;
+                    let badgeLabel = `EM DIA (${rem}${unit} restantes)`;
                     let barColor = 'bg-emerald-500';
 
                     if (!isOilActive) {
                       badgeColor = 'bg-slate-500/20 text-slate-400 border-slate-500/30';
                       badgeLabel = 'CONTROLE DESATIVADO';
                       barColor = 'bg-slate-400';
-                    } else if (rem <= 0) {
+                    } else if (oilStatus.status === 'ATRASADA') {
                       badgeColor = 'bg-red-500 text-white font-extrabold animate-pulse shadow-md border-red-600';
-                      badgeLabel = `VENCIDA HÁ ${Math.abs(rem)} HORAS!`;
+                      badgeLabel = `VENCIDA HÁ ${oilStatus.hoursOrKmOverdue} ${unit.toUpperCase()}!`;
                       barColor = 'bg-red-500';
-                    } else if (rem <= advance) {
+                    } else if (oilStatus.status === 'PROXIMA') {
                       badgeColor = 'bg-amber-500 text-gray-950 font-extrabold shadow-md border-amber-600';
-                      badgeLabel = `TROCAR EM ${rem} HORAS`;
+                      badgeLabel = `TROCAR EM ${rem} ${unit.toUpperCase()}`;
                       barColor = 'bg-amber-500';
                     }
 
@@ -863,10 +866,10 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                             <div>
                               <div className="flex items-center gap-2">
                                 <h3 className="font-black text-sm text-slate-900 dark:text-slate-100">
-                                  Controle de Troca de Óleo por Horímetro
+                                  Controle de Troca de Óleo {unit === 'km' ? 'por Quilometragem' : 'por Horímetro'}
                                 </h3>
                                 <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-300">
-                                  Ciclo {interval}h
+                                  Ciclo {interval.toLocaleString('pt-BR')}{unit}
                                 </span>
                               </div>
                               <p className="text-[11px] text-slate-500 dark:text-emerald-300/80">
@@ -887,7 +890,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                               Horímetro Atual
                             </span>
                             <span className="text-base font-black text-slate-900 dark:text-emerald-200">
-                              {curH} h
+                              {curH.toLocaleString('pt-BR')} {unit}
                             </span>
                           </div>
 
@@ -896,11 +899,11 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                               Última Troca / Ref.
                             </span>
                             <span className="text-base font-black text-slate-900 dark:text-emerald-200">
-                              {lastH} h
+                              {lastH.toLocaleString('pt-BR')} {unit}
                             </span>
-                            {vehicle.lastOilChangeDate && (
+                            {oilStatus.lastDate && (
                               <span className="text-[9px] text-slate-400 block mt-0.5">
-                                {new Date(vehicle.lastOilChangeDate).toLocaleDateString('pt-BR')}
+                                {new Date(oilStatus.lastDate).toLocaleDateString('pt-BR')}
                               </span>
                             )}
                           </div>
@@ -910,10 +913,10 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                               Intervalo Definido
                             </span>
                             <span className="text-base font-black text-slate-900 dark:text-emerald-200">
-                              {interval} h
+                              {interval.toLocaleString('pt-BR')} {unit}
                             </span>
                             <span className="text-[9px] text-slate-400 block mt-0.5">
-                              Alerta com {advance}h
+                              Alerta com {advance}{unit}
                             </span>
                           </div>
 
@@ -922,12 +925,12 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                               Próxima Troca
                             </span>
                             <span className={`text-base font-black ${
-                              rem <= 0 ? 'text-red-500 font-extrabold' : rem <= advance ? 'text-amber-500' : 'text-slate-900 dark:text-emerald-200'
+                              oilStatus.status === 'ATRASADA' ? 'text-red-500 font-extrabold' : oilStatus.status === 'PROXIMA' ? 'text-amber-500' : 'text-slate-900 dark:text-emerald-200'
                             }`}>
-                              {nextH} h
+                              {nextH.toLocaleString('pt-BR')} {unit}
                             </span>
                             <span className="text-[9px] text-slate-400 block mt-0.5">
-                              {rem <= 0 ? `Venceu há ${Math.abs(rem)}h` : `Faltam ${rem}h`}
+                              {oilStatus.status === 'ATRASADA' ? `Venceu há ${oilStatus.hoursOrKmOverdue}${unit}` : `Faltam ${rem}${unit}`}
                             </span>
                           </div>
                         </div>
@@ -937,7 +940,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                           <div className="space-y-1.5">
                             <div className="flex justify-between text-[11px] font-bold">
                               <span className="text-slate-500 dark:text-emerald-300/80">
-                                Progresso do ciclo atual: {hoursInCycle}h / {interval}h trabalhadas
+                                Progresso do ciclo atual: {hoursInCycle.toLocaleString('pt-BR')}{unit} / {interval.toLocaleString('pt-BR')}{unit} trabalhadas
                               </span>
                               <span className="text-slate-700 dark:text-emerald-200">
                                 {Math.round(progressPercent)}%
@@ -1021,6 +1024,11 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                         <p className="text-[10px] text-slate-500 mt-1">
                           Próxima troca será calculada para: <strong>{directOilHourmeter + (vehicle.oilChangeIntervalHours || 300)}h</strong>
                         </p>
+                        {directOilHourmeter < (vehicle.currentHourmeter || 0) && (
+                          <p className="text-[10px] text-amber-500 font-bold mt-1">
+                            ⚠️ Atenção: O valor digitado ({directOilHourmeter}h) é menor que o valor atual oficial ({vehicle.currentHourmeter || 0}h). O horímetro oficial da máquina será mantido no maior valor.
+                          </p>
+                        )}
                       </div>
 
                       <div>
@@ -1992,6 +2000,11 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                         darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-200'
                       }`}
                     />
+                    {mntMeter < (vehicle.category === 'VEICULO' ? (vehicle.currentKm || 0) : (vehicle.currentHourmeter || 0)) && (
+                      <p className="text-[10px] text-amber-500 font-bold mt-1">
+                        ⚠️ Atenção: O valor digitado ({mntMeter}) é menor que o valor atual oficial ({vehicle.category === 'VEICULO' ? (vehicle.currentKm || 0) : (vehicle.currentHourmeter || 0)}). O horímetro/odômetro oficial não será reduzido.
+                      </p>
+                    )}
                   </div>
                 </div>
 

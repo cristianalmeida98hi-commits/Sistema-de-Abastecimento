@@ -40,18 +40,18 @@ export function cleanUndefined<T extends Record<string, any>>(obj: T): T {
 
 // In-Memory Live Cache synced directly with Firestore in real-time
 let cache = {
-  users: INITIAL_USERS as User[],
-  vehicles: INITIAL_VEHICLES as Vehicle[],
-  gasStations: INITIAL_GAS_STATIONS as GasStation[],
-  centralTanks: INITIAL_CENTRAL_TANKS as CentralTank[],
-  tankMovements: INITIAL_TANK_MOVEMENTS as TankMovement[],
-  fuelLogs: INITIAL_FUEL_LOGS as FuelLog[],
-  fuelRefills: INITIAL_FUEL_REFILLS as FuelRefill[],
-  maintenanceLogs: INITIAL_MAINTENANCE_LOGS as MaintenanceLog[],
-  machineIssues: INITIAL_MACHINE_ISSUES as MachineIssue[],
-  preventiveItems: INITIAL_PREVENTIVE_ITEMS as PreventiveMaintenanceItem[],
-  alerts: INITIAL_ALERTS as SmartAlert[],
-  auditLogs: INITIAL_AUDIT_LOGS as AuditLog[],
+  users: [] as User[],
+  vehicles: [] as Vehicle[],
+  gasStations: [] as GasStation[],
+  centralTanks: [] as CentralTank[],
+  tankMovements: [] as TankMovement[],
+  fuelLogs: [] as FuelLog[],
+  fuelRefills: [] as FuelRefill[],
+  maintenanceLogs: [] as MaintenanceLog[],
+  machineIssues: [] as MachineIssue[],
+  preventiveItems: [] as PreventiveMaintenanceItem[],
+  alerts: [] as SmartAlert[],
+  auditLogs: [] as AuditLog[],
   settings: INITIAL_SETTINGS as SystemSettings
 };
 
@@ -79,155 +79,105 @@ export function initStorage() {
   try {
     // 1. Users Subscription
     onSnapshot(collection(db, 'users'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('users', INITIAL_USERS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
-        cache.users = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore Users Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
+      cache.users = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore Users Connection]', err?.message || err));
 
     // 2. Vehicles / Machines Subscription
     onSnapshot(collection(db, 'vehicles'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('vehicles', INITIAL_VEHICLES);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Vehicle));
-        cache.vehicles = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore Vehicles Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Vehicle));
+      cache.vehicles = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore Vehicles Connection]', err?.message || err));
 
     // 3. Central Tanks Subscription (Tanques Centrais: Quadra e Itapeva)
     onSnapshot(collection(db, 'central_tanks'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('central_tanks', INITIAL_CENTRAL_TANKS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CentralTank));
-        cache.centralTanks = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore CentralTanks Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CentralTank));
+      cache.centralTanks = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore CentralTanks Connection]', err?.message || err));
 
     // 3.1 Tank Movements Subscription
     onSnapshot(collection(db, 'tank_movements'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('tank_movements', INITIAL_TANK_MOVEMENTS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as TankMovement));
-        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-        cache.tankMovements = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore TankMovements Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as TankMovement));
+      items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+      cache.tankMovements = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore TankMovements Connection]', err?.message || err));
 
     // 3.2 Gas Stations Subscription
     onSnapshot(collection(db, 'gas_stations'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('gas_stations', INITIAL_GAS_STATIONS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GasStation));
-        cache.gasStations = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore GasStations Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GasStation));
+      cache.gasStations = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore GasStations Connection]', err?.message || err));
 
     // 4. Fuel Logs Subscription
     onSnapshot(collection(db, 'fuel_logs'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('fuel_logs', INITIAL_FUEL_LOGS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelLog));
-        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-        cache.fuelLogs = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore FuelLogs Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelLog));
+      items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+      cache.fuelLogs = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore FuelLogs Connection]', err?.message || err));
 
     // 4.1 Fuel Refills Subscription
     onSnapshot(collection(db, 'fuel_refills'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('fuel_refills', INITIAL_FUEL_REFILLS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelRefill));
-        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-        cache.fuelRefills = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore FuelRefills Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelRefill));
+      items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+      cache.fuelRefills = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore FuelRefills Connection]', err?.message || err));
 
     // 5. Maintenance Logs Subscription
     onSnapshot(collection(db, 'maintenance_logs'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('maintenance_logs', INITIAL_MAINTENANCE_LOGS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceLog));
-        items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        cache.maintenanceLogs = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore MaintenanceLogs Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceLog));
+      items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      cache.maintenanceLogs = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore MaintenanceLogs Connection]', err?.message || err));
 
     // 6. Machine Issues Subscription
     onSnapshot(collection(db, 'machine_issues'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('machine_issues', INITIAL_MACHINE_ISSUES);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MachineIssue));
-        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-        cache.machineIssues = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore Issues Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MachineIssue));
+      items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+      cache.machineIssues = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore Issues Connection]', err?.message || err));
 
     // 7. Preventive Items Subscription
     onSnapshot(collection(db, 'preventive_items'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('preventive_items', INITIAL_PREVENTIVE_ITEMS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as PreventiveMaintenanceItem));
-        cache.preventiveItems = items;
-        notifyDataUpdated();
-      }
-    }, (err) => console.error('[Firestore Preventive Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as PreventiveMaintenanceItem));
+      cache.preventiveItems = items;
+      notifyDataUpdated();
+    }, (err) => console.warn('[Firestore Preventive Connection]', err?.message || err));
 
     // 8. Alerts Subscription
     onSnapshot(collection(db, 'alerts'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('alerts', INITIAL_ALERTS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SmartAlert));
-        items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        cache.alerts = items;
-        notifyDataUpdated(false); // don't re-trigger alert check when alerts arrive
-      }
-    }, (err) => console.error('[Firestore Alerts Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SmartAlert));
+      items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      cache.alerts = items;
+      notifyDataUpdated(false); // don't re-trigger alert check when alerts arrive
+    }, (err) => console.warn('[Firestore Alerts Connection]', err?.message || err));
 
     // 9. Audit Logs Subscription
     onSnapshot(collection(db, 'audit_logs'), (snapshot) => {
-      if (snapshot.empty) {
-        seedCollection('audit_logs', INITIAL_AUDIT_LOGS);
-      } else {
-        const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
-        items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-        cache.auditLogs = items;
-        notifyDataUpdated(false);
-      }
-    }, (err) => console.error('[Firestore AuditLogs Error]', err));
+      const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
+      items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+      cache.auditLogs = items;
+      notifyDataUpdated(false);
+    }, (err) => console.warn('[Firestore AuditLogs Connection]', err?.message || err));
 
     // 10. System Settings Subscription
     onSnapshot(collection(db, 'settings'), (snapshot) => {
-      if (snapshot.empty) {
-        setDoc(doc(db, 'settings', 'config'), cleanUndefined(INITIAL_SETTINGS)).catch(console.error);
-      } else {
+      if (!snapshot.empty) {
         const configDoc = snapshot.docs.find(d => d.id === 'config') || snapshot.docs[0];
         if (configDoc) {
           cache.settings = configDoc.data() as SystemSettings;
           notifyDataUpdated();
         }
       }
-    }, (err) => console.error('[Firestore Settings Error]', err));
+    }, (err) => console.warn('[Firestore Settings Connection]', err?.message || err));
 
   } catch (err) {
     console.error('[Firestore init error]', err);
@@ -429,7 +379,7 @@ export function getVehicles(): Vehicle[] {
 }
 
 export function getCentralTanks(): CentralTank[] {
-  return cache.centralTanks && cache.centralTanks.length > 0 ? cache.centralTanks : INITIAL_CENTRAL_TANKS;
+  return cache.centralTanks || [];
 }
 
 export function getCentralTank(id: string): CentralTank | undefined {
@@ -444,15 +394,15 @@ export function getTankMovements(tankId?: string): TankMovement[] {
 }
 
 export function getGasStations(): GasStation[] {
-  return cache.gasStations;
+  return cache.gasStations || [];
 }
 
 export function getFuelLogs(): FuelLog[] {
-  return cache.fuelLogs;
+  return cache.fuelLogs || [];
 }
 
 export function getFuelRefills(): FuelRefill[] {
-  return cache.fuelRefills;
+  return cache.fuelRefills || [];
 }
 
 // Calculate Individual Tank Status (Tanque Central Quadra, Tanque Central Itapeva ou Genérico)
@@ -465,9 +415,9 @@ export function getTankStatus(targetTankId?: string) {
     targetTank = allTanks.find(t => t.id === targetTankId || (targetTankId.includes('quadra') && t.id === 'tank-quadra') || (targetTankId.includes('itapeva') && t.id === 'tank-itapeva'));
   }
   
-  // Fallback to first tank (Quadra) if not found
+  // Fallback to first tank if not found
   if (!targetTank) {
-    targetTank = allTanks[0] || INITIAL_CENTRAL_TANKS[0];
+    targetTank = allTanks[0];
   }
 
   const capacity = targetTank?.capacityLiters || 10000;

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   initStorage, getCurrentUser, getUsers, getVehicles, getGasStations, 
   getFuelLogs, getMaintenanceLogs, getAlerts, getAuditLogs, getSettings,
@@ -17,78 +17,64 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { CheckCircle2 } from 'lucide-react';
 
-// Lazy Loaded Views & Modals for optimum initial loading performance
-const DashboardView = React.lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
-const FuelLogsView = React.lazy(() => import('./components/FuelLogsView').then(m => ({ default: m.FuelLogsView })));
-const FleetManagementView = React.lazy(() => import('./components/FleetManagementView').then(m => ({ default: m.FleetManagementView })));
-const MaintenanceView = React.lazy(() => import('./components/MaintenanceView').then(m => ({ default: m.MaintenanceView })));
-const GasStationsView = React.lazy(() => import('./components/GasStationsView').then(m => ({ default: m.GasStationsView })));
-const StaffView = React.lazy(() => import('./components/StaffView').then(m => ({ default: m.StaffView })));
-const ReportsView = React.lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
-const AlertsView = React.lazy(() => import('./components/AlertsView').then(m => ({ default: m.AlertsView })));
-const AuditLogsView = React.lazy(() => import('./components/AuditLogsView').then(m => ({ default: m.AuditLogsView })));
-const SettingsAndAboutView = React.lazy(() => import('./components/SettingsAndAboutView').then(m => ({ default: m.SettingsAndAboutView })));
-const OperatorFuelingView = React.lazy(() => import('./components/OperatorFuelingView').then(m => ({ default: m.OperatorFuelingView })));
-const FuelingFormModal = React.lazy(() => import('./components/FuelingFormModal').then(m => ({ default: m.FuelingFormModal })));
-const QRCodeScannerModal = React.lazy(() => import('./components/QRCodeScannerModal').then(m => ({ default: m.QRCodeScannerModal })));
-const QRCodeModuleView = React.lazy(() => import('./components/QRCodeModuleView').then(m => ({ default: m.QRCodeModuleView })));
-const MachineDigitalSheetModal = React.lazy(() => import('./components/MachineDigitalSheetModal').then(m => ({ default: m.MachineDigitalSheetModal })));
-const OperatorDigitalSheetsView = React.lazy(() => import('./components/OperatorDigitalSheetsView').then(m => ({ default: m.OperatorDigitalSheetsView })));
-const LoginView = React.lazy(() => import('./components/LoginView').then(m => ({ default: m.LoginView })));
-
-const ViewLoader = () => (
-  <div className="flex items-center justify-center min-h-[300px] w-full">
-    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-400"></div>
-  </div>
-);
+import { DashboardView } from './components/DashboardView';
+import { FuelLogsView } from './components/FuelLogsView';
+import { FleetManagementView } from './components/FleetManagementView';
+import { MaintenanceView } from './components/MaintenanceView';
+import { GasStationsView } from './components/GasStationsView';
+import { StaffView } from './components/StaffView';
+import { ReportsView } from './components/ReportsView';
+import { AlertsView } from './components/AlertsView';
+import { AuditLogsView } from './components/AuditLogsView';
+import { SettingsAndAboutView } from './components/SettingsAndAboutView';
+import { OperatorFuelingView } from './components/OperatorFuelingView';
+import { FuelingFormModal } from './components/FuelingFormModal';
+import { QRCodeScannerModal } from './components/QRCodeScannerModal';
+import { QRCodeModuleView } from './components/QRCodeModuleView';
+import { MachineDigitalSheetModal } from './components/MachineDigitalSheetModal';
+import { OperatorDigitalSheetsView } from './components/OperatorDigitalSheetsView';
+import { LoginView } from './components/LoginView';
 
 export default function App() {
-  // Init Local Storage Seed
-  useEffect(() => {
-    initStorage();
-  }, []);
-
-  // State
-  const [currentUser, setCurrentUser] = useState<User | null>(getCurrentUser());
-  const [users, setUsers] = useState<User[]>(getUsers());
-  const [vehicles, setVehicles] = useState<Vehicle[]>(getVehicles());
-  const [gasStations, setGasStations] = useState<GasStation[]>(getGasStations());
-  const [fuelLogs, setFuelLogs] = useState<FuelLog[]>(getFuelLogs());
-  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>(getMaintenanceLogs());
-  const [machineIssues, setMachineIssues] = useState<MachineIssue[]>(getMachineIssues());
-  const [preventiveItems, setPreventiveItems] = useState<PreventiveMaintenanceItem[]>(getPreventiveItems());
-  const [alerts, setAlerts] = useState<SmartAlert[]>(getAlerts());
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(getAuditLogs());
-  const [settings, setSettings] = useState<SystemSettings>(getSettings());
+  // 1. All useState Hooks grouped strictly at the top
+  const [currentUser, setCurrentUser] = useState<User | null>(() => getCurrentUser());
+  const [users, setUsers] = useState<User[]>(() => getUsers());
+  const [vehicles, setVehicles] = useState<Vehicle[]>(() => getVehicles());
+  const [gasStations, setGasStations] = useState<GasStation[]>(() => getGasStations());
+  const [fuelLogs, setFuelLogs] = useState<FuelLog[]>(() => getFuelLogs());
+  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>(() => getMaintenanceLogs());
+  const [machineIssues, setMachineIssues] = useState<MachineIssue[]>(() => getMachineIssues());
+  const [preventiveItems, setPreventiveItems] = useState<PreventiveMaintenanceItem[]>(() => getPreventiveItems());
+  const [alerts, setAlerts] = useState<SmartAlert[]>(() => getAlerts());
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => getAuditLogs());
+  const [settings, setSettings] = useState<SystemSettings>(() => getSettings());
 
   // UI State
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [loginSuccessMessage, setLoginSuccessMessage] = useState<string | null>(null);
-
-  // Sync tab when currentUser changes or logs in
-  useEffect(() => {
-    if (currentUser) {
-      if (currentUser.role === 'FUNCIONARIO') {
-        const allowedFuncionarioTabs = ['operator-fueling', 'digital-sheets'];
-        if (!allowedFuncionarioTabs.includes(activeTab)) {
-          setActiveTab('operator-fueling');
-        }
-      }
-    }
-  }, [currentUser, activeTab]);
-
-  const darkMode = true;
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Modals
+  // Modals & Feedback State
   const [isFuelingModalOpen, setIsFuelingModalOpen] = useState<boolean>(false);
   const [preSelectedVehicleId, setPreSelectedVehicleId] = useState<string | undefined>(undefined);
   const [isQRScannerModalOpen, setIsQRScannerModalOpen] = useState<boolean>(false);
   const [selectedDigitalSheetVehicle, setSelectedDigitalSheetVehicle] = useState<Vehicle | null>(null);
+  const [fuelingSuccessFeedback, setFuelingSuccessFeedback] = useState<{
+    show: boolean;
+    liters: number;
+    equipmentName: string;
+  } | null>(null);
 
-  // Sync state on updates
+  const darkMode = true;
+
+  // 2. Storage initialization
+  useEffect(() => {
+    initStorage();
+  }, []);
+
+  // 3. Sync state on storage/Firestore updates
   const refreshState = useCallback(() => {
     const freshUser = getCurrentUser();
     setCurrentUser(freshUser);
@@ -109,7 +95,19 @@ export default function App() {
     return () => window.removeEventListener('andradeagro_data_updated', refreshState);
   }, [refreshState]);
 
-  // Listen for QR code scans or deep links via URL hash (e.g. #maintenance/v1 or #vehicle/v1)
+  // 4. Sync tab when currentUser changes or logs in
+  useEffect(() => {
+    if (currentUser) {
+      if (currentUser.role === 'FUNCIONARIO') {
+        const allowedFuncionarioTabs = ['operator-fueling', 'digital-sheets'];
+        if (!allowedFuncionarioTabs.includes(activeTab)) {
+          setActiveTab('operator-fueling');
+        }
+      }
+    }
+  }, [currentUser, activeTab]);
+
+  // 5. Listen for QR code scans or deep links via URL hash
   useEffect(() => {
     const handleHashCheck = () => {
       const hash = window.location.hash;
@@ -155,7 +153,6 @@ export default function App() {
       setActiveTab('dashboard');
     }
 
-    // Check if there is a pending vehicle deep link in the URL hash
     if (typeof window !== 'undefined' && window.location.hash) {
       const hash = window.location.hash;
       let matchedVehicleId: string | null = null;
@@ -178,12 +175,6 @@ export default function App() {
       }
     }
   };
-
-  const [fuelingSuccessFeedback, setFuelingSuccessFeedback] = useState<{
-    show: boolean;
-    liters: number;
-    equipmentName: string;
-  } | null>(null);
 
   const handleOpenFuelingModalWithEquipment = (equipmentId: string) => {
     const currentVehicles = getVehicles();
@@ -222,16 +213,14 @@ export default function App() {
     }
   };
 
-  // 1. If not authenticated, render Login Screen
+  // If not authenticated, render Login Screen
   if (!currentUser) {
     return (
-      <Suspense fallback={<ViewLoader />}>
-        <LoginView
-          onLoginSuccess={handleLoginSuccess}
-          darkMode={darkMode}
-          successMessage={loginSuccessMessage}
-        />
-      </Suspense>
+      <LoginView
+        onLoginSuccess={handleLoginSuccess}
+        darkMode={darkMode}
+        successMessage={loginSuccessMessage}
+      />
     );
   }
 
@@ -272,8 +261,7 @@ export default function App() {
 
         {/* Content View Container */}
         <main className="flex-1 p-3 sm:p-6 lg:p-8 overflow-y-auto max-w-[1600px] w-full mx-auto">
-          <Suspense fallback={<ViewLoader />}>
-            {activeTab === 'operator-fueling' && (
+          {activeTab === 'operator-fueling' && (
               <OperatorFuelingView
                 currentUser={currentUser}
                 vehicles={vehicles}
@@ -440,66 +428,63 @@ export default function App() {
                 darkMode={darkMode}
               />
             )}
-          </Suspense>
         </main>
       </div>
 
       {/* Global Modals */}
-      <Suspense fallback={null}>
-        {isFuelingModalOpen && (
-          <FuelingFormModal
-            isOpen={isFuelingModalOpen}
-            onClose={() => setIsFuelingModalOpen(false)}
-            onSubmit={handleAddFuelLog}
-            vehicles={vehicles}
-            gasStations={gasStations}
-            users={users}
-            currentUser={currentUser}
-            previousLogs={fuelLogs}
-            settings={settings}
-            preSelectedVehicleId={preSelectedVehicleId}
-            darkMode={darkMode}
-          />
-        )}
+      {isFuelingModalOpen && (
+        <FuelingFormModal
+          isOpen={isFuelingModalOpen}
+          onClose={() => setIsFuelingModalOpen(false)}
+          onSubmit={handleAddFuelLog}
+          vehicles={vehicles}
+          gasStations={gasStations}
+          users={users}
+          currentUser={currentUser}
+          previousLogs={fuelLogs}
+          settings={settings}
+          preSelectedVehicleId={preSelectedVehicleId}
+          darkMode={darkMode}
+        />
+      )}
 
-        {isQRScannerModalOpen && (
-          <QRCodeScannerModal
-            isOpen={isQRScannerModalOpen}
-            onClose={() => setIsQRScannerModalOpen(false)}
-            vehicles={vehicles}
-            fuelLogs={fuelLogs}
-            onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
-            darkMode={darkMode}
-          />
-        )}
+      {isQRScannerModalOpen && (
+        <QRCodeScannerModal
+          isOpen={isQRScannerModalOpen}
+          onClose={() => setIsQRScannerModalOpen(false)}
+          vehicles={vehicles}
+          fuelLogs={fuelLogs}
+          onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
+          darkMode={darkMode}
+        />
+      )}
 
-        {selectedDigitalSheetVehicle && (
-          <MachineDigitalSheetModal
-            isOpen={!!selectedDigitalSheetVehicle}
-            onClose={() => {
-              setSelectedDigitalSheetVehicle(null);
-              if (typeof window !== 'undefined' && window.location.hash) {
-                history.pushState("", document.title, window.location.pathname + window.location.search);
-              }
-            }}
-            vehicle={vehicles.find(v => v.id === selectedDigitalSheetVehicle.id) || selectedDigitalSheetVehicle}
-            fuelLogs={fuelLogs}
-            maintenanceLogs={maintenanceLogs}
-            machineIssues={machineIssues}
-            preventiveItems={preventiveItems}
-            currentUser={currentUser}
-            initialTab="OVERVIEW"
-            onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
-            onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}
-            onDeleteMaintenance={(id) => { deleteMaintenance(id); refreshState(); }}
-            onReportProblemSubmit={(issueData) => { addMachineIssue(issueData); refreshState(); }}
-            onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => { recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes); refreshState(); }}
-            onResolveIssue={(issueId) => { resolveMachineIssue(issueId); refreshState(); }}
-            onUpdateVehicleStatus={(vehicleId, newStatus) => { updateVehicle(vehicleId, { status: newStatus }); refreshState(); }}
-            darkMode={darkMode}
-          />
-        )}
-      </Suspense>
+      {selectedDigitalSheetVehicle && (
+        <MachineDigitalSheetModal
+          isOpen={!!selectedDigitalSheetVehicle}
+          onClose={() => {
+            setSelectedDigitalSheetVehicle(null);
+            if (typeof window !== 'undefined' && window.location.hash) {
+              history.pushState("", document.title, window.location.pathname + window.location.search);
+            }
+          }}
+          vehicle={vehicles.find(v => v.id === selectedDigitalSheetVehicle.id) || selectedDigitalSheetVehicle}
+          fuelLogs={fuelLogs}
+          maintenanceLogs={maintenanceLogs}
+          machineIssues={machineIssues}
+          preventiveItems={preventiveItems}
+          currentUser={currentUser}
+          initialTab="OVERVIEW"
+          onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
+          onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}
+          onDeleteMaintenance={(id) => { deleteMaintenance(id); refreshState(); }}
+          onReportProblemSubmit={(issueData) => { addMachineIssue(issueData); refreshState(); }}
+          onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => { recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes); refreshState(); }}
+          onResolveIssue={(issueId) => { resolveMachineIssue(issueId); refreshState(); }}
+          onUpdateVehicleStatus={(vehicleId, newStatus) => { updateVehicle(vehicleId, { status: newStatus }); refreshState(); }}
+          darkMode={darkMode}
+        />
+      )}
 
       {/* Fueling Success Feedback Toast / Overlay (Problem 4) */}
       {fuelingSuccessFeedback?.show && (

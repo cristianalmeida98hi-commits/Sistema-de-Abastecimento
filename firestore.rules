@@ -1,9 +1,51 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default allow read, write for system collections in AndradeAgro app
+    match /users/{document=**} {
+      allow read, write: if true;
+    }
+    match /vehicles/{document=**} {
+      allow read, write: if true;
+    }
+    match /central_tanks/{document=**} {
+      allow read, write: if true;
+    }
+    match /tank_movements/{document=**} {
+      allow read, write: if true;
+    }
+    match /gas_stations/{document=**} {
+      allow read, write: if true;
+    }
+    match /fuel_logs/{document=**} {
+      allow read, write: if true;
+    }
+    match /fuel_refills/{document=**} {
+      allow read, write: if true;
+    }
+    match /maintenance_logs/{document=**} {
+      allow read, write: if true;
+    }
+    match /machine_issues/{document=**} {
+      allow read, write: if true;
+    }
+    match /preventive_items/{document=**} {
+      allow read, write: if true;
+    }
+    match /alerts/{document=**} {
+      allow read, write: if true;
+    }
+    match /audit_logs/{document=**} {
+      allow read, write: if true;
+    }
+    match /settings/{document=**} {
+      allow read, write: if true;
+    }
+    match /system/{document=**} {
+      allow read, write: if true;
+    }
     match /{document=**} {
       allow read, write: if true;
     }
   }
 }
+

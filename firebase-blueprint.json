@@ -80,6 +80,18 @@
       "description": "Collection of system audit logs",
       "schema": "AuditLog"
     },
+    "central_tanks/{tankId}": {
+      "description": "Collection of central diesel tanks (Quadra, Itapeva)",
+      "schema": "CentralTank"
+    },
+    "tank_movements/{movementId}": {
+      "description": "Collection of fuel tank movements",
+      "schema": "TankMovement"
+    },
+    "fuel_refills/{refillId}": {
+      "description": "Collection of fuel supplier refills",
+      "schema": "FuelRefill"
+    },
     "settings/{settingId}": {
       "description": "System configuration documents",
       "schema": "Settings"

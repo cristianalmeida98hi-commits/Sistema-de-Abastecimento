@@ -378,13 +378,13 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   const handlePrintBadge = async (v: Vehicle) => {
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://andradeagro.app';
     const qrValue = `${origin}/#ficha-maquina/${v.id}`;
-    const qrDataUrl = await generateQRCodeDataUrl(qrValue, 250);
+    const qrDataUrl = await generateQRCodeDataUrl(qrValue, 350);
     const categoryLabel = getCategoryLabel(v.category);
     const sectorName = getSectorName(v.sector);
     const tankInfo = v.fuelType === 'NENHUM' ? 'Não aplica' : `${v.tankCapacityLiters}L (${getFuelTypeName(v.fuelType)})`;
 
-    const singleCardHtml = `
-      <div class="card">
+    const makeCardHtml = (extraClass = '') => `
+      <div class="card ${extraClass}">
         <div class="card-header">
           <span class="brand">ANDRADEAGRO</span>
           <span class="badge-cat">${categoryLabel}</span>
@@ -403,8 +403,6 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
       </div>
     `;
 
-    const fullSheetCardsHtml = Array(12).fill(singleCardHtml).join('');
-
     const htmlContent = `
       <!DOCTYPE html>
       <html lang="pt-BR">
@@ -418,55 +416,61 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
               margin: 6mm;
             }
             * { box-sizing: border-box; margin: 0; padding: 0; }
-            body {
+            html, body {
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-              background: #f8fafc;
+              background: #0f172a;
               color: #0f172a;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
+              width: 100%;
+              height: auto;
             }
             .no-print {
-              background: #042d23;
+              background: #022c22;
               color: #ffffff;
-              padding: 14px 20px;
-              border-bottom: 2px solid #064E3B;
+              padding: 12px 20px;
+              border-bottom: 2px solid #044E36;
               display: flex;
               flex-wrap: wrap;
               align-items: center;
               justify-content: space-between;
               gap: 12px;
-              box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+              box-shadow: 0 4px 14px rgba(0,0,0,0.3);
               position: sticky;
               top: 0;
               z-index: 1000;
             }
             .no-print h2 {
-              font-size: 14px;
-              font-weight: 800;
+              font-size: 13px;
+              font-weight: 900;
               color: #FACC15;
               letter-spacing: 0.5px;
             }
             .mode-tabs {
               display: flex;
-              gap: 6px;
-              background: #021a14;
+              flex-wrap: wrap;
+              gap: 4px;
+              background: #011913;
               padding: 4px;
               border-radius: 8px;
+              border: 1px solid #044E36;
             }
             .mode-btn {
-              padding: 6px 12px;
-              font-size: 12px;
+              padding: 6px 11px;
+              font-size: 11px;
               font-weight: 700;
               border-radius: 6px;
               border: none;
               cursor: pointer;
               background: transparent;
               color: #94a3b8;
-              transition: all 0.2s;
+              transition: all 0.15s;
+              white-space: nowrap;
             }
             .mode-btn.active {
-              background: #064E3B;
+              background: #044E36;
               color: #ffffff;
+              box-shadow: 0 1px 3px rgba(0,0,0,0.25);
             }
             .action-btns {
               display: flex;
@@ -480,14 +484,16 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
               cursor: pointer;
               border: none;
             }
-            .btn-print { background: #FACC15; color: #042d23; }
+            .btn-print { background: #FACC15; color: #022c22; }
             .btn-print:hover { background: #eab308; }
             .btn-close { background: #334155; color: #ffffff; }
 
             .page-container {
-              padding: 10mm;
+              padding: 12mm 0 20mm 0;
               display: flex;
-              justify-content: center;
+              flex-direction: column;
+              align-items: center;
+              gap: 10mm;
             }
 
             /* Single Card Mode */
@@ -496,133 +502,271 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
               flex-direction: column;
               align-items: center;
               gap: 10px;
-              padding: 10px;
+              padding: 16px;
               background: #ffffff;
-              border: 1.5px dashed #cbd5e1;
+              border: 2px dashed #94a3b8;
               border-radius: 12px;
+              box-shadow: 0 6px 20px rgba(0,0,0,0.3);
             }
             .cut-guide {
               font-size: 11px;
-              color: #64748b;
-              font-weight: 600;
+              color: #475569;
+              font-weight: 700;
             }
 
-            /* Full Sheet 12-up Mode */
-            .grid-12 {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              gap: 3.2mm;
-              width: 100%;
-              max-width: 198mm;
-            }
-
-            .card {
+            /* Multi-card Sheet Pages */
+            .sheet-page {
               box-sizing: border-box;
-              width: 100%;
-              height: 67mm;
-              max-height: 67mm;
+              width: 198mm;
+              height: 284mm;
+              max-height: 284mm;
+              background: #ffffff;
+              box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+              border-radius: 4px;
+              page-break-after: always !important;
+              break-after: page !important;
               page-break-inside: avoid !important;
               break-inside: avoid !important;
-              border: 1.5px solid #064E3B;
+              overflow: hidden;
+              display: flex;
+              flex-wrap: wrap;
+              align-content: flex-start;
+            }
+            .sheet-page:last-child {
+              page-break-after: auto !important;
+              break-after: auto !important;
+            }
+
+            /* Card styling with vivid colors & high contrast */
+            .card {
+              box-sizing: border-box;
+              border: 2px solid #044E36;
               border-radius: 6px;
-              padding: 3.2mm 2.8mm;
               display: flex;
               flex-direction: column;
               justify-content: space-between;
               align-items: center;
               background: #ffffff;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+              break-inside: avoid-page !important;
+              -webkit-column-break-inside: avoid !important;
               overflow: hidden;
+              position: relative;
             }
             .card-header {
               width: 100%;
               display: flex;
               justify-content: space-between;
               align-items: center;
-              border-bottom: 1px solid #e2e8f0;
-              padding-bottom: 1.2mm;
+              border-bottom: 1.5px solid #e2e8f0;
+              padding-bottom: 1mm;
             }
             .brand {
-              font-size: 8.5pt;
               font-weight: 900;
-              color: #064E3B;
-              letter-spacing: 0.5px;
+              color: #044E36;
+              letter-spacing: 0.6px;
             }
             .badge-cat {
-              font-size: 6.5pt;
               font-weight: 800;
               text-transform: uppercase;
-              background: #ecfdf5;
-              color: #064E3B;
-              padding: 1px 4px;
-              border-radius: 3px;
-              border: 0.5px solid #a7f3d0;
+              background: #dcfce7;
+              color: #044E36;
+              padding: 1.5px 5px;
+              border-radius: 4px;
+              border: 1px solid #10b981;
             }
             .card-ident {
               width: 100%;
               text-align: center;
-              margin-top: 1mm;
+              margin-top: 0.8mm;
             }
             .model {
-              font-size: 8pt;
-              font-weight: 800;
-              color: #0f172a;
-              line-height: 1.1;
+              font-weight: 850;
+              color: #020617;
+              line-height: 1.15;
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
             }
             .code-badge {
-              background: #064E3B;
+              background: #022c22;
               color: #FACC15;
               font-weight: 900;
-              font-size: 8.5pt;
-              padding: 1.5px 6px;
+              padding: 2px 7px;
               border-radius: 4px;
+              border: 1px solid #044E36;
               display: inline-block;
-              margin-top: 1mm;
-              letter-spacing: 0.5px;
+              margin-top: 0.8mm;
+              letter-spacing: 0.7px;
+              box-shadow: 0 1px 2px rgba(0,0,0,0.1);
             }
             .qr-container {
               display: flex;
               align-items: center;
               justify-content: center;
-              margin: 1mm 0;
+              margin: 0.8mm 0;
+              background: #ffffff;
+              padding: 1.5px;
+              border: 1px solid #e2e8f0;
+              border-radius: 4px;
             }
             .qr-container img {
-              width: 33mm;
-              height: 33mm;
               display: block;
             }
             .card-footer {
               width: 100%;
-              border-top: 1px solid #e2e8f0;
-              padding-top: 1.2mm;
+              border-top: 1.5px solid #e2e8f0;
+              background: #f8fafc;
+              padding: 1mm 2.5mm;
               display: flex;
               justify-content: space-between;
-              font-size: 6.5pt;
               font-weight: 700;
-              color: #475569;
+              color: #1e293b;
               white-space: nowrap;
               overflow: hidden;
             }
 
+            /* Formats */
+            /* 16 por folha (4x4) */
+            .sheet-page.d-16 { gap: 2.2mm; padding: 2.5mm; }
+            .sheet-page.d-16 .card {
+              width: calc((100% - 3 * 2.2mm) / 4);
+              height: 66mm;
+              max-height: 66mm;
+              padding: 2mm 1.8mm;
+            }
+            .sheet-page.d-16 .brand { font-size: 7pt; }
+            .sheet-page.d-16 .badge-cat { font-size: 5.5pt; padding: 0.5px 3px; }
+            .sheet-page.d-16 .model { font-size: 7pt; }
+            .sheet-page.d-16 .code-badge { font-size: 7.5pt; padding: 1px 4px; }
+            .sheet-page.d-16 .qr-container img { width: 27mm; height: 27mm; }
+            .sheet-page.d-16 .card-footer { font-size: 5.5pt; padding-top: 1mm; }
+
+            /* 12 por folha (3x4) */
+            .sheet-page.d-12 { gap: 2.8mm; padding: 3mm; }
+            .sheet-page.d-12 .card {
+              width: calc((100% - 2 * 2.8mm) / 3);
+              height: 66mm;
+              max-height: 66mm;
+              padding: 2.8mm 2.4mm;
+            }
+            .sheet-page.d-12 .brand { font-size: 8pt; }
+            .sheet-page.d-12 .badge-cat { font-size: 6.5pt; }
+            .sheet-page.d-12 .model { font-size: 8pt; }
+            .sheet-page.d-12 .code-badge { font-size: 8.5pt; }
+            .sheet-page.d-12 .qr-container img { width: 33mm; height: 33mm; }
+            .sheet-page.d-12 .card-footer { font-size: 6.5pt; }
+
+            /* 8 por folha (2x4) */
+            .sheet-page.d-8 { gap: 3.5mm; padding: 3mm; }
+            .sheet-page.d-8 .card {
+              width: calc((100% - 1 * 3.5mm) / 2);
+              height: 66mm;
+              max-height: 66mm;
+              padding: 3mm 4mm;
+            }
+            .sheet-page.d-8 .brand { font-size: 8.5pt; }
+            .sheet-page.d-8 .badge-cat { font-size: 7pt; }
+            .sheet-page.d-8 .model { font-size: 8.5pt; }
+            .sheet-page.d-8 .code-badge { font-size: 9pt; }
+            .sheet-page.d-8 .qr-container img { width: 33mm; height: 33mm; }
+            .sheet-page.d-8 .card-footer { font-size: 7pt; }
+
+            /* 4 por folha (2x2) */
+            .sheet-page.d-4 { gap: 6mm; padding: 4mm; }
+            .sheet-page.d-4 .card {
+              width: calc((100% - 1 * 6mm) / 2);
+              height: 133mm;
+              max-height: 133mm;
+              padding: 5mm 6mm;
+            }
+            .sheet-page.d-4 .brand { font-size: 11pt; }
+            .sheet-page.d-4 .badge-cat { font-size: 9pt; }
+            .sheet-page.d-4 .model { font-size: 11pt; }
+            .sheet-page.d-4 .code-badge { font-size: 12pt; padding: 3px 10px; }
+            .sheet-page.d-4 .qr-container img { width: 68mm; height: 68mm; }
+            .sheet-page.d-4 .card-footer { font-size: 9pt; }
+
+            /* Standalone single card style */
+            .single-wrapper .card {
+              width: 72mm;
+              height: 72mm;
+              padding: 3mm;
+            }
+            .single-wrapper .brand { font-size: 8.5pt; }
+            .single-wrapper .badge-cat { font-size: 7pt; }
+            .single-wrapper .model { font-size: 8.5pt; }
+            .single-wrapper .code-badge { font-size: 9pt; }
+            .single-wrapper .qr-container img { width: 36mm; height: 36mm; }
+            .single-wrapper .card-footer { font-size: 7pt; }
+
+            /* Absolute anti-break protection for Mobile & Desktop printing */
             @media print {
               .no-print { display: none !important; }
-              body { background: #ffffff !important; padding: 0 !important; margin: 0 !important; }
-              .page-container { padding: 0 !important; }
-              .single-wrapper { border: none !important; padding: 0 !important; }
+              html, body {
+                background: #ffffff !important;
+                color: #0f172a !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                width: 100% !important;
+                height: auto !important;
+                overflow: visible !important;
+              }
+              .page-container {
+                padding: 0 !important;
+                margin: 0 !important;
+                display: block !important;
+                width: 100% !important;
+                gap: 0 !important;
+              }
+              .single-wrapper {
+                border: none !important;
+                box-shadow: none !important;
+                padding: 0 !important;
+              }
               .cut-guide { display: none !important; }
+              .sheet-page {
+                margin: 0 !important;
+                box-shadow: none !important;
+                border-radius: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                height: 284mm !important;
+                max-height: 284mm !important;
+                page-break-after: always !important;
+                break-after: page !important;
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                overflow: hidden !important;
+                display: flex !important;
+                flex-wrap: wrap !important;
+                align-content: flex-start !important;
+              }
+              .sheet-page:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+              }
+              .card {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                break-inside: avoid-page !important;
+                -webkit-column-break-inside: avoid !important;
+              }
             }
           </style>
         </head>
         <body>
           <div class="no-print">
             <div>
-              <h2>Etiqueta: ${v.model} (${v.licensePlate || v.patrimonyCode})</h2>
+              <h2>${v.model} (${v.licensePlate || v.patrimonyCode})</h2>
             </div>
             <div class="mode-tabs">
-              <button class="mode-btn active" id="btn-single" onclick="setMode('single')">1 Etiqueta Avulsa</button>
-              <button class="mode-btn" id="btn-full" onclick="setMode('full')">📋 Folha Completa (12 Etiquetas)</button>
+              <button class="mode-btn active" id="btn-m-single" onclick="setMode('single')">1 Etiqueta Avulsa</button>
+              <button class="mode-btn" id="btn-m-16" onclick="setMode(16)">📋 Folha 16 (Máx. Rendimento)</button>
+              <button class="mode-btn" id="btn-m-12" onclick="setMode(12)">📋 Folha 12 (Padrão)</button>
+              <button class="mode-btn" id="btn-m-8" onclick="setMode(8)">📋 Folha 8 (Amplo)</button>
+              <button class="mode-btn" id="btn-m-4" onclick="setMode(4)">📋 Folha 4 (Grande)</button>
             </div>
             <div class="action-btns">
               <button class="btn btn-print" onclick="window.print()">🖨️ Imprimir</button>
@@ -631,33 +775,49 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
           </div>
 
           <div class="page-container" id="content-container">
-            <div class="single-wrapper" id="single-view" style="width: 67mm;">
-              <span class="cut-guide">✂️ Linha de Corte</span>
-              ${singleCardHtml}
+            <div class="single-wrapper" id="single-view">
+              <span class="cut-guide">✂️ Linha de Corte da Etiqueta</span>
+              ${makeCardHtml()}
             </div>
-            <div class="grid-12" id="full-view" style="display: none;">
-              ${fullSheetCardsHtml}
+            <div class="sheet-page d-16" id="view-16" style="display: none;">
+              ${Array(16).fill(makeCardHtml()).join('')}
+            </div>
+            <div class="sheet-page d-12" id="view-12" style="display: none;">
+              ${Array(12).fill(makeCardHtml()).join('')}
+            </div>
+            <div class="sheet-page d-8" id="view-8" style="display: none;">
+              ${Array(8).fill(makeCardHtml()).join('')}
+            </div>
+            <div class="sheet-page d-4" id="view-4" style="display: none;">
+              ${Array(4).fill(makeCardHtml()).join('')}
             </div>
           </div>
 
           <script>
             function setMode(mode) {
-              const singleView = document.getElementById('single-view');
-              const fullView = document.getElementById('full-view');
-              const btnSingle = document.getElementById('btn-single');
-              const btnFull = document.getElementById('btn-full');
+              const views = {
+                'single': document.getElementById('single-view'),
+                '16': document.getElementById('view-16'),
+                '12': document.getElementById('view-12'),
+                '8': document.getElementById('view-8'),
+                '4': document.getElementById('view-4'),
+              };
+              const buttons = {
+                'single': document.getElementById('btn-m-single'),
+                '16': document.getElementById('btn-m-16'),
+                '12': document.getElementById('btn-m-12'),
+                '8': document.getElementById('btn-m-8'),
+                '4': document.getElementById('btn-m-4'),
+              };
 
-              if (mode === 'single') {
-                singleView.style.display = 'flex';
-                fullView.style.display = 'none';
-                btnSingle.classList.add('active');
-                btnFull.classList.remove('active');
-              } else {
-                singleView.style.display = 'none';
-                fullView.style.display = 'grid';
-                btnSingle.classList.remove('active');
-                btnFull.classList.add('active');
-              }
+              Object.keys(views).forEach(key => {
+                if (views[key]) views[key].style.display = 'none';
+                if (buttons[key]) buttons[key].classList.remove('active');
+              });
+
+              const key = String(mode);
+              if (views[key]) views[key].style.display = 'flex';
+              if (buttons[key]) buttons[key].classList.add('active');
             }
           </script>
         </body>

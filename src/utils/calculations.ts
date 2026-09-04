@@ -1,4 +1,4 @@
-import { FuelLog, Vehicle, FuelType, Sector } from '../types';
+import { FuelLog, Vehicle, FuelType, Sector, GasStation } from '../types';
 import { getOperationTypeName, getActivityTypeName } from './operations';
 
 export function formatCurrency(amount: number): string {
@@ -60,6 +60,51 @@ export function getFuelTypeName(fuelType: FuelType | string | undefined | null):
     case 'ARLA_32': return 'Arla 32';
     default: return fuelType;
   }
+}
+
+/**
+ * Resolves the precise price per liter for a given fuel type and gas station.
+ * Strictly respects gasoline, ethanol, arla, and diesel categories without cross-contamination.
+ */
+export function getStationFuelPrice(station?: GasStation, fuelType?: FuelType | string | null): number {
+  if (!fuelType || fuelType === 'NENHUM') {
+    return 0;
+  }
+
+  const rawType = String(fuelType).toUpperCase();
+  const prices = station?.pricePerLiter;
+
+  // 1. Direct match in station's price map
+  if (prices && typeof (prices as any)[rawType] === 'number' && (prices as any)[rawType] > 0) {
+    return (prices as any)[rawType];
+  }
+
+  // 2. Category-based resolution
+  if (rawType.includes('GASOLINA')) {
+    if (rawType.includes('GRID') || rawType.includes('ADITIVADA')) {
+      return prices?.GASOLINA_GRID || prices?.GASOLINA_COMUM || 6.29;
+    }
+    return prices?.GASOLINA_COMUM || prices?.GASOLINA_GRID || 5.99;
+  }
+
+  if (rawType.includes('ETANOL') || rawType.includes('ALCOOL')) {
+    return prices?.ETANOL || 3.89;
+  }
+
+  if (rawType.includes('ARLA')) {
+    return prices?.ARLA_32 || 2.50;
+  }
+
+  if (rawType.includes('S500')) {
+    return prices?.DIESEL_S500 || prices?.DIESEL_S10 || 5.59;
+  }
+
+  if (rawType.includes('DIESEL')) {
+    return prices?.DIESEL_S10 || prices?.DIESEL_S500 || 5.79;
+  }
+
+  // Default fallback according to station diesel
+  return prices?.DIESEL_S10 || 5.79;
 }
 
 export function getSectorName(sector: Sector): string {

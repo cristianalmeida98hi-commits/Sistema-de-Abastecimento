@@ -8,6 +8,7 @@ import {
   getOperationTypeName, 
   getActivityTypeName 
 } from '../utils/operations';
+import { getStationFuelPrice, formatCurrency, getFuelTypeName } from '../utils/calculations';
 import { VehicleSelector } from './VehicleSelector';
 
 interface OperatorFuelingViewProps {
@@ -63,6 +64,11 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
   const activeVehicle = vehicles.find(v => v.id === selectedVehicleId);
   const isVehicleKm = activeVehicle?.category === 'VEICULO';
 
+  const currentStation = gasStations.find(g => g.id === selectedGasStationId) || gasStations[0];
+  const activeFuelType = activeVehicle?.fuelType && activeVehicle.fuelType !== 'NENHUM' ? activeVehicle.fuelType : 'DIESEL_S10';
+  const activePricePerLiter = getStationFuelPrice(currentStation, activeFuelType);
+  const activeTotalValue = (Number(liters) || 0) * activePricePerLiter;
+
   // Auto set default hourmeter / km when vehicle changes
   React.useEffect(() => {
     if (activeVehicle) {
@@ -105,11 +111,11 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
     setIsSubmitting(true);
 
     try {
-      const station = gasStations.find(g => g.id === selectedGasStationId) || gasStations[0];
+      const station = currentStation;
       const litersNum = Number(liters);
-      const fuelType = activeVehicle?.fuelType || 'DIESEL_S10';
-      const pricePerLiter = station?.pricePerLiter?.[fuelType] || 5.80;
-      const totalValue = litersNum * pricePerLiter;
+      const fuelType = activeFuelType;
+      const pricePerLiter = activePricePerLiter;
+      const totalValue = activeTotalValue;
       const nowIso = new Date().toISOString();
 
       const newLogData: Omit<FuelLog, 'id' | 'createdAt'> = {
@@ -441,10 +447,14 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
           >
             {gasStations.map((stn) => (
               <option key={stn.id} value={stn.id}>
-                {stn.name} ({stn.type})
+                {stn.name} ({stn.type === 'INTERNO' ? 'Tanque Sede' : 'Externo'})
               </option>
             ))}
           </select>
+          <div className="flex items-center justify-between text-[11px] font-bold text-emerald-600 dark:text-[#FACC15] mt-1.5 px-1">
+            <span>Combustível: <strong>{getFuelTypeName(activeFuelType)}</strong> ({formatCurrency(activePricePerLiter)}/L)</span>
+            <span>Total: <strong>{formatCurrency(activeTotalValue)}</strong></span>
+          </div>
         </div>
 
         {/* 7. Observações / Atividade Personalizada */}

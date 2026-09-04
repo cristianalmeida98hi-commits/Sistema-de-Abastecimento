@@ -553,6 +553,24 @@ export const INITIAL_GAS_STATIONS: GasStation[] = [
       NENHUM: 0
     },
     active: true
+  },
+  {
+    id: 'stn-bom-jesus',
+    name: 'Bom Jesus de Quadra',
+    type: 'EXTERNO',
+    supplierName: 'Auto Posto Bom Jesus de Quadra',
+    cnpj: '45.678.901/0001-23',
+    location: 'Rod. SP-143, Quadra - SP',
+    pricePerLiter: {
+      DIESEL_S10: 6.09,
+      DIESEL_S500: 5.89,
+      GASOLINA_COMUM: 6.25,
+      GASOLINA_GRID: 6.55,
+      ETANOL: 4.19,
+      ARLA_32: 2.90,
+      NENHUM: 0
+    },
+    active: true
   }
 ];
 

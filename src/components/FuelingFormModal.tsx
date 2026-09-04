@@ -6,7 +6,7 @@ import {
 import { Vehicle, GasStation, User, FuelType, FuelLog, SystemSettings, OperationType, ActivityType } from '../types';
 import { 
   calculateFuelLogMetrics, formatCurrency, getFuelTypeName, getSectorName,
-  getActivitiesForOperation, OPERATION_OPTIONS 
+  getActivitiesForOperation, OPERATION_OPTIONS, getStationFuelPrice 
 } from '../utils/calculations';
 import { getTankStatus } from '../utils/storage';
 import { VehicleSelector } from './VehicleSelector';
@@ -81,12 +81,23 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   );
 
   const [fuelType, setFuelType] = useState<FuelType>(
-    selectedEquipment?.fuelType || 'DIESEL_S10'
+    selectedEquipment?.fuelType && selectedEquipment.fuelType !== 'NENHUM' ? selectedEquipment.fuelType : 'DIESEL_S10'
   );
+
+  // Automatically synchronize fuel type when selected equipment changes
+  useEffect(() => {
+    if (selectedEquipment?.fuelType && selectedEquipment.fuelType !== 'NENHUM') {
+      setFuelType(selectedEquipment.fuelType);
+    }
+  }, [selectedEquipment?.id, selectedEquipment?.fuelType]);
 
   const [liters, setLiters] = useState<number | string>(50);
 
-  const pricePerLiter = selectedStation?.pricePerLiter?.[fuelType] || 5.79;
+  // Strictly compute price per liter based on fuel type and station
+  const pricePerLiter = useMemo(
+    () => getStationFuelPrice(selectedStation, fuelType),
+    [selectedStation, fuelType]
+  );
 
   const isKmBased = selectedEquipment?.category === 'VEICULO';
   const initialCurrentKmOrHour = isKmBased 

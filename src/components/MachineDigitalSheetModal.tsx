@@ -75,9 +75,22 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
   // Oil Change Direct Registration & Configuration State
   const [isOilConfigOpen, setIsOilConfigOpen] = useState(false);
   const [oilConfigActive, setOilConfigActive] = useState<boolean>(vehicle.oilChangeControlActive !== false);
-  const [oilConfigInterval, setOilConfigInterval] = useState<number>(vehicle.oilChangeIntervalHours || vehicle.maintenanceIntervalHours || 300);
-  const [oilConfigAdvance, setOilConfigAdvance] = useState<number>(vehicle.oilChangeWarningAdvanceHours !== undefined ? vehicle.oilChangeWarningAdvanceHours : 50);
-  const [oilConfigRefHourmeter, setOilConfigRefHourmeter] = useState<number>(vehicle.lastOilChangeHourmeter !== undefined ? vehicle.lastOilChangeHourmeter : (vehicle.currentHourmeter || 0));
+  const isVehicleKm = vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
+  const [oilConfigInterval, setOilConfigInterval] = useState<number | string>(
+    isVehicleKm 
+      ? (vehicle.oilChangeIntervalKm || vehicle.maintenanceIntervalKm || 10000)
+      : (vehicle.oilChangeIntervalHours || vehicle.maintenanceIntervalHours || 300)
+  );
+  const [oilConfigAdvance, setOilConfigAdvance] = useState<number | string>(
+    isVehicleKm
+      ? (vehicle.oilChangeWarningAdvanceKm !== undefined ? vehicle.oilChangeWarningAdvanceKm : (vehicle.maintenanceWarningAdvanceKm || 1000))
+      : (vehicle.oilChangeWarningAdvanceHours !== undefined ? vehicle.oilChangeWarningAdvanceHours : (vehicle.maintenanceWarningAdvanceHours || 50))
+  );
+  const [oilConfigRefHourmeter, setOilConfigRefHourmeter] = useState<number | string>(
+    isVehicleKm
+      ? (vehicle.lastOilChangeKm !== undefined ? vehicle.lastOilChangeKm : (vehicle.currentKm || 0))
+      : (vehicle.lastOilChangeHourmeter !== undefined ? vehicle.lastOilChangeHourmeter : (vehicle.currentHourmeter || 0))
+  );
   const [isSavingOilConfig, setIsSavingOilConfig] = useState(false);
 
   const [isDirectOilChangeOpen, setIsDirectOilChangeOpen] = useState(false);
@@ -328,16 +341,25 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
     setTimeout(() => setActionSuccessMsg(null), 4000);
   };
 
-  // Save Oil Change Configuration & Reference Hourmeter
+  // Save Oil Change Configuration & Reference Hourmeter / Km
   const handleSaveOilConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingOilConfig(true);
     try {
+      const isVehicleKm = vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
+      const intervalVal = Math.max(1, Number(oilConfigInterval) || (isVehicleKm ? 10000 : 300));
+      const advanceVal = Math.max(0, Number(oilConfigAdvance) || (isVehicleKm ? 1000 : 50));
+      const refVal = Math.max(0, Number(oilConfigRefHourmeter) || 0);
+
       await setOilChangeConfigAndReference(vehicle.id, {
         active: oilConfigActive,
-        intervalHours: oilConfigInterval,
-        warningAdvanceHours: oilConfigAdvance,
-        referenceHourmeter: oilConfigRefHourmeter
+        intervalHours: !isVehicleKm ? intervalVal : undefined,
+        intervalKm: isVehicleKm ? intervalVal : undefined,
+        warningAdvanceHours: !isVehicleKm ? advanceVal : undefined,
+        warningAdvanceKm: isVehicleKm ? advanceVal : undefined,
+        referenceHourmeter: !isVehicleKm ? refVal : undefined,
+        referenceKm: isVehicleKm ? refVal : undefined,
+        isKm: isVehicleKm
       });
       setActionSuccessMsg('Configuração de troca de óleo atualizada com sucesso!');
       setIsOilConfigOpen(false);
@@ -354,6 +376,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
   const handleSaveDirectOilChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingDirectOil(true);
+    const isVehicleKm = vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
     try {
       await recordOilChange(
         vehicle.id,
@@ -366,10 +389,11 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
           oilQuantityLiters: directOilLiters > 0 ? directOilLiters : undefined,
           filtersReplaced: directOilFilters,
           performedBy: directOilPerformedBy || currentUser.name,
-          supplierOrWorkshop: directOilSupplier
+          supplierOrWorkshop: directOilSupplier,
+          isKm: isVehicleKm
         }
       );
-      setActionSuccessMsg(`Troca de óleo registrada com sucesso no horímetro ${directOilHourmeter}h!`);
+      setActionSuccessMsg(`Troca de óleo registrada com sucesso no ${isVehicleKm ? 'KM' : 'horímetro'} ${directOilHourmeter.toLocaleString('pt-BR')}${isVehicleKm ? ' km' : 'h'}!`);
       setIsDirectOilChangeOpen(false);
       setTimeout(() => setActionSuccessMsg(null), 4000);
     } catch (err) {
@@ -960,10 +984,23 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                           <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
                             <button
                               onClick={() => {
+                                const isKm = oilStatus.unit === 'km' || vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
                                 setOilConfigActive(vehicle.oilChangeControlActive !== false);
-                                setOilConfigInterval(vehicle.oilChangeIntervalHours || vehicle.maintenanceIntervalHours || 300);
-                                setOilConfigAdvance(vehicle.oilChangeWarningAdvanceHours !== undefined ? vehicle.oilChangeWarningAdvanceHours : 50);
-                                setOilConfigRefHourmeter(vehicle.lastOilChangeHourmeter !== undefined ? vehicle.lastOilChangeHourmeter : (vehicle.currentHourmeter || 0));
+                                setOilConfigInterval(
+                                  isKm
+                                    ? (vehicle.oilChangeIntervalKm || vehicle.maintenanceIntervalKm || 10000)
+                                    : (vehicle.oilChangeIntervalHours || vehicle.maintenanceIntervalHours || 300)
+                                );
+                                setOilConfigAdvance(
+                                  isKm
+                                    ? (vehicle.oilChangeWarningAdvanceKm !== undefined ? vehicle.oilChangeWarningAdvanceKm : (vehicle.maintenanceWarningAdvanceKm || 1000))
+                                    : (vehicle.oilChangeWarningAdvanceHours !== undefined ? vehicle.oilChangeWarningAdvanceHours : (vehicle.maintenanceWarningAdvanceHours || 50))
+                                );
+                                setOilConfigRefHourmeter(
+                                  isKm
+                                    ? (vehicle.lastOilChangeKm !== undefined ? vehicle.lastOilChangeKm : (vehicle.currentKm || 0))
+                                    : (vehicle.lastOilChangeHourmeter !== undefined ? vehicle.lastOilChangeHourmeter : (vehicle.currentHourmeter || 0))
+                                );
                                 setIsOilConfigOpen(true);
                               }}
                               className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-emerald-900/50 hover:bg-slate-100 dark:hover:bg-emerald-800 text-slate-700 dark:text-emerald-200 border border-emerald-800/30 flex items-center gap-1.5 transition-colors"
@@ -974,7 +1011,8 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
 
                             <button
                               onClick={() => {
-                                setDirectOilHourmeter(vehicle.currentHourmeter || 0);
+                                const isKm = oilStatus.unit === 'km' || vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
+                                setDirectOilHourmeter(isKm ? (vehicle.currentKm || 0) : (vehicle.currentHourmeter || 0));
                                 setDirectOilDate(new Date().toISOString().slice(0, 10));
                                 setDirectOilPerformedBy(currentUser?.name || '');
                                 setIsDirectOilChangeOpen(true);
@@ -994,42 +1032,52 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
 
               {/* Direct Oil Change Modal inside Digital Sheet */}
               {isDirectOilChangeOpen && (
-                <div className="p-4 sm:p-5 rounded-3xl bg-amber-500/10 border-2 border-amber-500/40 space-y-3.5 animate-in fade-in">
-                  <div className="flex items-center justify-between border-b pb-2 border-amber-500/30">
-                    <h4 className="font-black text-sm text-amber-900 dark:text-amber-200 flex items-center gap-2">
-                      <Droplet className="w-4 h-4 text-amber-500 fill-amber-500" />
-                      <span>Registrar Troca de Óleo - {vehicle.name}</span>
-                    </h4>
-                    <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
-                      Ciclo: {vehicle.oilChangeIntervalHours || 300} Horas
-                    </span>
-                  </div>
+                (() => {
+                  const isKm = vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
+                  const cycleInterval = isKm
+                    ? (Number(vehicle.oilChangeIntervalKm) || Number(vehicle.maintenanceIntervalKm) || 10000)
+                    : (Number(vehicle.oilChangeIntervalHours) || Number(vehicle.maintenanceIntervalHours) || 300);
+                  const currentUnit = isKm ? 'km' : 'h';
+                  const currentOfficial = isKm ? (vehicle.currentKm || 0) : (vehicle.currentHourmeter || 0);
 
-                  <form onSubmit={handleSaveDirectOilChange} className="space-y-3 text-xs">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
-                          Horímetro Atual no Momento da Troca (h) *
-                        </label>
-                        <input
-                          type="number"
-                          step="0.1"
-                          required
-                          value={directOilHourmeter}
-                          onChange={(e) => setDirectOilHourmeter(parseFloat(e.target.value) || 0)}
-                          className={`w-full p-2.5 rounded-xl border font-black text-sm ${
-                            darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
-                          }`}
-                        />
-                        <p className="text-[10px] text-slate-500 mt-1">
-                          Próxima troca será calculada para: <strong>{directOilHourmeter + (vehicle.oilChangeIntervalHours || 300)}h</strong>
-                        </p>
-                        {directOilHourmeter < (vehicle.currentHourmeter || 0) && (
-                          <p className="text-[10px] text-amber-500 font-bold mt-1">
-                            ⚠️ Atenção: O valor digitado ({directOilHourmeter}h) é menor que o valor atual oficial ({vehicle.currentHourmeter || 0}h). O horímetro oficial da máquina será mantido no maior valor.
-                          </p>
-                        )}
+                  return (
+                    <div className="p-4 sm:p-5 rounded-3xl bg-amber-500/10 border-2 border-amber-500/40 space-y-3.5 animate-in fade-in">
+                      <div className="flex items-center justify-between border-b pb-2 border-amber-500/30">
+                        <h4 className="font-black text-sm text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                          <Droplet className="w-4 h-4 text-amber-500 fill-amber-500" />
+                          <span>Registrar Troca de Óleo - {vehicle.name}</span>
+                        </h4>
+                        <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                          Ciclo: {cycleInterval.toLocaleString('pt-BR')} {isKm ? 'KM' : 'Horas'}
+                        </span>
                       </div>
+
+                      <form onSubmit={handleSaveDirectOilChange} className="space-y-3 text-xs">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
+                              {isKm ? 'Quilometragem Atual na Troca (km) *' : 'Horímetro Atual no Momento da Troca (h) *'}
+                            </label>
+                            <input
+                              type="number"
+                              step={isKm ? '1' : '0.1'}
+                              min="0"
+                              required
+                              value={directOilHourmeter}
+                              onChange={(e) => setDirectOilHourmeter(parseFloat(e.target.value) || 0)}
+                              className={`w-full p-2.5 rounded-xl border font-black text-sm ${
+                                darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
+                              }`}
+                            />
+                            <p className="text-[10px] text-slate-500 mt-1">
+                              Próxima troca será calculada para: <strong>{(directOilHourmeter + cycleInterval).toLocaleString('pt-BR')} {currentUnit}</strong>
+                            </p>
+                            {directOilHourmeter < currentOfficial && (
+                              <p className="text-[10px] text-amber-500 font-bold mt-1">
+                                ⚠️ Atenção: O valor digitado ({directOilHourmeter.toLocaleString('pt-BR')}{currentUnit}) é menor que o valor atual oficial ({currentOfficial.toLocaleString('pt-BR')}{currentUnit}). O medidor oficial do veículo será mantido no maior valor.
+                              </p>
+                            )}
+                          </div>
 
                       <div>
                         <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
@@ -1171,112 +1219,273 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                         className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 font-black shadow-md flex items-center gap-1.5 transition-transform active:scale-95"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        {isSavingDirectOil ? 'Gravando...' : 'Confirmar e Atualizar Horímetro'}
+                        {isSavingDirectOil ? 'Gravando...' : (isKm ? 'Confirmar e Atualizar KM' : 'Confirmar e Atualizar Horímetro')}
                       </button>
                     </div>
                   </form>
                 </div>
-              )}
+              );
+            })())}
 
               {/* Oil Config Modal inside Digital Sheet */}
-              {isOilConfigOpen && (
-                <div className="p-4 sm:p-5 rounded-3xl bg-emerald-900/30 border-2 border-emerald-500/40 space-y-3.5 animate-in fade-in">
-                  <div className="flex items-center justify-between border-b pb-2 border-emerald-500/30">
-                    <h4 className="font-black text-sm text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
-                      <Wrench className="w-4 h-4 text-emerald-500" />
-                      <span>Configuração do Plano de Troca de Óleo - {vehicle.name}</span>
-                    </h4>
-                  </div>
-
-                  <form onSubmit={handleSaveOilConfig} className="space-y-3 text-xs">
-                    <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20">
-                      <label className="flex items-center gap-2.5 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={oilConfigActive}
-                          onChange={(e) => setOilConfigActive(e.target.checked)}
-                          className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500"
-                        />
-                        <span className="font-bold text-amber-900 dark:text-amber-200 text-xs">
-                          Manter controle automático de troca de óleo ativado para esta máquina
-                        </span>
-                      </label>
+              {isOilConfigOpen && (() => {
+                const isKm = vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
+                return (
+                  <div className="p-4 sm:p-5 rounded-3xl bg-emerald-900/30 border-2 border-emerald-500/40 space-y-3.5 animate-in fade-in">
+                    <div className="flex items-center justify-between border-b pb-2 border-emerald-500/30">
+                      <h4 className="font-black text-sm text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
+                        <Wrench className="w-4 h-4 text-emerald-500" />
+                        <span>Configuração do Plano de Troca de Óleo {isKm ? '(Quilometragem)' : '(Horímetro)'} - {vehicle.name}</span>
+                      </h4>
                     </div>
 
-                    {oilConfigActive && (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div>
-                          <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
-                            Intervalo Padrão (Horas)
-                          </label>
+                    <form onSubmit={handleSaveOilConfig} className="space-y-3 text-xs">
+                      <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20">
+                        <label className="flex items-center gap-2.5 cursor-pointer">
                           <input
-                            type="number"
-                            min="10"
-                            value={oilConfigInterval}
-                            onChange={(e) => setOilConfigInterval(parseInt(e.target.value) || 300)}
-                            className={`w-full p-2.5 rounded-xl border font-bold ${
-                              darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
-                            }`}
+                            type="checkbox"
+                            checked={oilConfigActive}
+                            onChange={(e) => setOilConfigActive(e.target.checked)}
+                            className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500"
                           />
-                          <p className="text-[10px] text-slate-500 mt-1">Padrão agrícola: 300 horas</p>
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
-                            Aviso Prévio (Horas de Antecedência)
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={oilConfigAdvance}
-                            onChange={(e) => setOilConfigAdvance(parseInt(e.target.value) || 50)}
-                            className={`w-full p-2.5 rounded-xl border font-bold ${
-                              darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
-                            }`}
-                          />
-                          <p className="text-[10px] text-slate-500 mt-1">Gera alerta amarelo com antecedência</p>
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
-                            Horímetro de Referência da Última Troca (h)
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={oilConfigRefHourmeter}
-                            onChange={(e) => setOilConfigRefHourmeter(parseFloat(e.target.value) || 0)}
-                            className={`w-full p-2.5 rounded-xl border font-bold ${
-                              darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
-                            }`}
-                          />
-                          <p className="text-[10px] text-slate-500 mt-1">
-                            Próxima troca: <strong>{(oilConfigRefHourmeter || 0) + (oilConfigInterval || 300)}h</strong>
-                          </p>
-                        </div>
+                          <span className="font-bold text-amber-900 dark:text-amber-200 text-xs">
+                            Manter controle automático de troca de óleo ativado para este {isKm ? 'veículo' : 'equipamento'}
+                          </span>
+                        </label>
                       </div>
-                    )}
 
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-emerald-500/20">
-                      <button
-                        type="button"
-                        onClick={() => setIsOilConfigOpen(false)}
-                        className="px-3.5 py-2 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-emerald-900/40 text-slate-600 dark:text-slate-300"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={isSavingOilConfig}
-                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black shadow-md flex items-center gap-1.5"
-                      >
-                        <Check className="w-4 h-4" />
-                        {isSavingOilConfig ? 'Salvando...' : 'Salvar Configuração'}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              )}
+                      {oilConfigActive && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {isKm ? (
+                            <>
+                              <div>
+                                <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
+                                  Intervalo Padrão (Quilômetros - KM) *
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="100"
+                                  required
+                                  value={oilConfigInterval}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '') {
+                                      setOilConfigInterval('');
+                                    } else {
+                                      const parsed = parseInt(val, 10);
+                                      if (!isNaN(parsed) && parsed >= 0) {
+                                        setOilConfigInterval(parsed);
+                                      }
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (!oilConfigInterval || Number(oilConfigInterval) <= 0) {
+                                      setOilConfigInterval(10000);
+                                    }
+                                  }}
+                                  placeholder="Ex: 10000, 15000, 20000, 30000..."
+                                  className={`w-full p-2.5 rounded-xl border font-bold text-sm ${
+                                    darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
+                                  }`}
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  Sem limite máximo: 10.000, 15.000, 20.000, 30.000 km ou mais.
+                                </p>
+                              </div>
+
+                              <div>
+                                <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
+                                  Aviso Prévio (KM de Antecedência)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="100"
+                                  value={oilConfigAdvance}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '') {
+                                      setOilConfigAdvance('');
+                                    } else {
+                                      const parsed = parseInt(val, 10);
+                                      if (!isNaN(parsed) && parsed >= 0) {
+                                        setOilConfigAdvance(parsed);
+                                      }
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (oilConfigAdvance === '' || isNaN(Number(oilConfigAdvance)) || Number(oilConfigAdvance) < 0) {
+                                      setOilConfigAdvance(1000);
+                                    }
+                                  }}
+                                  placeholder="Ex: 1000"
+                                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                                    darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
+                                  }`}
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">Gera alerta amarelo com antecedência</p>
+                              </div>
+
+                              <div>
+                                <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
+                                  KM de Referência da Última Troca
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={oilConfigRefHourmeter}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '') {
+                                      setOilConfigRefHourmeter('');
+                                    } else {
+                                      const parsed = parseFloat(val);
+                                      if (!isNaN(parsed) && parsed >= 0) {
+                                        setOilConfigRefHourmeter(parsed);
+                                      }
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (oilConfigRefHourmeter === '' || isNaN(Number(oilConfigRefHourmeter)) || Number(oilConfigRefHourmeter) < 0) {
+                                      setOilConfigRefHourmeter(0);
+                                    }
+                                  }}
+                                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                                    darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
+                                  }`}
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  Próxima troca: <strong>{((Number(oilConfigRefHourmeter) || 0) + (Number(oilConfigInterval) || 10000)).toLocaleString('pt-BR')} km</strong>
+                                </p>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div>
+                                <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
+                                  Intervalo Padrão (Horas)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="10"
+                                  value={oilConfigInterval}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '') {
+                                      setOilConfigInterval('');
+                                    } else {
+                                      const parsed = parseInt(val, 10);
+                                      if (!isNaN(parsed) && parsed >= 0) {
+                                        setOilConfigInterval(parsed);
+                                      }
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (!oilConfigInterval || Number(oilConfigInterval) <= 0) {
+                                      setOilConfigInterval(300);
+                                    }
+                                  }}
+                                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                                    darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
+                                  }`}
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">Padrão agrícola: 300 horas</p>
+                              </div>
+
+                              <div>
+                                <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
+                                  Aviso Prévio (Horas de Antecedência)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="10"
+                                  value={oilConfigAdvance}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '') {
+                                      setOilConfigAdvance('');
+                                    } else {
+                                      const parsed = parseInt(val, 10);
+                                      if (!isNaN(parsed) && parsed >= 0) {
+                                        setOilConfigAdvance(parsed);
+                                      }
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (oilConfigAdvance === '' || isNaN(Number(oilConfigAdvance)) || Number(oilConfigAdvance) < 0) {
+                                      setOilConfigAdvance(50);
+                                    }
+                                  }}
+                                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                                    darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
+                                  }`}
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">Gera alerta amarelo com antecedência</p>
+                              </div>
+
+                              <div>
+                                <label className="block font-bold text-slate-700 dark:text-emerald-200 mb-1">
+                                  Horímetro de Referência da Última Troca (h)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={oilConfigRefHourmeter}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '') {
+                                      setOilConfigRefHourmeter('');
+                                    } else {
+                                      const parsed = parseFloat(val);
+                                      if (!isNaN(parsed) && parsed >= 0) {
+                                        setOilConfigRefHourmeter(parsed);
+                                      }
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (oilConfigRefHourmeter === '' || isNaN(Number(oilConfigRefHourmeter)) || Number(oilConfigRefHourmeter) < 0) {
+                                      setOilConfigRefHourmeter(0);
+                                    }
+                                  }}
+                                  className={`w-full p-2.5 rounded-xl border font-bold ${
+                                    darkMode ? 'bg-emerald-950 border-emerald-800 text-white' : 'bg-white border-slate-300'
+                                  }`}
+                                />
+                                <p className="text-[10px] text-slate-500 mt-1">
+                                  Próxima troca: <strong>{((Number(oilConfigRefHourmeter) || 0) + (Number(oilConfigInterval) || 300)).toLocaleString('pt-BR')}h</strong>
+                                </p>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-emerald-500/20">
+                        <button
+                          type="button"
+                          onClick={() => setIsOilConfigOpen(false)}
+                          className="px-3.5 py-2 rounded-xl font-bold hover:bg-slate-200 dark:hover:bg-emerald-900/40 text-slate-600 dark:text-slate-300"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSavingOilConfig}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black shadow-md flex items-center gap-1.5"
+                        >
+                          <Check className="w-4 h-4" />
+                          {isSavingOilConfig ? 'Salvando...' : 'Salvar Configuração'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                );
+              })()}
 
               <div className="flex items-center justify-between">
                 <div>

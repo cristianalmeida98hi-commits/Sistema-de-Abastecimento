@@ -473,6 +473,91 @@ export function getGasStations(): GasStation[] {
   return cache.gasStations || [];
 }
 
+export function getGasStation(id: string): GasStation | undefined {
+  const stations = getGasStations();
+  return stations.find(s => s.id === id);
+}
+
+/**
+ * Checks if a gas station is EXTERNAL based on its entity type or recognized external supplier.
+ * External stations (such as 'Bom Jesus de Quadra', Shell, Ipiranga, etc.) never deduct fuel from internal farm tanks.
+ */
+export function isGasStationExternal(gasStationId?: string, gasStationName?: string): boolean {
+  if (gasStationId) {
+    const station = getGasStation(gasStationId);
+    if (station) {
+      return station.type === 'EXTERNO';
+    }
+    if (gasStationId === 'stn-bom-jesus' || gasStationId === 'stn-002' || gasStationId === 'stn-003') {
+      return true;
+    }
+  }
+
+  if (gasStationName) {
+    const cleanName = gasStationName.trim().toLowerCase();
+    const stations = getGasStations();
+    const station = stations.find(s => s.name.trim().toLowerCase() === cleanName);
+    if (station) {
+      return station.type === 'EXTERNO';
+    }
+
+    if (cleanName.includes('bom jesus')) {
+      return true;
+    }
+    if (cleanName.includes('shell') || cleanName.includes('ipiranga') || cleanName.includes('externo') || cleanName.includes('posto de rua') || cleanName.includes('br-163')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Resolves the internal Central Tank if and only if the gas station is internal ('INTERNO').
+ * Returns null for any external station (like Bom Jesus de Quadra).
+ */
+export function getInternalTankForStation(gasStationId?: string, gasStationName?: string): CentralTank | null {
+  if (isGasStationExternal(gasStationId, gasStationName)) {
+    return null;
+  }
+
+  const tanks = getCentralTanks();
+
+  // If directly referencing a central tank ID
+  if (gasStationId === 'tank-quadra' || gasStationId === 'tank-itapeva') {
+    return tanks.find(t => t.id === gasStationId) || null;
+  }
+
+  if (gasStationId) {
+    const station = getGasStation(gasStationId);
+    if (station) {
+      if (station.type === 'EXTERNO') return null;
+      if (station.tankId) {
+        return tanks.find(t => t.id === station.tankId) || null;
+      }
+      if (station.id === 'stn-itapeva' || station.name.toLowerCase().includes('itapeva')) {
+        return tanks.find(t => t.id === 'tank-itapeva') || null;
+      }
+      return tanks.find(t => t.id === 'tank-quadra') || tanks[0] || null;
+    }
+  }
+
+  if (gasStationName) {
+    const cleanName = gasStationName.trim().toLowerCase();
+    if (cleanName.includes('bom jesus') || cleanName.includes('shell') || cleanName.includes('ipiranga')) {
+      return null;
+    }
+    if (cleanName.includes('itapeva')) {
+      return tanks.find(t => t.id === 'tank-itapeva') || null;
+    }
+    if (cleanName.includes('tanque central') || cleanName.includes('sede') || cleanName.includes('interno') || cleanName.includes('fazenda andrade')) {
+      return tanks.find(t => t.id === 'tank-quadra') || null;
+    }
+  }
+
+  return null;
+}
+
 export function getFuelLogs(): FuelLog[] {
   return cache.fuelLogs || [];
 }
@@ -497,45 +582,33 @@ export function getTankStatus(targetTankId?: string) {
   }
 
   const capacity = targetTank?.capacityLiters || 10000;
-  const initialStock = targetTank?.currentStockLiters !== undefined ? targetTank.currentStockLiters : 7500;
+  // The official, single-source-of-truth current stock persisted on the tank document
+  const currentStock = targetTank?.currentStockLiters !== undefined 
+    ? Math.max(0, Number(targetTank.currentStockLiters)) 
+    : 7500;
   const minStockAlert = targetTank?.minStockAlertLiters || 2000;
-  const baseUpdatedAt = targetTank?.stockBaseUpdatedAt ? new Date(targetTank.stockBaseUpdatedAt).getTime() : 0;
 
   // Refills dedicated to this specific tank
   const refills = getFuelRefills();
   const totalRefilled = refills.reduce((sum, r) => {
-    const rDate = r.dateTime || (r as any).date;
-    // Check if refill belongs to this tank (by tankId or matched name)
     const isThisTank = (r as any).tankId === targetTank?.id || 
       (targetTank?.id === 'tank-quadra' && (!((r as any).tankId) || (r as any).tankId === 'stn-001' || (r as any).tankId === 'stn-quadra')) ||
       (targetTank?.id === 'tank-itapeva' && (r as any).tankId === 'tank-itapeva');
     
     if (!isThisTank) return sum;
-
-    if (baseUpdatedAt > 0 && rDate) {
-      const refillTime = new Date(rDate).getTime();
-      if (refillTime < baseUpdatedAt) return sum;
-    }
     return sum + (Number(r.liters) || 0);
   }, 0);
 
-  // Dispensed fuel logs dedicated to this specific tank
+  // Dispensed fuel logs dedicated to this specific tank (EXCLUDING external stations like Bom Jesus de Quadra)
   const fuelLogs = getFuelLogs();
   const totalDispensed = fuelLogs.reduce((sum, log) => {
-    const isThisTank = log.gasStationId === targetTank?.id || 
-      (targetTank?.id === 'tank-quadra' && (log.gasStationId === 'stn-001' || log.gasStationId === 'stn-quadra' || log.gasStationName?.toLowerCase().includes('quadra') || (!log.gasStationId && !log.gasStationName?.toLowerCase().includes('itapeva')))) ||
-      (targetTank?.id === 'tank-itapeva' && (log.gasStationId === 'tank-itapeva' || log.gasStationId === 'stn-itapeva' || log.gasStationName?.toLowerCase().includes('itapeva')));
+    const internalTank = getInternalTankForStation(log.gasStationId, log.gasStationName);
+    const isThisTank = internalTank && internalTank.id === targetTank?.id;
 
     if (!isThisTank) return sum;
-
-    if (baseUpdatedAt > 0 && log.dateTime) {
-      const logTime = new Date(log.dateTime).getTime();
-      if (logTime < baseUpdatedAt) return sum;
-    }
     return sum + (Number(log.liters) || 0);
   }, 0);
 
-  const currentStock = Math.max(0, initialStock + totalRefilled - totalDispensed);
   const percentage = capacity > 0 ? Math.min(100, Math.max(0, (currentStock / capacity) * 100)) : 0;
   
   // Alerta quando estoque atual <= estoque mínimo configurado (padrão 2.000 L)
@@ -548,7 +621,7 @@ export function getTankStatus(targetTankId?: string) {
     location: targetTank?.location || 'Sede',
     capacity,
     minStockAlert,
-    initialStock,
+    initialStock: currentStock,
     totalRefilled,
     totalDispensed,
     currentStock,
@@ -693,15 +766,20 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
     // Write fuel log to Firestore
     await setDoc(doc(db, 'fuel_logs', cleanedLog.id), cleanedLog);
 
-    // If fueling came from a central tank, register a Tank Movement (Saída / Abastecimento)
-    const isTankQuadra = log.gasStationId === 'tank-quadra' || log.gasStationId === 'stn-001' || log.gasStationId === 'stn-quadra' || log.gasStationName?.toLowerCase().includes('quadra');
-    const isTankItapeva = log.gasStationId === 'tank-itapeva' || log.gasStationId === 'stn-itapeva' || log.gasStationName?.toLowerCase().includes('itapeva');
+    // If fueling came from an internal central tank, deduct stock and register a Tank Movement (Saída / Abastecimento)
+    const internalTank = getInternalTankForStation(log.gasStationId, log.gasStationName);
     
-    if (isTankQuadra || isTankItapeva) {
-      const activeTankId = isTankItapeva ? 'tank-itapeva' : 'tank-quadra';
-      const statusBefore = getTankStatus(activeTankId);
-      const prevStock = statusBefore.currentStock;
+    if (internalTank) {
+      const activeTankId = internalTank.id;
+      const prevStock = Number(internalTank.currentStockLiters ?? 7500);
       const afterStock = Math.max(0, prevStock - log.liters);
+
+      // Persist the updated stock directly on the tank document in Firestore and memory
+      internalTank.currentStockLiters = afterStock;
+      cache.centralTanks = cache.centralTanks.map(t => t.id === activeTankId ? { ...t, currentStockLiters: afterStock } : t);
+      await updateDoc(doc(db, 'central_tanks', activeTankId), {
+        currentStockLiters: afterStock
+      });
 
       await addTankMovement({
         tankId: activeTankId,
@@ -912,27 +990,90 @@ export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<Mai
   const targetVehicle = vehicles.find(v => v.id === m.equipmentId);
   if (targetVehicle) {
     const isKm = targetVehicle.category === 'VEICULO' || targetVehicle.maintenanceControlType === 'QUILOMETRAGEM';
+    // STRICT RULE: Only a maintenance specifically of type TROCA_OLEO triggers oil change synchronization and alert reset
+    const isOilChange = m.type === 'TROCA_OLEO';
+    const serviceMeter = Number(m.kmOrHourAtService) || 0;
     const interval = isKm 
-      ? (targetVehicle.maintenanceIntervalKm || 10000)
-      : (targetVehicle.maintenanceIntervalHours || targetVehicle.oilChangeIntervalHours || 300);
+      ? (Number(targetVehicle.oilChangeIntervalKm) || Number(targetVehicle.maintenanceIntervalKm) || 10000)
+      : (Number(targetVehicle.oilChangeIntervalHours) || Number(targetVehicle.maintenanceIntervalHours) || 300);
 
-    const updates: Partial<Vehicle> = {};
+    const nextTarget = m.nextServiceKmOrHour && Number(m.nextServiceKmOrHour) > serviceMeter
+      ? Number(m.nextServiceKmOrHour)
+      : serviceMeter + interval;
+
+    const updates: Partial<Vehicle> = {
+      lastMaintenanceDate: m.date
+    };
+
     if (isKm) {
-      updates.lastMaintenanceKm = m.kmOrHourAtService;
-      updates.nextMaintenanceKm = m.nextServiceKmOrHour || (m.kmOrHourAtService + interval);
-      updates.lastMaintenanceDate = m.date;
-    } else {
-      updates.lastMaintenanceHourmeter = m.kmOrHourAtService;
-      updates.nextMaintenanceHourmeter = m.nextServiceKmOrHour || (m.kmOrHourAtService + interval);
-      updates.lastMaintenanceDate = m.date;
-      if (m.type === 'TROCA_OLEO' || m.title.toLowerCase().includes('óleo')) {
-        updates.lastOilChangeHourmeter = m.kmOrHourAtService;
+      if (serviceMeter > (Number(targetVehicle.currentKm) || 0)) {
+        updates.currentKm = serviceMeter;
+      }
+      updates.lastMaintenanceKm = serviceMeter;
+      updates.nextMaintenanceKm = nextTarget;
+
+      if (isOilChange) {
+        updates.lastOilChangeKm = serviceMeter;
         updates.lastOilChangeDate = m.date;
-        updates.nextOilChangeHourmeter = m.nextServiceKmOrHour || (m.kmOrHourAtService + interval);
+        updates.nextOilChangeKm = nextTarget;
+      }
+    } else {
+      if (serviceMeter > (Number(targetVehicle.currentHourmeter) || 0)) {
+        updates.currentHourmeter = serviceMeter;
+      }
+      updates.lastMaintenanceHourmeter = serviceMeter;
+      updates.nextMaintenanceHourmeter = nextTarget;
+
+      if (isOilChange) {
+        updates.lastOilChangeHourmeter = serviceMeter;
+        updates.lastOilChangeDate = m.date;
+        updates.nextOilChangeHourmeter = nextTarget;
       }
     }
 
+    if (targetVehicle.status === 'EM_MANUTENCAO') {
+      updates.status = 'ATIVO';
+    }
+
     await updateVehicle(targetVehicle.id, updates);
+
+    // SOMENTE se for TROCA DE ÓLEO: resolver alertas de troca de óleo
+    if (isOilChange) {
+      const alertsToResolve = cache.alerts.filter(
+        a => a.equipmentId === targetVehicle.id && 
+        (a.type === 'OIL_CHANGE_DUE' || a.id === `alt-oil-${targetVehicle.id}` || a.id === `alt-km-${targetVehicle.id}`) &&
+        !a.resolved
+      );
+
+      for (const alert of alertsToResolve) {
+        alert.resolved = true;
+        alert.resolvedAt = new Date().toISOString();
+        alert.resolvedBy = m.performedBy || 'Troca de Óleo Registrada';
+        try {
+          await updateDoc(doc(db, 'alerts', alert.id), {
+            resolved: true,
+            resolvedAt: alert.resolvedAt,
+            resolvedBy: alert.resolvedBy
+          });
+        } catch (e) {
+          console.warn('[addMaintenance] Could not update alert in Firestore:', e);
+        }
+      }
+
+      const prevItems = (cache.preventiveItems || []).filter(
+        p => p.equipmentId === targetVehicle.id && (p.itemKey === 'TROCA_OLEO_MOTOR' || p.itemKey === 'FILTRO_OLEO')
+      );
+      for (const pItem of prevItems) {
+        pItem.lastServiceDate = m.date;
+        pItem.lastServiceHourmeter = serviceMeter;
+        pItem.nextScheduledHourmeter = serviceMeter + (pItem.intervalHours || 250);
+        try {
+          await setDoc(doc(db, 'preventive_items', pItem.id), pItem, { merge: true });
+        } catch (e) {
+          console.warn('[addMaintenance] Could not update preventive item:', e);
+        }
+      }
+    }
   }
 
   logAuditEvent('CRIAR', 'Manutenção', `Agendou/Registrou manutenção "${m.title}" em ${m.equipmentName}.`);
@@ -1213,11 +1354,19 @@ export async function addFuelRefill(refill: Omit<FuelRefill, 'id' | 'createdAt'>
 
   await setDoc(doc(db, 'fuel_refills', cleaned.id), cleaned);
 
-  // Register in Tank Movements
+  // Register in Tank Movements and update tank stock
   const targetTankId = (refill as any).tankId || 'tank-quadra';
-  const tankStatus = getTankStatus(targetTankId);
-  const prevStock = tankStatus.currentStock;
+  const targetTank = getCentralTank(targetTankId) || getCentralTanks()[0];
+  const prevStock = Number(targetTank?.currentStockLiters ?? 7500);
   const afterStock = prevStock + cleaned.liters;
+
+  if (targetTank) {
+    targetTank.currentStockLiters = afterStock;
+    cache.centralTanks = cache.centralTanks.map(t => t.id === targetTank.id ? { ...t, currentStockLiters: afterStock } : t);
+    await updateDoc(doc(db, 'central_tanks', targetTank.id), {
+      currentStockLiters: afterStock
+    });
+  }
 
   await addTankMovement({
     tankId: targetTankId,
@@ -1232,7 +1381,7 @@ export async function addFuelRefill(refill: Omit<FuelRefill, 'id' | 'createdAt'>
     notes: `Recebimento de combustível: ${cleaned.liters.toLocaleString('pt-BR')}L (${cleaned.fuelType}) de ${cleaned.supplierName || 'Fornecedor'}. NF: ${cleaned.invoiceNumber || 'S/N'}.`
   });
 
-  logAuditEvent('CRIAR', 'Entrada de Combustível', `Registrou entrada de ${cleaned.liters.toLocaleString('pt-BR')}L no ${tankStatus.name} (${cleaned.fuelType}) de ${cleaned.supplierName || 'Fornecedor'}.`);
+  logAuditEvent('CRIAR', 'Entrada de Combustível', `Registrou entrada de ${cleaned.liters.toLocaleString('pt-BR')}L no ${targetTank?.name || 'Tanque Central'} (${cleaned.fuelType}) de ${cleaned.supplierName || 'Fornecedor'}.`);
   
   checkAutomatedAlerts();
   return cleaned;

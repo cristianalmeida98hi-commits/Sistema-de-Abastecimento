@@ -73,14 +73,14 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
 
   // Oil Change & Maintenance Interval Configuration State (for Add / Edit)
   const [oilChangeControlActive, setOilChangeControlActive] = useState(true);
-  const [oilChangeIntervalHours, setOilChangeIntervalHours] = useState(300);
-  const [oilChangeWarningAdvanceHours, setOilChangeWarningAdvanceHours] = useState(50);
-  const [lastOilChangeHourmeter, setLastOilChangeHourmeter] = useState<number>(0);
+  const [oilChangeIntervalHours, setOilChangeIntervalHours] = useState<number | string>(300);
+  const [oilChangeWarningAdvanceHours, setOilChangeWarningAdvanceHours] = useState<number | string>(50);
+  const [lastOilChangeHourmeter, setLastOilChangeHourmeter] = useState<number | string>(0);
 
   // KM-based Oil Change Configuration State (for Vehicles)
-  const [oilChangeIntervalKm, setOilChangeIntervalKm] = useState(10000);
-  const [oilChangeWarningAdvanceKm, setOilChangeWarningAdvanceKm] = useState(1000);
-  const [lastOilChangeKm, setLastOilChangeKm] = useState<number>(0);
+  const [oilChangeIntervalKm, setOilChangeIntervalKm] = useState<number | string>(10000);
+  const [oilChangeWarningAdvanceKm, setOilChangeWarningAdvanceKm] = useState<number | string>(1000);
+  const [lastOilChangeKm, setLastOilChangeKm] = useState<number | string>(0);
 
   // Quick Oil Change Modal State
   const [oilChangeVehicle, setOilChangeVehicle] = useState<Vehicle | null>(null);
@@ -186,13 +186,13 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     const sprayCapacity = sprayCapObj ? (Number(sprayCapObj.value) || 0) : (hasSprayingTank ? sprayingTankCapacityLiters : 0);
 
     const initialHourmeter = !isRoadVehicle ? currentHourmeter : undefined;
-    const refOilMeter = lastOilChangeHourmeter > 0 ? lastOilChangeHourmeter : (initialHourmeter || 0);
-    const intervalHours = Math.max(1, oilChangeIntervalHours || 300);
+    const refOilMeter = Number(lastOilChangeHourmeter) > 0 ? Number(lastOilChangeHourmeter) : (initialHourmeter || 0);
+    const intervalHours = Math.max(1, Number(oilChangeIntervalHours) || 300);
     const nextOilMeterHours = refOilMeter + intervalHours;
 
-    const intervalKm = Math.max(1, oilChangeIntervalKm || 10000);
-    const advanceKm = Math.max(0, oilChangeWarningAdvanceKm !== undefined ? oilChangeWarningAdvanceKm : 1000);
-    const refOilKm = lastOilChangeKm > 0 ? lastOilChangeKm : (currentKm || 0);
+    const intervalKm = Math.max(1, Number(oilChangeIntervalKm) || 10000);
+    const advanceKm = Math.max(0, Number(oilChangeWarningAdvanceKm) || 1000);
+    const refOilKm = Number(lastOilChangeKm) > 0 ? Number(lastOilChangeKm) : (currentKm || 0);
     const nextOilKm = refOilKm + intervalKm;
 
     try {
@@ -317,13 +317,13 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
       const sprayCapObj = operationalCapacities.find(c => c.type === 'PULVERIZACAO');
       const sprayCapacity = sprayCapObj ? (Number(sprayCapObj.value) || 0) : (hasSprayingTank ? sprayingTankCapacityLiters : 0);
 
-      const intervalHours = Math.max(1, oilChangeIntervalHours || 300);
-      const refMeterHours = lastOilChangeHourmeter;
+      const intervalHours = Math.max(1, Number(oilChangeIntervalHours) || 300);
+      const refMeterHours = Number(lastOilChangeHourmeter);
       const nextOilMeterHours = refMeterHours + intervalHours;
 
-      const intervalKm = Math.max(1, oilChangeIntervalKm || 10000);
-      const advanceKm = Math.max(0, oilChangeWarningAdvanceKm !== undefined ? oilChangeWarningAdvanceKm : 1000);
-      const refMeterKm = lastOilChangeKm;
+      const intervalKm = Math.max(1, Number(oilChangeIntervalKm) || 10000);
+      const advanceKm = Math.max(0, Number(oilChangeWarningAdvanceKm) || 1000);
+      const refMeterKm = Number(lastOilChangeKm);
       const nextOilMeterKm = refMeterKm + intervalKm;
 
       await onUpdateVehicle(editingVehicle.id, {
@@ -1433,15 +1433,31 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         </label>
                         <input
                           type="number"
-                          min="100"
-                          step="500"
+                          min="1"
+                          step="100"
                           value={oilChangeIntervalKm}
-                          onChange={(e) => setOilChangeIntervalKm(parseInt(e.target.value) || 10000)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setOilChangeIntervalKm('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setOilChangeIntervalKm(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (!oilChangeIntervalKm || Number(oilChangeIntervalKm) <= 0) {
+                              setOilChangeIntervalKm(10000);
+                            }
+                          }}
+                          placeholder="Ex: 10000, 15000, 20000, 30000"
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
-                        <p className="text-[10px] text-slate-500 mt-0.5">Padrão rodoviário: 10.000 km</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Ex: 10.000, 15.000, 20.000, 30.000 km ou mais</p>
                       </div>
 
                       <div>
@@ -1453,12 +1469,27 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                           min="0"
                           step="100"
                           value={oilChangeWarningAdvanceKm}
-                          onChange={(e) => setOilChangeWarningAdvanceKm(parseInt(e.target.value) || 1000)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setOilChangeWarningAdvanceKm('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setOilChangeWarningAdvanceKm(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (oilChangeWarningAdvanceKm === '' || isNaN(Number(oilChangeWarningAdvanceKm)) || Number(oilChangeWarningAdvanceKm) < 0) {
+                              setOilChangeWarningAdvanceKm(1000);
+                            }
+                          }}
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
-                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com 1.000 km antes</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com antecedência (ex: 1.000 km)</p>
                       </div>
 
                       <div>
@@ -1468,15 +1499,31 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
+                          step="1"
                           value={lastOilChangeKm}
-                          onChange={(e) => setLastOilChangeKm(parseFloat(e.target.value) || 0)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setLastOilChangeKm('');
+                            } else {
+                              const parsed = parseFloat(val);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setLastOilChangeKm(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (lastOilChangeKm === '' || isNaN(Number(lastOilChangeKm)) || Number(lastOilChangeKm) < 0) {
+                              setLastOilChangeKm(0);
+                            }
+                          }}
                           placeholder="0 ou da última troca"
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
                         <p className="text-[10px] text-slate-500 mt-0.5">
-                          Próxima troca: <strong>{((lastOilChangeKm || 0) + (oilChangeIntervalKm || 10000)).toLocaleString('pt-BR')} km</strong>
+                          Próxima troca: <strong>{((Number(lastOilChangeKm) || 0) + (Number(oilChangeIntervalKm) || 10000)).toLocaleString('pt-BR')} km</strong>
                         </p>
                       </div>
                     </div>
@@ -1488,9 +1535,25 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         </label>
                         <input
                           type="number"
-                          min="10"
+                          min="1"
+                          step="10"
                           value={oilChangeIntervalHours}
-                          onChange={(e) => setOilChangeIntervalHours(parseInt(e.target.value) || 300)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setOilChangeIntervalHours('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setOilChangeIntervalHours(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (!oilChangeIntervalHours || Number(oilChangeIntervalHours) <= 0) {
+                              setOilChangeIntervalHours(300);
+                            }
+                          }}
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
@@ -1505,13 +1568,29 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
+                          step="10"
                           value={oilChangeWarningAdvanceHours}
-                          onChange={(e) => setOilChangeWarningAdvanceHours(parseInt(e.target.value) || 50)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setOilChangeWarningAdvanceHours('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setOilChangeWarningAdvanceHours(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (oilChangeWarningAdvanceHours === '' || isNaN(Number(oilChangeWarningAdvanceHours)) || Number(oilChangeWarningAdvanceHours) < 0) {
+                              setOilChangeWarningAdvanceHours(50);
+                            }
+                          }}
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
-                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com 50h antes</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com antecedência (ex: 50h)</p>
                       </div>
 
                       <div>
@@ -1521,15 +1600,31 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
+                          step="1"
                           value={lastOilChangeHourmeter}
-                          onChange={(e) => setLastOilChangeHourmeter(parseFloat(e.target.value) || 0)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setLastOilChangeHourmeter('');
+                            } else {
+                              const parsed = parseFloat(val);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setLastOilChangeHourmeter(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (lastOilChangeHourmeter === '' || isNaN(Number(lastOilChangeHourmeter)) || Number(lastOilChangeHourmeter) < 0) {
+                              setLastOilChangeHourmeter(0);
+                            }
+                          }}
                           placeholder="0 ou da última troca"
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
                         <p className="text-[10px] text-slate-500 mt-0.5">
-                          Próxima troca: <strong>{(lastOilChangeHourmeter || 0) + (oilChangeIntervalHours || 300)}h</strong>
+                          Próxima troca: <strong>{((Number(lastOilChangeHourmeter) || 0) + (Number(oilChangeIntervalHours) || 300)).toLocaleString('pt-BR')}h</strong>
                         </p>
                       </div>
                     </div>
@@ -1734,15 +1829,31 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         </label>
                         <input
                           type="number"
-                          min="100"
-                          step="500"
+                          min="1"
+                          step="100"
                           value={oilChangeIntervalKm}
-                          onChange={(e) => setOilChangeIntervalKm(parseInt(e.target.value) || 10000)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setOilChangeIntervalKm('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setOilChangeIntervalKm(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (!oilChangeIntervalKm || Number(oilChangeIntervalKm) <= 0) {
+                              setOilChangeIntervalKm(10000);
+                            }
+                          }}
+                          placeholder="Ex: 10000, 15000, 20000, 30000"
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
-                        <p className="text-[10px] text-slate-500 mt-0.5">Padrão rodoviário: 10.000 km</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Ex: 10.000, 15.000, 20.000, 30.000 km ou mais</p>
                       </div>
 
                       <div>
@@ -1754,12 +1865,27 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                           min="0"
                           step="100"
                           value={oilChangeWarningAdvanceKm}
-                          onChange={(e) => setOilChangeWarningAdvanceKm(parseInt(e.target.value) || 1000)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setOilChangeWarningAdvanceKm('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setOilChangeWarningAdvanceKm(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (oilChangeWarningAdvanceKm === '' || isNaN(Number(oilChangeWarningAdvanceKm)) || Number(oilChangeWarningAdvanceKm) < 0) {
+                              setOilChangeWarningAdvanceKm(1000);
+                            }
+                          }}
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
-                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com 1.000 km antes</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com antecedência (ex: 1.000 km)</p>
                       </div>
 
                       <div>
@@ -1769,14 +1895,31 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
+                          step="1"
                           value={lastOilChangeKm}
-                          onChange={(e) => setLastOilChangeKm(parseFloat(e.target.value) || 0)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setLastOilChangeKm('');
+                            } else {
+                              const parsed = parseFloat(val);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setLastOilChangeKm(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (lastOilChangeKm === '' || isNaN(Number(lastOilChangeKm)) || Number(lastOilChangeKm) < 0) {
+                              setLastOilChangeKm(0);
+                            }
+                          }}
+                          placeholder="0 ou da última troca"
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
                         <p className="text-[10px] text-slate-500 mt-0.5">
-                          Próxima troca: <strong>{((lastOilChangeKm || 0) + (oilChangeIntervalKm || 10000)).toLocaleString('pt-BR')} km</strong>
+                          Próxima troca: <strong>{((Number(lastOilChangeKm) || 0) + (Number(oilChangeIntervalKm) || 10000)).toLocaleString('pt-BR')} km</strong>
                         </p>
                       </div>
                     </div>
@@ -1788,9 +1931,25 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         </label>
                         <input
                           type="number"
-                          min="10"
+                          min="1"
+                          step="10"
                           value={oilChangeIntervalHours}
-                          onChange={(e) => setOilChangeIntervalHours(parseInt(e.target.value) || 300)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setOilChangeIntervalHours('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setOilChangeIntervalHours(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (!oilChangeIntervalHours || Number(oilChangeIntervalHours) <= 0) {
+                              setOilChangeIntervalHours(300);
+                            }
+                          }}
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
@@ -1805,13 +1964,29 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
+                          step="10"
                           value={oilChangeWarningAdvanceHours}
-                          onChange={(e) => setOilChangeWarningAdvanceHours(parseInt(e.target.value) || 50)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setOilChangeWarningAdvanceHours('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setOilChangeWarningAdvanceHours(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (oilChangeWarningAdvanceHours === '' || isNaN(Number(oilChangeWarningAdvanceHours)) || Number(oilChangeWarningAdvanceHours) < 0) {
+                              setOilChangeWarningAdvanceHours(50);
+                            }
+                          }}
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
-                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com 50h antes</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Avisar com antecedência (ex: 50h)</p>
                       </div>
 
                       <div>
@@ -1821,14 +1996,31 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
+                          step="1"
                           value={lastOilChangeHourmeter}
-                          onChange={(e) => setLastOilChangeHourmeter(parseFloat(e.target.value) || 0)}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setLastOilChangeHourmeter('');
+                            } else {
+                              const parsed = parseFloat(val);
+                              if (!isNaN(parsed) && parsed >= 0) {
+                                setLastOilChangeHourmeter(parsed);
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (lastOilChangeHourmeter === '' || isNaN(Number(lastOilChangeHourmeter)) || Number(lastOilChangeHourmeter) < 0) {
+                              setLastOilChangeHourmeter(0);
+                            }
+                          }}
+                          placeholder="0 ou da última troca"
                           className={`w-full p-2 rounded-xl border text-xs font-bold ${
                             darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-white border-slate-200'
                           }`}
                         />
                         <p className="text-[10px] text-slate-500 mt-0.5">
-                          Próxima troca calculada: <strong>{((lastOilChangeHourmeter || 0) + (oilChangeIntervalHours || 300)).toLocaleString('pt-BR')}h</strong>
+                          Próxima troca calculada: <strong>{((Number(lastOilChangeHourmeter) || 0) + (Number(oilChangeIntervalHours) || 300)).toLocaleString('pt-BR')}h</strong>
                         </p>
                       </div>
                     </div>

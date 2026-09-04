@@ -107,15 +107,12 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
         {/* Card Principal */}
         <div className="bg-emerald-950/90 backdrop-blur-xl border border-emerald-800/80 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-emerald-950/80 text-emerald-100">
           
-          {/* Logo & Header */}
-          <div className="text-center space-y-2 mb-6">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#064E3B] text-[#FACC15] border border-emerald-700 shadow-md">
-              <Fuel className="w-7 h-7" />
+          {/* Header */}
+          <div className="flex flex-col items-center justify-center space-y-3 mb-6">
+            <div className="bg-white px-6 py-2.5 rounded-2xl shadow-md border border-white/20 flex items-center justify-center">
+              <img src="/andrade-agro-logo.png" alt="AndradeAgro" className="h-9 sm:h-11 w-auto max-w-[280px] object-contain" />
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              AndradeAgro
-            </h1>
-            <p className="text-xs text-emerald-300/80 font-medium">
+            <p className="text-xs text-emerald-300/85 font-medium tracking-wide text-center">
               Gestão Inteligente de Abastecimentos & Frotas Agrícolas
             </p>
           </div>

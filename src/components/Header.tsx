@@ -48,7 +48,12 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
                 <Menu className="w-5 h-5 text-[#FACC15]" />
               </button>
             )}
-            <h1 className="text-base sm:text-xl font-bold text-slate-100 truncate">
+            <div className="flex items-center md:hidden shrink-0">
+              <div className="bg-white px-2 py-1 rounded-lg shadow-xs border border-white/20 flex items-center justify-center">
+                <img src="/andrade-agro-logo.png" alt="AndradeAgro" className="h-5 w-auto object-contain" />
+              </div>
+            </div>
+            <h1 className="text-sm sm:text-lg font-bold text-slate-100 truncate">
               {currentUser.role === 'FUNCIONARIO' 
                 ? 'Módulo do Operador' 
                 : currentUser.role === 'MANUTENCAO' 

@@ -71,14 +71,16 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
       {/* Brand Header */}
       <div className="p-4 sm:p-5 flex flex-col items-start gap-1 border-b border-white/10 relative">
         <div className="flex items-center justify-between w-full">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => handleItemClick('dashboard')}>
-            <div className="w-9 h-9 bg-[#FACC15] rounded-xl flex items-center justify-center text-[#064E3B] shadow-md shrink-0">
-              <Leaf className="w-5 h-5 fill-[#064E3B]" />
-            </div>
-            {(!collapsed || isMobileOpen) && (
-              <div className="flex flex-col min-w-0">
-                <span className="text-white font-bold text-lg tracking-tight truncate">Andrade<span className="text-[#FACC15]">Agro</span></span>
-                <span className="text-[10px] text-[#FACC15] uppercase tracking-widest font-bold">Gestão Inteligente</span>
+          <div className="flex items-center gap-3 cursor-pointer select-none group" onClick={() => handleItemClick('dashboard')}>
+            {collapsed && !isMobileOpen ? (
+              <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center p-1 shadow-xs border border-white/20 hover:scale-105 transition-transform" title="AndradeAgro">
+                <span className="text-base font-black text-[#0B6133] tracking-tighter">AA</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2.5">
+                <div className="bg-white px-3.5 py-1.5 rounded-xl shadow-xs border border-white/20 flex items-center justify-center hover:bg-white/90 transition-all">
+                  <img src="/andrade-agro-logo.png" alt="AndradeAgro" className="h-7 w-auto max-w-[175px] object-contain" />
+                </div>
               </div>
             )}
           </div>

@@ -381,15 +381,13 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
     const qrDataUrl = await generateQRCodeDataUrl(qrValue, 350);
     const categoryLabel = getCategoryLabel(v.category);
     const sectorName = getSectorName(v.sector);
-    const tankInfo = v.fuelType === 'NENHUM' ? 'Não aplica' : `${v.tankCapacityLiters}L (${getFuelTypeName(v.fuelType)})`;
+    const tankInfo = v.fuelType === 'NENHUM' ? 'Não aplica' : `${v.tankCapacityLiters}L`;
 
     const makeCardHtml = (extraClass = '') => `
       <div class="card ${extraClass}">
         <div class="card-header">
-          <span class="brand">ANDRADEAGRO</span>
-          <span class="badge-cat">${categoryLabel}</span>
-        </div>
-        <div class="card-ident">
+          <div class="brand-title">ANDRADEAGRO</div>
+          <div class="card-subtitle">IDENTIFICAÇÃO DO EQUIPAMENTO</div>
           <div class="model" title="${v.model}">${v.model}</div>
           <div class="code-badge">${v.licensePlate || v.patrimonyCode}</div>
         </div>
@@ -397,8 +395,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
           <img src="${qrDataUrl}" alt="QR" />
         </div>
         <div class="card-footer">
-          <span>📍 ${sectorName}</span>
-          <span>⛽ ${tankInfo}</span>
+          <span>Setor: ${sectorName} • Cap.: ${tankInfo}</span>
         </div>
       </div>
     `;
@@ -540,8 +537,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
             /* Card styling with vivid colors & high contrast */
             .card {
               box-sizing: border-box;
-              border: 2px solid #044E36;
-              border-radius: 6px;
+              border: 1.5px solid #044E36;
+              border-radius: 8px;
               display: flex;
               flex-direction: column;
               justify-content: space-between;
@@ -553,156 +550,172 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
               -webkit-column-break-inside: avoid !important;
               overflow: hidden;
               position: relative;
+              box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+              transform: translateZ(0);
             }
             .card-header {
               width: 100%;
+              text-align: center;
+              padding: 1.5mm 1mm 0 1mm;
               display: flex;
-              justify-content: space-between;
+              flex-direction: column;
               align-items: center;
-              border-bottom: 1.5px solid #e2e8f0;
-              padding-bottom: 1mm;
             }
-            .brand {
+            .brand-title {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
               font-weight: 900;
               color: #044E36;
-              letter-spacing: 0.6px;
-            }
-            .badge-cat {
-              font-weight: 800;
+              letter-spacing: 1.2px;
               text-transform: uppercase;
-              background: #dcfce7;
-              color: #044E36;
-              padding: 1.5px 5px;
-              border-radius: 4px;
-              border: 1px solid #10b981;
+              line-height: 1.1;
             }
-            .card-ident {
-              width: 100%;
-              text-align: center;
-              margin-top: 0.8mm;
+            .card-subtitle {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+              font-weight: 800;
+              color: #D97706;
+              letter-spacing: 0.8px;
+              text-transform: uppercase;
+              line-height: 1.1;
+              margin-top: 1px;
             }
             .model {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
               font-weight: 850;
-              color: #020617;
+              color: #0f172a;
               line-height: 1.15;
               white-space: nowrap;
               overflow: hidden;
               text-overflow: ellipsis;
+              width: 100%;
+              margin-top: 1.5px;
             }
             .code-badge {
-              background: #022c22;
-              color: #FACC15;
+              background: #044E36;
+              color: #FFFFFF;
               font-weight: 900;
-              padding: 2px 7px;
-              border-radius: 4px;
-              border: 1px solid #044E36;
+              border-radius: 5px;
+              border: 1px solid #065F46;
               display: inline-block;
-              margin-top: 0.8mm;
-              letter-spacing: 0.7px;
-              box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+              margin-top: 1.5px;
+              letter-spacing: 0.8px;
+              box-shadow: 0 1px 2px rgba(4,78,54,0.18);
+              white-space: nowrap;
             }
             .qr-container {
               display: flex;
               align-items: center;
               justify-content: center;
-              margin: 0.8mm 0;
+              margin: 1mm 0;
               background: #ffffff;
-              padding: 1.5px;
-              border: 1px solid #e2e8f0;
+              padding: 2px;
               border-radius: 4px;
             }
             .qr-container img {
               display: block;
+              image-rendering: pixelated;
+              image-rendering: crisp-edges;
             }
             .card-footer {
               width: 100%;
-              border-top: 1.5px solid #e2e8f0;
-              background: #f8fafc;
-              padding: 1mm 2.5mm;
+              border-top: 1px solid #E2E8F0;
+              background: #F8FAFC;
+              padding: 1.2mm 1.5mm;
               display: flex;
-              justify-content: space-between;
-              font-weight: 700;
-              color: #1e293b;
+              justify-content: center;
+              align-items: center;
+              font-weight: 750;
+              color: #064E3B;
               white-space: nowrap;
               overflow: hidden;
+              text-overflow: ellipsis;
+              text-align: center;
             }
 
             /* Formats */
             /* 16 por folha (4x4) */
-            .sheet-page.d-16 { gap: 2.2mm; padding: 2.5mm; }
+            .sheet-page.d-16 { gap: 2mm; padding: 2.5mm; }
             .sheet-page.d-16 .card {
-              width: calc((100% - 3 * 2.2mm) / 4);
-              height: 66mm;
-              max-height: 66mm;
-              padding: 2mm 1.8mm;
+              width: calc((100% - 3 * 2mm) / 4);
+              height: 63.5mm;
+              max-height: 63.5mm;
+              padding: 1.5mm 1mm;
             }
-            .sheet-page.d-16 .brand { font-size: 7pt; }
-            .sheet-page.d-16 .badge-cat { font-size: 5.5pt; padding: 0.5px 3px; }
+            .sheet-page.d-16 .brand-title { font-size: 7.5pt; }
+            .sheet-page.d-16 .card-subtitle { font-size: 5.2pt; }
             .sheet-page.d-16 .model { font-size: 7pt; }
-            .sheet-page.d-16 .code-badge { font-size: 7.5pt; padding: 1px 4px; }
-            .sheet-page.d-16 .qr-container img { width: 27mm; height: 27mm; }
-            .sheet-page.d-16 .card-footer { font-size: 5.5pt; padding-top: 1mm; }
+            .sheet-page.d-16 .code-badge { font-size: 7.5pt; padding: 1px 6px; }
+            .sheet-page.d-16 .qr-container img { width: 28mm; height: 28mm; }
+            .sheet-page.d-16 .card-footer { font-size: 5.5pt; padding: 0.8mm 1mm; }
 
             /* 12 por folha (3x4) */
-            .sheet-page.d-12 { gap: 2.8mm; padding: 3mm; }
+            .sheet-page.d-12 { gap: 2.5mm; padding: 2.5mm; }
             .sheet-page.d-12 .card {
-              width: calc((100% - 2 * 2.8mm) / 3);
-              height: 66mm;
-              max-height: 66mm;
-              padding: 2.8mm 2.4mm;
+              width: calc((100% - 2 * 2.5mm) / 3);
+              height: 63.5mm;
+              max-height: 63.5mm;
+              padding: 1.8mm 1.5mm;
             }
-            .sheet-page.d-12 .brand { font-size: 8pt; }
-            .sheet-page.d-12 .badge-cat { font-size: 6.5pt; }
+            .sheet-page.d-12 .brand-title { font-size: 8.5pt; }
+            .sheet-page.d-12 .card-subtitle { font-size: 6pt; }
             .sheet-page.d-12 .model { font-size: 8pt; }
-            .sheet-page.d-12 .code-badge { font-size: 8.5pt; }
-            .sheet-page.d-12 .qr-container img { width: 33mm; height: 33mm; }
-            .sheet-page.d-12 .card-footer { font-size: 6.5pt; }
+            .sheet-page.d-12 .code-badge { font-size: 8.5pt; padding: 1.5px 8px; }
+            .sheet-page.d-12 .qr-container img { width: 32mm; height: 32mm; }
+            .sheet-page.d-12 .card-footer { font-size: 6.5pt; padding: 1mm 1.5mm; }
 
             /* 8 por folha (2x4) */
-            .sheet-page.d-8 { gap: 3.5mm; padding: 3mm; }
+            .sheet-page.d-8 { gap: 3.5mm; padding: 2.5mm; }
             .sheet-page.d-8 .card {
               width: calc((100% - 1 * 3.5mm) / 2);
-              height: 66mm;
-              max-height: 66mm;
-              padding: 3mm 4mm;
+              height: 63.5mm;
+              max-height: 63.5mm;
+              padding: 2mm 3mm;
             }
-            .sheet-page.d-8 .brand { font-size: 8.5pt; }
-            .sheet-page.d-8 .badge-cat { font-size: 7pt; }
+            .sheet-page.d-8 .brand-title { font-size: 9pt; }
+            .sheet-page.d-8 .card-subtitle { font-size: 6.5pt; }
             .sheet-page.d-8 .model { font-size: 8.5pt; }
-            .sheet-page.d-8 .code-badge { font-size: 9pt; }
-            .sheet-page.d-8 .qr-container img { width: 33mm; height: 33mm; }
-            .sheet-page.d-8 .card-footer { font-size: 7pt; }
+            .sheet-page.d-8 .code-badge { font-size: 9pt; padding: 1.5px 8px; }
+            .sheet-page.d-8 .qr-container img { width: 34mm; height: 34mm; }
+            .sheet-page.d-8 .card-footer { font-size: 7pt; padding: 1mm 2mm; }
 
             /* 4 por folha (2x2) */
-            .sheet-page.d-4 { gap: 6mm; padding: 4mm; }
+            .sheet-page.d-4 { gap: 5mm; padding: 3mm; }
             .sheet-page.d-4 .card {
-              width: calc((100% - 1 * 6mm) / 2);
-              height: 133mm;
-              max-height: 133mm;
-              padding: 5mm 6mm;
+              width: calc((100% - 1 * 5mm) / 2);
+              height: 128mm;
+              max-height: 128mm;
+              padding: 4mm 5mm;
             }
-            .sheet-page.d-4 .brand { font-size: 11pt; }
-            .sheet-page.d-4 .badge-cat { font-size: 9pt; }
-            .sheet-page.d-4 .model { font-size: 11pt; }
-            .sheet-page.d-4 .code-badge { font-size: 12pt; padding: 3px 10px; }
+            .sheet-page.d-4 .brand-title { font-size: 14pt; letter-spacing: 2px; }
+            .sheet-page.d-4 .card-subtitle { font-size: 9.5pt; }
+            .sheet-page.d-4 .model { font-size: 12pt; }
+            .sheet-page.d-4 .code-badge { font-size: 12pt; padding: 3px 12px; }
             .sheet-page.d-4 .qr-container img { width: 68mm; height: 68mm; }
-            .sheet-page.d-4 .card-footer { font-size: 9pt; }
+            .sheet-page.d-4 .card-footer { font-size: 9pt; padding: 2mm 3mm; }
 
             /* Standalone single card style */
             .single-wrapper .card {
               width: 72mm;
               height: 72mm;
-              padding: 3mm;
+              padding: 2.5mm;
             }
-            .single-wrapper .brand { font-size: 8.5pt; }
-            .single-wrapper .badge-cat { font-size: 7pt; }
-            .single-wrapper .model { font-size: 8.5pt; }
-            .single-wrapper .code-badge { font-size: 9pt; }
+            .single-wrapper .brand-title { font-size: 8.5pt; }
+            .single-wrapper .card-subtitle { font-size: 6pt; }
+            .single-wrapper .model { font-size: 8pt; }
+            .single-wrapper .code-badge { font-size: 8.5pt; padding: 1.5px 8px; }
             .single-wrapper .qr-container img { width: 36mm; height: 36mm; }
-            .single-wrapper .card-footer { font-size: 7pt; }
+            .single-wrapper .card-footer { font-size: 6.5pt; padding: 1mm 1.5mm; }
 
             /* Absolute anti-break protection for Mobile & Desktop printing */
             @media print {
+              @page {
+                size: A4 portrait;
+                margin: 6mm 5mm;
+              }
+              *, *::before, *::after {
+                box-sizing: border-box !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
               .no-print { display: none !important; }
               html, body {
                 background: #ffffff !important;
@@ -724,24 +737,30 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 border: none !important;
                 box-shadow: none !important;
                 padding: 0 !important;
+                background: transparent !important;
+                margin: 0 auto !important;
               }
               .cut-guide { display: none !important; }
               .sheet-page {
-                margin: 0 !important;
+                margin: 0 auto !important;
                 box-shadow: none !important;
+                border: none !important;
                 border-radius: 0 !important;
                 width: 100% !important;
-                max-width: 100% !important;
-                height: 284mm !important;
-                max-height: 284mm !important;
+                max-width: 198mm !important;
+                height: auto !important;
+                min-height: 255mm !important;
+                max-height: 272mm !important;
+                page-break-before: auto !important;
                 page-break-after: always !important;
                 break-after: page !important;
                 page-break-inside: avoid !important;
                 break-inside: avoid !important;
-                overflow: hidden !important;
+                overflow: visible !important;
                 display: flex !important;
                 flex-wrap: wrap !important;
                 align-content: flex-start !important;
+                background: #ffffff !important;
               }
               .sheet-page:last-child {
                 page-break-after: auto !important;
@@ -752,6 +771,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                 break-inside: avoid !important;
                 break-inside: avoid-page !important;
                 -webkit-column-break-inside: avoid !important;
+                transform: translateZ(0);
               }
             }
           </style>

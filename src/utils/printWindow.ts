@@ -7,20 +7,47 @@ export function openPrintWindow(htmlContent: string): void {
     const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
     const blobUrl = URL.createObjectURL(blob);
     
-    // Using noopener,noreferrer ensures the popup window runs in its own process/thread
-    // preventing window.print() from freezing the main application.
-    const printWin = window.open(blobUrl, '_blank', 'noopener,noreferrer');
+    // Try opening new window first
+    const printWin = window.open(blobUrl, '_blank');
 
-    if (!printWin) {
-      alert('Por favor, permita popups no navegador para abrir a janela de impressão.');
-      URL.revokeObjectURL(blobUrl);
+    if (printWin) {
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+      }, 180000);
       return;
     }
 
-    // Revoke the object URL after 2 minutes to free memory
-    setTimeout(() => {
-      URL.revokeObjectURL(blobUrl);
-    }, 120000);
+    // Resilient Fallback for Mobile and iframe sandboxes where window.open returns null
+    const existingIframe = document.getElementById('andrade-print-frame');
+    if (existingIframe) {
+      existingIframe.remove();
+    }
+
+    const printFrame = document.createElement('iframe');
+    printFrame.id = 'andrade-print-frame';
+    printFrame.style.position = 'fixed';
+    printFrame.style.top = '-9999px';
+    printFrame.style.left = '-9999px';
+    printFrame.style.width = '100%';
+    printFrame.style.height = '100%';
+    printFrame.style.border = 'none';
+    printFrame.style.zIndex = '-9999';
+    printFrame.src = blobUrl;
+
+    printFrame.onload = () => {
+      try {
+        printFrame.contentWindow?.focus();
+        printFrame.contentWindow?.print();
+      } catch (e) {
+        console.warn('Iframe print warning:', e);
+      }
+      setTimeout(() => {
+        printFrame.remove();
+        URL.revokeObjectURL(blobUrl);
+      }, 60000);
+    };
+
+    document.body.appendChild(printFrame);
   } catch (err) {
     console.error('Erro ao abrir janela de impressão:', err);
     alert('Erro ao abrir janela de impressão. Tente novamente.');

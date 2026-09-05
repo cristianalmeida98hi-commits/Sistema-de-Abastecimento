@@ -28,28 +28,13 @@ export interface OilChangeStatus {
 }
 
 /**
- * Checks whether a maintenance log corresponds strictly to an oil/filter change service.
+ * Checks whether a maintenance log corresponds strictly to an oil change service.
+ * Rule: SOMENTE uma manutenção especificamente do tipo TROCA_OLEO pode dar baixa ou resetar o controle de óleo.
  */
 export function isOilMaintenanceService(
-  type?: string,
-  title?: string,
-  description?: string
+  type?: string
 ): boolean {
-  if (type === 'TROCA_OLEO' || type === 'TROCA_FILTROS') return true;
-  
-  const text = `${title || ''} ${description || ''}`.toLowerCase();
-  return (
-    text.includes('troca de óleo') ||
-    text.includes('troca de oleo') ||
-    text.includes('troca do óleo') ||
-    text.includes('troca do oleo') ||
-    text.includes('óleo de motor') ||
-    text.includes('oleo de motor') ||
-    text.includes('óleo lubrificante') ||
-    text.includes('oleo lubrificante') ||
-    text.includes('óleo e filtro') ||
-    text.includes('oleo e filtro')
-  );
+  return type === 'TROCA_OLEO';
 }
 
 /**
@@ -99,10 +84,10 @@ export function calculateOilChangeStatus(vehicle: Vehicle): OilChangeStatus {
     : (vehicle.oilChangeWarningAdvanceHours !== undefined ? Number(vehicle.oilChangeWarningAdvanceHours) : (Number(vehicle.maintenanceWarningAdvanceHours) || 50));
 
   const lastMeter = isKm
-    ? (vehicle.lastOilChangeKm !== undefined ? Number(vehicle.lastOilChangeKm) : (Number(vehicle.lastMaintenanceKm) || 0))
-    : (vehicle.lastOilChangeHourmeter !== undefined ? Number(vehicle.lastOilChangeHourmeter) : (Number(vehicle.lastMaintenanceHourmeter) || 0));
+    ? (vehicle.lastOilChangeKm !== undefined ? Number(vehicle.lastOilChangeKm) : 0)
+    : (vehicle.lastOilChangeHourmeter !== undefined ? Number(vehicle.lastOilChangeHourmeter) : 0);
 
-  const lastDate = vehicle.lastOilChangeDate || vehicle.lastMaintenanceDate || '';
+  const lastDate = vehicle.lastOilChangeDate || '';
 
   // Determine next target meter: if explicitly configured/calculated and > lastMeter, use it; otherwise lastMeter + interval
   let nextMeter = isKm

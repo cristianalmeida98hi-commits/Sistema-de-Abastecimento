@@ -1433,8 +1433,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         </label>
                         <input
                           type="number"
-                          min="1"
-                          step="100"
+                          min="0"
+                          step="any"
                           value={oilChangeIntervalKm}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1467,7 +1467,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
-                          step="100"
+                          step="any"
                           value={oilChangeWarningAdvanceKm}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1499,7 +1499,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
-                          step="1"
+                          step="any"
                           value={lastOilChangeKm}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1535,8 +1535,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         </label>
                         <input
                           type="number"
-                          min="1"
-                          step="10"
+                          min="0"
+                          step="any"
                           value={oilChangeIntervalHours}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1568,7 +1568,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
-                          step="10"
+                          step="any"
                           value={oilChangeWarningAdvanceHours}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1600,7 +1600,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
-                          step="1"
+                          step="any"
                           value={lastOilChangeHourmeter}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1829,8 +1829,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         </label>
                         <input
                           type="number"
-                          min="1"
-                          step="100"
+                          min="0"
+                          step="any"
                           value={oilChangeIntervalKm}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1863,7 +1863,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
-                          step="100"
+                          step="any"
                           value={oilChangeWarningAdvanceKm}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1895,7 +1895,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
-                          step="1"
+                          step="any"
                           value={lastOilChangeKm}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1931,8 +1931,8 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         </label>
                         <input
                           type="number"
-                          min="1"
-                          step="10"
+                          min="0"
+                          step="any"
                           value={oilChangeIntervalHours}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1964,7 +1964,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
-                          step="10"
+                          step="any"
                           value={oilChangeWarningAdvanceHours}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1996,7 +1996,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
                         <input
                           type="number"
                           min="0"
-                          step="1"
+                          step="any"
                           value={lastOilChangeHourmeter}
                           onChange={(e) => {
                             const val = e.target.value;

@@ -1658,15 +1658,15 @@ export function checkAutomatedAlerts() {
       const isKm = v.category === 'VEICULO' || v.maintenanceControlType === 'QUILOMETRAGEM';
       
       if (!isKm) {
-        // Hour-based maintenance control
+        // Hour-based maintenance control - STRICTLY OIL CHANGE FIELDS ONLY
         const isOilControlActive = v.oilChangeControlActive !== false;
         const curHour = Number(v.currentHourmeter) || 0;
-        const lastMnt = Number(v.lastOilChangeHourmeter) || Number(v.lastMaintenanceHourmeter) || 0;
+        const lastMnt = Number(v.lastOilChangeHourmeter) || 0;
         const interval = Number(v.oilChangeIntervalHours) || Number(v.maintenanceIntervalHours) || 300;
         const warningAdvance = v.oilChangeWarningAdvanceHours !== undefined ? Number(v.oilChangeWarningAdvanceHours) : (Number(v.maintenanceWarningAdvanceHours) || 50);
         const nextMnt = v.nextOilChangeHourmeter !== undefined
           ? Number(v.nextOilChangeHourmeter)
-          : (v.nextMaintenanceHourmeter !== undefined ? Number(v.nextMaintenanceHourmeter) : (lastMnt > 0 ? lastMnt + interval : interval));
+          : (lastMnt > 0 ? lastMnt + interval : interval);
 
         const mntAlertId = `alt-oil-${v.id}`;
         const existingMntAlert = cache.alerts.find(a => a.id === mntAlertId || (a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'));
@@ -1753,15 +1753,15 @@ export function checkAutomatedAlerts() {
           }
         }
       } else {
-        // Km-based maintenance / oil change control for vehicles
+        // Km-based maintenance / oil change control for vehicles - STRICTLY OIL CHANGE FIELDS ONLY
         const isOilControlActive = v.oilChangeControlActive !== false;
         const curKm = Number(v.currentKm) || 0;
-        const lastKm = Number(v.lastOilChangeKm) || Number(v.lastMaintenanceKm) || 0;
+        const lastKm = Number(v.lastOilChangeKm) || 0;
         const intervalKm = Number(v.oilChangeIntervalKm) || Number(v.maintenanceIntervalKm) || 10000;
         const warningAdvanceKm = v.oilChangeWarningAdvanceKm !== undefined ? Number(v.oilChangeWarningAdvanceKm) : (Number(v.maintenanceWarningAdvanceKm) || 1000);
         const nextKm = v.nextOilChangeKm !== undefined
           ? Number(v.nextOilChangeKm)
-          : (v.nextMaintenanceKm !== undefined ? Number(v.nextMaintenanceKm) : (lastKm > 0 ? lastKm + intervalKm : intervalKm));
+          : (lastKm > 0 ? lastKm + intervalKm : intervalKm);
 
         const kmAlertId = `alt-oil-${v.id}`;
         const existingKmAlert = cache.alerts.find(a => a.id === kmAlertId || (a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')));

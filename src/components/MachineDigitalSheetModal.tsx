@@ -310,7 +310,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
         title: `Manutenção: ${m.title}`,
         description: `Horímetro/KM: ${m.kmOrHourAtService}h • Serv: ${m.description} (${m.supplierOrWorkshop})`,
         user: m.performedBy || 'Técnico',
-        value: m.cost > 0 ? formatCurrency(m.cost) : undefined,
+        value: (canEdit && m.cost > 0) ? formatCurrency(m.cost) : undefined,
         rawObj: m
       });
     });
@@ -1734,10 +1734,12 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                             <span className="text-slate-400 text-[10px] block">Mecânico:</span>
                             <span className="text-slate-700 dark:text-slate-300">{m.performedBy || 'Não inf.'}</span>
                           </div>
-                          <div>
-                            <span className="text-slate-400 text-[10px] block">Valor:</span>
-                            <span className="text-slate-700 dark:text-slate-300 font-bold">{m.cost > 0 ? formatCurrency(m.cost) : 'Oficina Interna'}</span>
-                          </div>
+                          {canEdit && (
+                            <div>
+                              <span className="text-slate-400 text-[10px] block">Valor:</span>
+                              <span className="text-slate-700 dark:text-slate-300 font-bold">{m.cost > 0 ? formatCurrency(m.cost) : 'Oficina Interna'}</span>
+                            </div>
+                          )}
                         </div>
 
                         {m.description && <p className="text-[10px] text-slate-500 italic">"{m.description}"</p>}
@@ -1821,10 +1823,12 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                             <strong className="text-slate-800 dark:text-slate-200">{log.supplierOrWorkshop || 'Interno'}</strong>
                           </div>
 
-                          <div>
-                            <span className="block text-[10px]">Custo Registrado:</span>
-                            <strong className="text-[#064E3B] dark:text-[#FACC15]">{log.cost > 0 ? formatCurrency(log.cost) : 'R$ 0,00'}</strong>
-                          </div>
+                          {canEdit && (
+                            <div>
+                              <span className="block text-[10px]">Custo Registrado:</span>
+                              <strong className="text-[#064E3B] dark:text-[#FACC15]">{log.cost > 0 ? formatCurrency(log.cost) : 'R$ 0,00'}</strong>
+                            </div>
+                          )}
                         </div>
 
                         {log.notes && (

@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   X, Fuel, Calendar, Clock, Truck, User as UserIcon, 
-  AlertTriangle, CheckCircle2, Check, Droplet, Sparkles, Plus, Gauge, MapPin
+  AlertTriangle, CheckCircle2, Check, Droplet, Sparkles, Plus, Gauge, MapPin, Lock
 } from 'lucide-react';
-import { Vehicle, GasStation, User, FuelType, FuelLog, SystemSettings, OperationType, ActivityType } from '../types';
+import { Vehicle, GasStation, User, FuelType, FuelLog, SystemSettings, OperationType, ActivityType, canEditSystemData } from '../types';
 import { 
   calculateFuelLogMetrics, formatCurrency, getFuelTypeName, getSectorName,
   getActivitiesForOperation, OPERATION_OPTIONS, getStationFuelPrice 
@@ -93,11 +93,51 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
 
   const [liters, setLiters] = useState<number | string>(50);
 
-  // Strictly compute price per liter based on fuel type and station
-  const pricePerLiter = useMemo(
+  const isFuncionario = currentUser.role === 'FUNCIONARIO';
+  const isPrivileged = canEditSystemData(currentUser.role);
+
+  const isExternalStation = selectedStation?.type === 'EXTERNO';
+
+  // Base price configured on the station for the selected fuel type
+  const baseStationPrice = useMemo(
     () => getStationFuelPrice(selectedStation, fuelType),
     [selectedStation, fuelType]
   );
+
+  // Manual price state (specifically used when station is EXTERNO)
+  const [manualPricePerLiter, setManualPricePerLiter] = useState<string>(() => {
+    const p = getStationFuelPrice(selectedStation, fuelType);
+    return p > 0 ? p.toFixed(2) : '';
+  });
+
+  const lastStationIdRef = useRef<string>(selectedStation?.id || '');
+  const lastFuelTypeRef = useRef<FuelType>(fuelType);
+
+  // Whenever selected station or fuel type changes, synchronize suggested reference price for that fuel type
+  useEffect(() => {
+    const stationChanged = lastStationIdRef.current !== selectedStation?.id;
+    const fuelChanged = lastFuelTypeRef.current !== fuelType;
+
+    if (stationChanged || fuelChanged) {
+      lastStationIdRef.current = selectedStation?.id || '';
+      lastFuelTypeRef.current = fuelType;
+
+      const refPrice = getStationFuelPrice(selectedStation, fuelType);
+      setManualPricePerLiter(refPrice > 0 ? refPrice.toFixed(2) : '');
+    }
+  }, [selectedStation?.id, fuelType]);
+
+  // Strictly compute price per liter:
+  // EXTERNO: user can manually type any price per liter (e.g. 5,89 or 5.89).
+  // INTERNO: STRICTLY locked to the station's registered price (baseStationPrice), no manual typing allowed.
+  const pricePerLiter = useMemo(() => {
+    if (isExternalStation) {
+      const clean = String(manualPricePerLiter).replace(',', '.').trim();
+      const parsed = parseFloat(clean);
+      return !isNaN(parsed) && parsed > 0 ? parsed : baseStationPrice;
+    }
+    return baseStationPrice;
+  }, [isExternalStation, manualPricePerLiter, baseStationPrice]);
 
   const isKmBased = selectedEquipment?.category === 'VEICULO';
   const initialCurrentKmOrHour = isKmBased 
@@ -172,6 +212,17 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
     if (!selectedEquipment || !selectedStation || numLiters <= 0) {
       alert('Por favor, selecione o equipamento e informe a quantidade de litros abastecidos.');
       return;
+    }
+
+    if (isExternalStation) {
+      const clean = String(manualPricePerLiter).replace(',', '.').trim();
+      const parsed = parseFloat(clean);
+      if (isNaN(parsed) || parsed <= 0) {
+        alert(isFuncionario
+          ? 'Por favor, informe o valor unitário da bomba constante no comprovante.'
+          : 'Por favor, informe um preço do combustível válido maior que zero (R$/L).');
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -480,7 +531,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
               </div>
             </div>
 
-            {/* 4. Details Grid: Fuel Type, Station, Driver, DateTime */}
+            {/* 4. Details Grid: Fuel Type, Station, Price, Driver, DateTime */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-3xl bg-[#04281f] border border-emerald-800/80">
               
               {/* Station Selection */}
@@ -520,6 +571,89 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                 </select>
               </div>
 
+              {/* Preço / Informação do Combustível */}
+              {isExternalStation ? (
+                isFuncionario ? (
+                  /* FUNCIONÁRIO no Posto Externo: entrada discreta sem dados monetários (sem R$, sem R$/L, sem Preço, sem Valor Total) */
+                  <div className="space-y-1.5 sm:col-span-2 p-3.5 rounded-2xl bg-[#03231b] border border-emerald-800/80">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200">
+                        Valor unitário da bomba (conforme cupom/bomba) *
+                      </label>
+                      <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded-full border border-emerald-700/60">
+                        Lançamento Externo
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      required
+                      value={manualPricePerLiter}
+                      onChange={(e) => setManualPricePerLiter(e.target.value)}
+                      placeholder="Informe o valor numérico da bomba (ex: 5,89)"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-emerald-700 bg-[#063327] text-slate-100 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500/30 transition-all shadow-inner"
+                    />
+                    <p className="text-[10px] text-emerald-300/70">
+                      Informe os dígitos indicados na bomba/comprovante para o processamento interno do lançamento.
+                    </p>
+                  </div>
+                ) : (
+                  /* ADMIN / MANUTENÇÃO no Posto Externo: digitação manual com R$ e conferência */
+                  <div className="space-y-1 sm:col-span-2 p-3 rounded-2xl bg-[#03231b] border border-emerald-800/80">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
+                        <Fuel className="w-3.5 h-3.5 text-[#FACC15]" />
+                        Preço do combustível (R$/L) *
+                      </label>
+                      <span className="text-[10px] font-black text-[#FACC15] bg-[#FACC15]/20 px-2.5 py-0.5 rounded-full border border-[#FACC15]/40 flex items-center gap-1">
+                        Posto Externo • Digitação Manual Habilitada
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">
+                          R$
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          required
+                          value={manualPricePerLiter}
+                          onChange={(e) => setManualPricePerLiter(e.target.value)}
+                          placeholder="0,00"
+                          className="w-full pl-10 pr-3.5 py-2.5 rounded-xl border-2 border-[#FACC15] bg-[#063327] text-[#FACC15] text-sm font-black outline-none focus:ring-2 focus:ring-[#FACC15]/30 transition-all shadow-inner"
+                        />
+                      </div>
+                      <p className="text-[11px] text-emerald-300/80 leading-snug">
+                        Você pode digitar livremente o preço praticado na bomba do posto externo para <strong>{getFuelTypeName(fuelType)}</strong> (ex: 5,89 / 6,12 / 6,20).
+                      </p>
+                    </div>
+                  </div>
+                )
+              ) : (
+                /* POSTO INTERNO: NÃO mostrar campo de digitação manual */
+                !isFuncionario && (
+                  <div className="space-y-1 sm:col-span-2 p-3 rounded-2xl bg-[#03231b] border border-emerald-800/80 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-950 flex items-center justify-center border border-emerald-700/60 shrink-0">
+                        <Lock className="w-4 h-4 text-emerald-400" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-200">
+                          Posto Interno (Tanque Sede) • Preço Travado Automático
+                        </p>
+                        <p className="text-[11px] text-emerald-300/80">
+                          Preço tabelado da fazenda: <strong className="text-[#FACC15]">{formatCurrency(baseStationPrice)}/L</strong> para {getFuelTypeName(fuelType)}. Não permite digitação manual.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-bold text-emerald-300 bg-emerald-950 px-2.5 py-1 rounded-full border border-emerald-700/60 shrink-0">
+                      Automático
+                    </span>
+                  </div>
+                )
+              )}
+
               {/* Driver / Operator */}
               <div className="space-y-1">
                 <label className="block text-[11px] font-black uppercase tracking-wider text-slate-200">
@@ -554,32 +688,62 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
 
             </div>
 
-            {/* 5. Financial & Metrics Bar */}
-            <div className="p-4 rounded-3xl bg-gradient-to-r from-[#064E3B] to-[#043327] border-2 border-[#FACC15] shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <span className="text-[10px] uppercase font-black tracking-widest text-[#FACC15] block">
-                  Valor Total Estimado ({numLiters} L × {formatCurrency(pricePerLiter)}/L)
-                </span>
-                <span className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                  {formatCurrency(metrics.totalValue)}
-                </span>
-              </div>
+            {/* 5. Metrics Bar: Role-gated */}
+            {isPrivileged ? (
+              /* ADMIN / MANUTENÇÃO: Exibe dados financeiros completos */
+              <div className="p-4 rounded-3xl bg-gradient-to-r from-[#064E3B] to-[#043327] border-2 border-[#FACC15] shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <span className="text-[10px] uppercase font-black tracking-widest text-[#FACC15] block">
+                    Valor Total Estimado ({numLiters} L × {formatCurrency(pricePerLiter)}/L)
+                  </span>
+                  <span className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                    {formatCurrency(metrics.totalValue)}
+                  </span>
+                </div>
 
-              <div className="flex items-center gap-4 text-xs font-bold text-emerald-200">
-                {metrics.calculatedAverageKmPerLiter !== undefined && (
-                  <div className="text-right">
-                    <span className="block text-[10px] text-[#FACC15] font-black uppercase">Média Km/L</span>
-                    <span className="text-sm font-extrabold text-white">{metrics.calculatedAverageKmPerLiter} km/L</span>
-                  </div>
-                )}
-                {metrics.calculatedAverageLitersPerHour !== undefined && (
-                  <div className="text-right">
-                    <span className="block text-[10px] text-[#FACC15] font-black uppercase">Consumo L/h</span>
-                    <span className="text-sm font-extrabold text-white">{metrics.calculatedAverageLitersPerHour} L/h</span>
-                  </div>
-                )}
+                <div className="flex items-center gap-4 text-xs font-bold text-emerald-200">
+                  {metrics.calculatedAverageKmPerLiter !== undefined && (
+                    <div className="text-right">
+                      <span className="block text-[10px] text-[#FACC15] font-black uppercase">Média Km/L</span>
+                      <span className="text-sm font-extrabold text-white">{metrics.calculatedAverageKmPerLiter} km/L</span>
+                    </div>
+                  )}
+                  {metrics.calculatedAverageLitersPerHour !== undefined && (
+                    <div className="text-right">
+                      <span className="block text-[10px] text-[#FACC15] font-black uppercase">Consumo L/h</span>
+                      <span className="text-sm font-extrabold text-white">{metrics.calculatedAverageLitersPerHour} L/h</span>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              /* FUNCIONÁRIO: Exibição estritamente operacional, SEM dados financeiros */
+              <div className="p-4 rounded-3xl bg-[#04281f] border border-emerald-800 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <span className="text-[10px] uppercase font-black tracking-widest text-[#FACC15] block">
+                    Resumo Operacional
+                  </span>
+                  <span className="text-xl font-black text-white tracking-tight">
+                    {numLiters} Litros Abastecidos
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs font-bold text-emerald-200">
+                  {metrics.calculatedAverageKmPerLiter !== undefined && (
+                    <div className="text-right">
+                      <span className="block text-[10px] text-[#FACC15] font-black uppercase">Média Km/L</span>
+                      <span className="text-sm font-extrabold text-white">{metrics.calculatedAverageKmPerLiter} km/L</span>
+                    </div>
+                  )}
+                  {metrics.calculatedAverageLitersPerHour !== undefined && (
+                    <div className="text-right">
+                      <span className="block text-[10px] text-[#FACC15] font-black uppercase">Consumo L/h</span>
+                      <span className="text-sm font-extrabold text-white">{metrics.calculatedAverageLitersPerHour} L/h</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Suspicious Consumption Alert if Triggered */}
             {metrics.flaggedSuspicious && (

@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { FuelLog, User, Vehicle, GasStation, OperationType, ActivityType } from '../types';
-import { Fuel, CheckCircle2, Clock, Truck, Plus, Sparkles, Send, Shield, History, MapPin, AlertTriangle, ChevronRight } from 'lucide-react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { FuelLog, User, Vehicle, GasStation, OperationType, ActivityType, FuelType, canEditSystemData } from '../types';
+import { Fuel, CheckCircle2, Clock, Truck, Plus, Sparkles, Send, Shield, History, MapPin, AlertTriangle, ChevronRight, Lock } from 'lucide-react';
 import { getTankStatus } from '../utils/storage';
 import { 
   getActivitiesForOperation, 
@@ -8,7 +8,7 @@ import {
   getOperationTypeName, 
   getActivityTypeName 
 } from '../utils/operations';
-import { getStationFuelPrice, formatCurrency, getFuelTypeName } from '../utils/calculations';
+import { getStationFuelPrice, getFuelTypeName, formatCurrency } from '../utils/calculations';
 import { VehicleSelector } from './VehicleSelector';
 
 interface OperatorFuelingViewProps {
@@ -28,6 +28,9 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
   userLogs = [],
   darkMode
 }) => {
+  const isFuncionario = currentUser.role === 'FUNCIONARIO';
+  const isPrivileged = canEditSystemData(currentUser.role);
+
   const tankStatus = useMemo(() => getTankStatus(), []);
   const isTankLow = tankStatus.currentStock <= 2000;
 
@@ -56,18 +59,58 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
   const [selectedGasStationId, setSelectedGasStationId] = useState<string>(
     gasStations.find(s => s.type === 'INTERNO')?.id || gasStations[0]?.id || ''
   );
-  
-  const [showSuccessToast, setShowSuccessToast] = useState(false);
-  const [lastSavedLog, setLastSavedLog] = useState<Partial<FuelLog> | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const activeVehicle = vehicles.find(v => v.id === selectedVehicleId);
   const isVehicleKm = activeVehicle?.category === 'VEICULO';
 
+  const [fuelType, setFuelType] = useState<FuelType>(() => {
+    return (activeVehicle?.fuelType && activeVehicle.fuelType !== 'NENHUM') ? activeVehicle.fuelType : 'DIESEL_S10';
+  });
+
+  // Keep fuelType synced with selected vehicle if vehicle has defined fuelType
+  useEffect(() => {
+    if (activeVehicle?.fuelType && activeVehicle.fuelType !== 'NENHUM') {
+      setFuelType(activeVehicle.fuelType);
+    }
+  }, [selectedVehicleId, activeVehicle?.fuelType]);
+
   const currentStation = gasStations.find(g => g.id === selectedGasStationId) || gasStations[0];
-  const activeFuelType = activeVehicle?.fuelType && activeVehicle.fuelType !== 'NENHUM' ? activeVehicle.fuelType : 'DIESEL_S10';
-  const activePricePerLiter = getStationFuelPrice(currentStation, activeFuelType);
+  const isExternalStation = currentStation?.type === 'EXTERNO';
+  const baseStationPrice = getStationFuelPrice(currentStation, fuelType);
+
+  const [manualPricePerLiter, setManualPricePerLiter] = useState<string>(() => {
+    const def = getStationFuelPrice(currentStation, fuelType);
+    return def > 0 ? def.toFixed(2) : '';
+  });
+
+  const lastStationRef = useRef<string>(currentStation?.id || '');
+  const lastFuelRef = useRef<FuelType>(fuelType);
+
+  useEffect(() => {
+    const stnChanged = lastStationRef.current !== currentStation?.id;
+    const fuelChanged = lastFuelRef.current !== fuelType;
+    if (stnChanged || fuelChanged) {
+      lastStationRef.current = currentStation?.id || '';
+      lastFuelRef.current = fuelType;
+      const def = getStationFuelPrice(currentStation, fuelType);
+      setManualPricePerLiter(def > 0 ? def.toFixed(2) : '');
+    }
+  }, [currentStation?.id, fuelType]);
+
+  const activePricePerLiter = useMemo(() => {
+    if (isExternalStation) {
+      const clean = String(manualPricePerLiter).replace(',', '.').trim();
+      const parsed = parseFloat(clean);
+      return !isNaN(parsed) && parsed > 0 ? parsed : baseStationPrice;
+    }
+    return baseStationPrice;
+  }, [isExternalStation, manualPricePerLiter, baseStationPrice]);
+
   const activeTotalValue = (Number(liters) || 0) * activePricePerLiter;
+
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [lastSavedLog, setLastSavedLog] = useState<Partial<FuelLog> | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Auto set default hourmeter / km when vehicle changes
   React.useEffect(() => {
@@ -108,12 +151,22 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
       return;
     }
 
+    if (isExternalStation) {
+      const clean = String(manualPricePerLiter).replace(',', '.').trim();
+      const parsed = parseFloat(clean);
+      if (isNaN(parsed) || parsed <= 0) {
+        alert(isFuncionario
+          ? 'Por favor, informe o valor unitário da bomba constante no comprovante.'
+          : 'Por favor, informe um preço do combustível válido maior que zero (R$/L).');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
       const station = currentStation;
       const litersNum = Number(liters);
-      const fuelType = activeFuelType;
       const pricePerLiter = activePricePerLiter;
       const totalValue = activeTotalValue;
       const nowIso = new Date().toISOString();
@@ -431,29 +484,125 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
 
         </div>
 
-        {/* 6. Posto de Abastecimento (Default Interno) */}
-        <div>
-          <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-1">
-            Posto / Ponto de Abastecimento
-          </label>
-          <select
-            value={selectedGasStationId}
-            onChange={(e) => setSelectedGasStationId(e.target.value)}
-            className={`w-full px-4 py-3 text-xs font-bold rounded-2xl border outline-none ${
-              darkMode 
-                ? 'bg-emerald-950 border-emerald-800 text-slate-100' 
-                : 'bg-slate-50 border-slate-300 text-slate-900'
-            }`}
-          >
-            {gasStations.map((stn) => (
-              <option key={stn.id} value={stn.id}>
-                {stn.name} ({stn.type === 'INTERNO' ? 'Tanque Sede' : 'Externo'})
-              </option>
-            ))}
-          </select>
-          <div className="flex items-center justify-between text-[11px] font-bold text-emerald-600 dark:text-[#FACC15] mt-1.5 px-1">
-            <span>Combustível: <strong>{getFuelTypeName(activeFuelType)}</strong> ({formatCurrency(activePricePerLiter)}/L)</span>
-            <span>Total: <strong>{formatCurrency(activeTotalValue)}</strong></span>
+        {/* 6. Posto de Abastecimento & Combustível */}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-1">
+              Posto / Ponto de Abastecimento *
+            </label>
+            <select
+              value={selectedGasStationId}
+              onChange={(e) => setSelectedGasStationId(e.target.value)}
+              className={`w-full px-4 py-3 text-xs font-bold rounded-2xl border outline-none ${
+                darkMode 
+                  ? 'bg-emerald-950 border-emerald-800 text-slate-100' 
+                  : 'bg-slate-50 border-slate-300 text-slate-900'
+              }`}
+            >
+              {gasStations.map((stn) => (
+                <option key={stn.id} value={stn.id}>
+                  {stn.name} ({stn.type === 'INTERNO' ? 'Tanque Sede' : 'Posto Externo'})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-1">
+                Tipo de Combustível *
+              </label>
+              <select
+                value={fuelType}
+                onChange={(e) => setFuelType(e.target.value as FuelType)}
+                className={`w-full px-4 py-2.5 text-xs font-bold rounded-2xl border outline-none ${
+                  darkMode 
+                    ? 'bg-emerald-950 border-emerald-800 text-slate-100' 
+                    : 'bg-slate-50 border-slate-300 text-slate-900'
+                }`}
+              >
+                <option value="DIESEL_S10">Diesel S10</option>
+                <option value="DIESEL_S500">Diesel S500</option>
+                <option value="GASOLINA_COMUM">Gasolina Comum</option>
+                <option value="GASOLINA_GRID">Gasolina Aditivada</option>
+                <option value="ETANOL">Etanol Hidratado</option>
+                <option value="ARLA_32">Arla 32</option>
+              </select>
+            </div>
+
+            {/* Price Field: Role-gated */}
+            {isExternalStation ? (
+              isFuncionario ? (
+                /* FUNCIONÁRIO no Posto Externo: campo discreto sem dados monetários (sem R$, sem R$/L, sem Preço, sem Custo, sem Total) */
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-1">
+                    Valor unitário da bomba (conforme cupom/bomba) *
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    required
+                    value={manualPricePerLiter}
+                    onChange={(e) => setManualPricePerLiter(e.target.value)}
+                    placeholder="Ex: 5,89"
+                    className={`w-full px-4 py-2.5 text-xs font-bold rounded-2xl border outline-none ${
+                      darkMode 
+                        ? 'bg-emerald-950 border-emerald-800 text-slate-100' 
+                        : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  />
+                  <p className="text-[10px] text-slate-500 dark:text-emerald-300/70 mt-1 font-medium">
+                    Informe os dígitos registrados na bomba para validação do abastecimento externo.
+                  </p>
+                </div>
+              ) : (
+                /* ADMIN / MANUTENÇÃO no Posto Externo: digitação manual com R$ e total */
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider mb-1 flex items-center justify-between">
+                    <span>Preço do combustível (R$/L) *</span>
+                    <span className="text-[10px] text-amber-600 dark:text-[#FACC15] font-black">Manual</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">
+                      R$
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      required
+                      value={manualPricePerLiter}
+                      onChange={(e) => setManualPricePerLiter(e.target.value)}
+                      placeholder="0,00"
+                      className={`w-full pl-9 pr-4 py-2.5 text-xs font-black rounded-2xl border-2 border-[#FACC15] outline-none ${
+                        darkMode 
+                          ? 'bg-emerald-950 text-[#FACC15]' 
+                          : 'bg-white text-emerald-900'
+                      }`}
+                    />
+                  </div>
+                  <p className="text-[10px] text-emerald-600 dark:text-[#FACC15] font-bold mt-1">
+                    Total: {formatCurrency(activeTotalValue)} ({liters || 0} L × {formatCurrency(activePricePerLiter)}/L)
+                  </p>
+                </div>
+              )
+            ) : (
+              /* POSTO INTERNO: Travado */
+              !isFuncionario ? (
+                <div className="flex flex-col justify-center">
+                  <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-800/60 flex items-center gap-2">
+                    <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <div className="text-[11px] leading-tight">
+                      <span className="font-bold text-slate-200 block">Posto Interno (Preço Fixo)</span>
+                      <span className="text-emerald-300 font-bold">{formatCurrency(baseStationPrice)}/L • Total: {formatCurrency(activeTotalValue)}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center text-[11px] font-bold text-slate-500 dark:text-emerald-300/80">
+                  <span>Abastecimento no Tanque Interno da Fazenda</span>
+                </div>
+              )
+            )}
           </div>
         </div>
 

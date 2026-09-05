@@ -296,7 +296,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
         title: `Abastecimento (${f.liters}L)`,
         description: `Posto: ${f.gasStationName} • Horímetro/KM: ${f.hourmeterAtFueling || f.kmAtFueling || 'N/I'}`,
         user: f.driverOrOperatorName,
-        value: formatCurrency(f.totalValue),
+        value: undefined,
         photoUrl: f.dashboardPhotoUrl,
         rawObj: f
       });
@@ -461,9 +461,10 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
     } else {
       if (onAddMaintenance) {
         const isKm = vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
+        const isOilService = mntType === 'TROCA_OLEO';
         const interval = isKm 
-          ? (Number(vehicle.maintenanceIntervalKm) || 10000) 
-          : (Number(vehicle.maintenanceIntervalHours) || Number(vehicle.oilChangeIntervalHours) || 300);
+          ? (isOilService ? (Number(vehicle.oilChangeIntervalKm) || Number(vehicle.maintenanceIntervalKm) || 10000) : (Number(vehicle.maintenanceIntervalKm) || 10000))
+          : (isOilService ? (Number(vehicle.oilChangeIntervalHours) || Number(vehicle.maintenanceIntervalHours) || 300) : (Number(vehicle.maintenanceIntervalHours) || 300));
 
         onAddMaintenance({
           equipmentId: vehicle.id,
@@ -709,6 +710,36 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
               </div>
             </div>
 
+            {/* Quick Oil Status Callout - Sincronizado com a Frota */}
+            {(() => {
+              const oilStatus = calculateOilChangeStatus(vehicle);
+              if (!oilStatus.isOilActive) return null;
+              return (
+                <div className={`p-2.5 px-3.5 rounded-2xl border flex items-center justify-between text-xs transition-all ${
+                  oilStatus.status === 'ATRASADA'
+                    ? 'bg-red-50 dark:bg-red-950/50 border-red-300 dark:border-red-800 text-red-700 dark:text-red-300'
+                    : oilStatus.status === 'PROXIMA'
+                      ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300'
+                      : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full animate-pulse bg-current"></span>
+                      Controle de Troca de Óleo:
+                    </span>
+                    <span className="font-extrabold">
+                      {oilStatus.status === 'ATRASADA'
+                        ? `Atrasada em ${oilStatus.hoursOrKmOverdue} ${oilStatus.unit}`
+                        : `Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${oilStatus.unit}`}
+                    </span>
+                  </div>
+                  <div className="text-[11px] opacity-90 font-medium">
+                    Próxima troca aos <strong>{oilStatus.nextMeter.toLocaleString('pt-BR')} {oilStatus.unit}</strong>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Capacidades Operacionais Dinâmicas */}
             {(() => {
               const capacities = getConsolidatedCapacities(vehicle);
@@ -844,11 +875,10 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
           {/* TAB 1: CONTROLE DE MANUTENÇÃO PREVENTIVA */}
           {activeTab === 'PREVENTIVE' && (
             <div className="space-y-4 animate-in fade-in duration-200">
-              {/* Highlight Banner for Oil Change Control (Standard 300h or Custom) */}
-              {vehicle.category !== 'VEICULO' && (
-                <div className={`p-4 sm:p-5 rounded-3xl border shadow-sm relative overflow-hidden transition-all ${
-                  darkMode ? 'bg-emerald-950/70 border-amber-500/30' : 'bg-amber-50/70 border-amber-200'
-                }`}>
+              {/* Highlight Banner for Oil Change Control (Synchronized with Fleet/Vehicle Control) */}
+              <div className={`p-4 sm:p-5 rounded-3xl border shadow-sm relative overflow-hidden transition-all ${
+                darkMode ? 'bg-emerald-950/70 border-amber-500/30' : 'bg-amber-50/70 border-amber-200'
+              }`}>
                   {(() => {
                     const oilStatus = calculateOilChangeStatus(vehicle);
                     const isOilActive = oilStatus.isOilActive;
@@ -1028,7 +1058,6 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                     );
                   })()}
                 </div>
-              )}
 
               {/* Direct Oil Change Modal inside Digital Sheet */}
               {isDirectOilChangeOpen && (
@@ -1265,7 +1294,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                                 <input
                                   type="number"
                                   min="1"
-                                  step="100"
+                                  step="1"
                                   required
                                   value={oilConfigInterval}
                                   onChange={(e) => {
@@ -1301,7 +1330,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                                 <input
                                   type="number"
                                   min="0"
-                                  step="100"
+                                  step="1"
                                   value={oilConfigAdvance}
                                   onChange={(e) => {
                                     const val = e.target.value;
@@ -1370,7 +1399,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                                 <input
                                   type="number"
                                   min="1"
-                                  step="10"
+                                  step="1"
                                   value={oilConfigInterval}
                                   onChange={(e) => {
                                     const val = e.target.value;
@@ -1402,7 +1431,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                                 <input
                                   type="number"
                                   min="0"
-                                  step="10"
+                                  step="1"
                                   value={oilConfigAdvance}
                                   onChange={(e) => {
                                     const val = e.target.value;
@@ -1657,10 +1686,10 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                 <div className="flex items-center justify-between">
                   <h4 className="font-extrabold text-xs text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
                     <Sparkles className="w-4 h-4 text-amber-600" />
-                    <span>Histórico de Trocas de Óleo e Filtros ({oilChangeLogs.length})</span>
+                    <span>Histórico de Trocas de Óleo ({oilChangeLogs.length})</span>
                   </h4>
                   <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300">
-                    Ciclo padrão: {vehicle.oilChangeIntervalHours || 300} Horas
+                    Ciclo padrão: {isVehicleKm ? (vehicle.oilChangeIntervalKm || vehicle.maintenanceIntervalKm || 10000).toLocaleString('pt-BR') + ' KM' : (vehicle.oilChangeIntervalHours || vehicle.maintenanceIntervalHours || 300).toLocaleString('pt-BR') + ' Horas'}
                   </span>
                 </div>
 
@@ -1674,7 +1703,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                           <div>
                             <span className="font-black text-xs text-slate-900 dark:text-slate-100 block">{m.title}</span>
                             <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
-                              Horímetro: <strong>{m.kmOrHourAtService} h</strong>
+                              {isVehicleKm ? 'Quilometragem' : 'Horímetro'}: <strong>{m.kmOrHourAtService?.toLocaleString('pt-BR')} {isVehicleKm ? 'km' : 'h'}</strong>
                             </span>
                           </div>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-emerald-900/50 text-slate-600 dark:text-emerald-300">
@@ -1867,45 +1896,64 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
             </div>
           )}
 
-          {/* TAB 4: INDICADORES E CUSTOS */}
+          {/* TAB 4: INDICADORES OPERACIONAIS */}
           {activeTab === 'OVERVIEW' && (
             <div className="space-y-4 animate-in fade-in duration-200">
               <div className="flex items-center justify-between">
                 <h3 className="font-extrabold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
                   <BarChart3 className="w-4 h-4 text-[#064E3B] dark:text-[#FACC15]" />
-                  <span>Indicadores Operacionais e Custos da Máquina</span>
+                  <span>Indicadores Operacionais da Máquina</span>
                 </h3>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                <div className={`p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-900 space-y-1 ${currentUser?.role === 'FUNCIONARIO' ? 'col-span-2 sm:col-span-3' : ''}`}>
-                  <span className="text-[10px] text-slate-500 font-bold block uppercase">Horas / KM Acumulado:</span>
-                  <strong className="text-xl font-black text-[#064E3B] dark:text-[#FACC15]">
-                    {vehicle.category === 'VEICULO' ? `${vehicle.currentKm} km` : `${vehicle.currentHourmeter || 0} h`}
-                  </strong>
-                  <p className="text-[10px] text-slate-500">Total trabalhado</p>
-                </div>
+              {(() => {
+                const oilStatus = calculateOilChangeStatus(vehicle);
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-900 space-y-1">
+                      <span className="text-[10px] text-slate-500 font-bold block uppercase">Horas / KM Acumulado:</span>
+                      <strong className="text-xl font-black text-[#064E3B] dark:text-[#FACC15]">
+                        {vehicle.category === 'VEICULO' ? `${vehicle.currentKm.toLocaleString('pt-BR')} km` : `${vehicle.currentHourmeter || 0} h`}
+                      </strong>
+                      <p className="text-[10px] text-slate-500">Total trabalhado</p>
+                    </div>
 
-                {currentUser?.role !== 'FUNCIONARIO' && (
-                  <>
                     <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-900 space-y-1">
                       <span className="text-[10px] text-slate-500 font-bold block uppercase">Consumo Mensal:</span>
                       <strong className="text-xl font-black text-slate-900 dark:text-slate-100">
                         {litersConsumedMonth.toLocaleString('pt-BR')} L
                       </strong>
-                      <p className="text-[10px] text-slate-500">{formatCurrency(totalSpentMonth)} no mês</p>
+                      <p className="text-[10px] text-slate-500">Total de litros consumidos no mês</p>
                     </div>
 
-                    <div className="p-4 rounded-2xl bg-[#064E3B] text-white p-4 rounded-2xl space-y-1 col-span-2 sm:col-span-1 shadow-md">
-                      <span className="text-[10px] text-[#FACC15] font-black block uppercase">Custo Acumulado Total:</span>
-                      <strong className="text-xl font-black text-white">
-                        {formatCurrency(totalAccumulatedCost)}
+                    <div className={`p-4 rounded-2xl border space-y-1 shadow-sm ${
+                      !oilStatus.isOilActive 
+                        ? 'bg-slate-50 dark:bg-emerald-950/30 border-slate-200 dark:border-emerald-900' 
+                        : oilStatus.status === 'ATRASADA'
+                          ? 'bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800'
+                          : oilStatus.status === 'PROXIMA'
+                            ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800'
+                            : 'bg-[#064E3B] text-white border-emerald-700'
+                    }`}>
+                      <span className={`text-[10px] font-black block uppercase ${oilStatus.status === 'EM_DIA' ? 'text-[#FACC15]' : 'text-slate-500 dark:text-slate-400'}`}>
+                        Controle de Troca de Óleo:
+                      </span>
+                      <strong className={`text-xl font-black ${
+                        oilStatus.status === 'ATRASADA' ? 'text-red-600 dark:text-red-400' : oilStatus.status === 'PROXIMA' ? 'text-amber-600 dark:text-amber-400' : oilStatus.status === 'EM_DIA' ? 'text-white' : 'text-slate-600'
+                      }`}>
+                        {oilStatus.isOilActive 
+                          ? (oilStatus.status === 'ATRASADA' 
+                              ? `Vencida há ${oilStatus.hoursOrKmOverdue} ${oilStatus.unit}` 
+                              : `Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${oilStatus.unit}`) 
+                          : 'Desativado'}
                       </strong>
-                      <p className="text-[10px] text-slate-200">Somatório Abastecimentos + Manutenções</p>
+                      <p className={`text-[10px] ${oilStatus.status === 'EM_DIA' ? 'text-slate-200' : 'text-slate-500'}`}>
+                        {oilStatus.isOilActive ? `Próxima troca em: ${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit}` : 'Sem plano ativo'}
+                      </p>
                     </div>
-                  </>
-                )}
-              </div>
+                  </div>
+                );
+              })()}
 
               {/* Quick Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -1921,7 +1969,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                   </div>
                   {lastFueling ? (
                     <div className="space-y-1">
-                      <p className="font-bold text-slate-900 dark:text-slate-100">{lastFueling.liters} Litros • {formatCurrency(lastFueling.totalValue)}</p>
+                      <p className="font-bold text-slate-900 dark:text-slate-100">{lastFueling.liters} Litros ({getFuelTypeName(lastFueling.fuelType)})</p>
                       <p className="text-[11px] text-slate-500">Operador: {lastFueling.driverOrOperatorName}</p>
                       <p className="text-[11px] text-slate-500">Posto: {lastFueling.gasStationName}</p>
                     </div>

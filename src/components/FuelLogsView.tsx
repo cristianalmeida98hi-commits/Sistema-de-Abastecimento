@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Fuel, Search, Filter, Download, FileSpreadsheet, FileText, Printer, 
-  Trash2, Edit3, Eye, AlertCircle, CheckCircle2, ChevronRight, X, Calendar, User as UserIcon
+  Trash2, Edit3, Eye, AlertCircle, CheckCircle2, ChevronRight, X, Calendar, User as UserIcon, Lock
 } from 'lucide-react';
 import { FuelLog, Vehicle, GasStation, User, UserRole, SystemSettings, OperationType, ActivityType, canEditSystemData } from '../types';
 import { 
@@ -606,16 +606,46 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block font-bold mb-1">Valor por Litro (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={editPricePerLiter}
-                  onChange={(e) => setEditPricePerLiter(parseFloat(e.target.value) || 0)}
-                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
-                />
-              </div>
+              {(() => {
+                const currentStation = gasStations.find(s => s.id === editingLog.gasStationId);
+                const isInternal = currentStation ? currentStation.type === 'INTERNO' : (editingLog.gasStationName?.toLowerCase().includes('sede') ?? false);
+
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block font-bold">Valor por Litro (R$)</label>
+                      {isInternal ? (
+                        <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded-full border border-emerald-700/60 flex items-center gap-1">
+                          <Lock className="w-2.5 h-2.5" />
+                          Posto Interno (Preço Travado)
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-700/60">
+                          Posto Externo (Preço Editável)
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="number"
+                      step="0.001"
+                      disabled={isInternal}
+                      readOnly={isInternal}
+                      value={editPricePerLiter}
+                      onChange={(e) => setEditPricePerLiter(parseFloat(e.target.value) || 0)}
+                      className={`w-full p-2 rounded-xl border ${
+                        isInternal 
+                          ? 'opacity-70 cursor-not-allowed bg-emerald-950/50 border-emerald-900 text-slate-300' 
+                          : darkMode ? 'bg-emerald-900/40 border-emerald-800 font-black text-amber-300' : 'bg-gray-50 font-black text-amber-700'
+                      }`}
+                    />
+                    {isInternal && (
+                      <p className="text-[10px] text-emerald-400/80 mt-1">
+                        Regra de Posto Interno: o preço é travado e segue o cadastro padrão do posto da fazenda.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="p-2 rounded-xl bg-amber-500/10 font-bold">
                 Novo Total: {formatCurrency(editLiters * editPricePerLiter)}

@@ -318,6 +318,17 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
                 />
               </div>
 
+              <div className="p-3 rounded-xl bg-emerald-900/30 border border-emerald-800/60 space-y-1">
+                <span className="font-bold text-xs flex items-center gap-1.5 text-amber-300">
+                  {type === 'INTERNO' ? 'Regra do Posto Interno:' : 'Regra do Posto Externo:'}
+                </span>
+                <p className="text-[11px] text-emerald-300/80">
+                  {type === 'INTERNO' 
+                    ? 'No posto interno (sede), estes preços são travados e aplicados automaticamente aos abastecimentos sem digitação manual.' 
+                    : 'No posto externo comercial, estes preços servem como referência padrão. O usuário poderá digitar manualmente o valor exato no momento de registrar o abastecimento.'}
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block font-bold mb-1">Preço Diesel S10 (R$)</label>

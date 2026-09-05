@@ -8,6 +8,7 @@ import {
   loginUser, loginUserById, getRememberedEmail, clearRememberedEmail, getUsers, 
   getQuickAccessUserIds, setQuickAccessUserIds, toggleQuickAccessUser 
 } from '../utils/storage';
+import { verifyPassword } from '../utils/security';
 
 interface LoginViewProps {
   onLoginSuccess: (user: User) => void;
@@ -27,6 +28,14 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
   const [allUsers, setAllUsers] = useState<User[]>(() => getUsers());
   const [quickAccessIds, setQuickAccessIds] = useState<string[]>(() => getQuickAccessUserIds());
   const [showManageModal, setShowManageModal] = useState(false);
+
+  // Authentication Gate for Quick Access Management (Strictly MANUTENCAO Profile Only)
+  const [showAuthGateModal, setShowAuthGateModal] = useState(false);
+  const [authMaintenanceUserId, setAuthMaintenanceUserId] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthValidating, setIsAuthValidating] = useState(false);
+  const [authorizedMaintenanceUser, setAuthorizedMaintenanceUser] = useState<User | null>(null);
 
   // Sync state if data updates
   useEffect(() => {
@@ -76,11 +85,49 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
     }, 200);
   };
 
-  const handleRemoveShortcut = async (userId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const updated = quickAccessIds.filter(id => id !== userId);
-    setQuickAccessIds(updated);
-    await setQuickAccessUserIds(updated);
+  const handleOpenManagement = () => {
+    if (authorizedMaintenanceUser && authorizedMaintenanceUser.role === 'MANUTENCAO') {
+      setShowManageModal(true);
+    } else {
+      const defaultMaint = allUsers.find(u => u.active !== false && u.role === 'MANUTENCAO');
+      if (defaultMaint) {
+        setAuthMaintenanceUserId(defaultMaint.id);
+      }
+      setAuthPassword('');
+      setAuthError(null);
+      setShowAuthGateModal(true);
+    }
+  };
+
+  const handleVerifyMaintenance = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setIsAuthValidating(true);
+
+    setTimeout(() => {
+      setIsAuthValidating(false);
+      const targetUser = allUsers.find(u => u.id === authMaintenanceUserId);
+      if (!targetUser) {
+        setAuthError('Selecione um usuário cadastrado com perfil MANUTENÇÃO.');
+        return;
+      }
+
+      // STRICT VALIDATION: Only MANUTENCAO is allowed. ADMIN and FUNCIONARIO are forbidden.
+      if (targetUser.role !== 'MANUTENCAO') {
+        setAuthError('Acesso Negado: Administradores e Funcionários NÃO possuem permissão para gerenciar o Acesso Rápido. O gerenciamento é permitido exclusivamente para o perfil MANUTENÇÃO.');
+        return;
+      }
+
+      const isValid = verifyPassword(authPassword, targetUser.password);
+      if (!isValid) {
+        setAuthError('Senha incorreta para o perfil de MANUTENÇÃO.');
+        return;
+      }
+
+      setAuthorizedMaintenanceUser(targetUser);
+      setShowAuthGateModal(false);
+      setShowManageModal(true);
+    }, 250);
   };
 
   const handleToggleShortcut = async (userId: string) => {
@@ -89,12 +136,18 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
   };
 
   const handleRestoreAllShortcuts = async () => {
+    // Check if maintenance is authorized
+    if (!authorizedMaintenanceUser || authorizedMaintenanceUser.role !== 'MANUTENCAO') {
+      handleOpenManagement();
+      return;
+    }
     const allActiveIds = allUsers.filter(u => u.active !== false).map(u => u.id);
     setQuickAccessIds(allActiveIds);
     await setQuickAccessUserIds(allActiveIds);
   };
 
   const activeUsers = allUsers.filter(u => u.active !== false);
+  const maintenanceUsers = activeUsers.filter(u => u.role === 'MANUTENCAO');
   const visibleShortcuts = activeUsers.filter(u => quickAccessIds.includes(u.id));
   const adminShortcuts = visibleShortcuts.filter(u => u.role === 'ADMIN');
   const maintenanceShortcuts = visibleShortcuts.filter(u => u.role === 'MANUTENCAO');
@@ -218,8 +271,9 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
               </div>
               <button
                 type="button"
-                onClick={() => setShowManageModal(true)}
-                className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-900/50 hover:bg-emerald-900 border border-emerald-700/60"
+                onClick={handleOpenManagement}
+                className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-900/50 hover:bg-emerald-900 border border-emerald-700/60 transition-all"
+                title="Apenas perfil MANUTENÇÃO pode gerenciar atalhos"
               >
                 <Settings2 className="w-3.5 h-3.5" />
                 <span>Gerenciar</span>
@@ -231,10 +285,10 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                 <p className="text-xs text-emerald-300/80">Nenhum atalho rápido configurado.</p>
                 <button
                   type="button"
-                  onClick={handleRestoreAllShortcuts}
+                  onClick={handleOpenManagement}
                   className="text-xs font-bold text-amber-400 underline"
                 >
-                  Restaurar todos os usuários da equipe
+                  Restaurar todos os usuários da equipe (Exige Manutenção)
                 </button>
               </div>
             ) : (
@@ -258,15 +312,7 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                               isThisLoggingIn ? 'ring-2 ring-[#FACC15] bg-emerald-900/90' : ''
                             } ${loggingInUserId && !isThisLoggingIn ? 'opacity-50 pointer-events-none' : ''}`}
                           >
-                            <button
-                              type="button"
-                              onClick={(e) => handleRemoveShortcut(user.id, e)}
-                              title="Remover este atalho"
-                              className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-900/80 hover:bg-red-500/80 text-emerald-400 hover:text-white flex items-center justify-center opacity-70 group-hover:opacity-100 transition-all z-10"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                            <div className="flex items-center justify-between pr-5">
+                            <div className="flex items-center justify-between">
                               <span className="font-extrabold text-[#FACC15] truncate flex items-center gap-1.5">
                                 {isThisLoggingIn && (
                                   <div className="w-3 h-3 border-2 border-[#FACC15] border-t-transparent rounded-full animate-spin shrink-0"></div>
@@ -313,15 +359,7 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                               isThisLoggingIn ? 'ring-2 ring-amber-400 bg-emerald-900/90' : ''
                             } ${loggingInUserId && !isThisLoggingIn ? 'opacity-50 pointer-events-none' : ''}`}
                           >
-                            <button
-                              type="button"
-                              onClick={(e) => handleRemoveShortcut(user.id, e)}
-                              title="Remover este atalho"
-                              className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-900/80 hover:bg-red-500/80 text-emerald-400 hover:text-white flex items-center justify-center opacity-70 group-hover:opacity-100 transition-all z-10"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                            <div className="flex items-center justify-between pr-5">
+                            <div className="flex items-center justify-between">
                               <span className="font-extrabold text-amber-300 truncate flex items-center gap-1.5">
                                 {isThisLoggingIn && (
                                   <div className="w-3 h-3 border-2 border-amber-300 border-t-transparent rounded-full animate-spin shrink-0"></div>
@@ -369,15 +407,7 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                               isThisLoggingIn ? 'ring-2 ring-[#FACC15] bg-emerald-900/90' : ''
                             } ${loggingInUserId && !isThisLoggingIn ? 'opacity-50 pointer-events-none' : ''}`}
                           >
-                            <button
-                              type="button"
-                              onClick={(e) => handleRemoveShortcut(user.id, e)}
-                              title="Remover este atalho"
-                              className="absolute top-1 right-1 w-4 h-4 rounded-full bg-emerald-900/80 hover:bg-red-500/80 text-emerald-400 hover:text-white flex items-center justify-center opacity-70 group-hover:opacity-100 transition-all z-10"
-                            >
-                              <X className="w-2.5 h-2.5" />
-                            </button>
-                            <div className="flex items-center justify-between pr-4">
+                            <div className="flex items-center justify-between">
                               <span className="font-extrabold text-[#FACC15] truncate flex items-center gap-1">
                                 {isThisLoggingIn && (
                                   <div className="w-2.5 h-2.5 border-2 border-[#FACC15] border-t-transparent rounded-full animate-spin shrink-0"></div>
@@ -395,7 +425,7 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                                 {user.email}
                               </p>
                               {isThisLoggingIn && (
-                                <span className="text-[8px] font-bold text-[#FACC15] animate-pulse">
+                                <span className="text-[9px] font-bold text-[#FACC15] animate-pulse">
                                   Entrando...
                                 </span>
                               )}
@@ -414,16 +444,133 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
 
       </div>
 
-      {/* Modal para Gerenciar Atalhos de Acesso Rápido */}
+      {/* Modal de Autorização Exclusiva para Perfil MANUTENÇÃO */}
+      {showAuthGateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md bg-emerald-950 border-2 border-amber-500/60 rounded-3xl p-6 shadow-2xl space-y-4 text-emerald-100">
+            <div className="flex items-center justify-between border-b border-emerald-800/60 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/40">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm text-white">
+                    Autorização de Segurança
+                  </h3>
+                  <p className="text-[10px] text-amber-300 font-bold uppercase tracking-wide">
+                    Exclusivo Perfil MANUTENÇÃO
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAuthGateModal(false)}
+                className="p-1.5 rounded-xl hover:bg-emerald-900 text-emerald-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-1">
+              <p className="font-bold flex items-center gap-1.5 text-amber-300">
+                <Shield className="w-3.5 h-3.5 shrink-0" />
+                Regra Restrita de Acesso:
+              </p>
+              <p className="text-[11px] leading-relaxed text-amber-100/90">
+                Administradores e Funcionários <strong>NÃO</strong> têm permissão para gerenciar o Acesso Rápido na tela de login. Somente o perfil <strong>MANUTENÇÃO</strong> pode gerenciar ou restaurar atalhos.
+              </p>
+            </div>
+
+            {authError && (
+              <div className="p-3 rounded-xl bg-red-500/20 border border-red-500/50 text-red-200 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{authError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifyMaintenance} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-emerald-200 mb-1">
+                  Selecione o Usuário de Manutenção
+                </label>
+                <select
+                  value={authMaintenanceUserId}
+                  onChange={(e) => setAuthMaintenanceUserId(e.target.value)}
+                  required
+                  className="w-full p-2.5 rounded-xl border border-emerald-800 bg-emerald-900/60 text-white text-xs font-bold outline-none focus:border-amber-400"
+                >
+                  <option value="">Selecione o usuário de manutenção...</option>
+                  {allUsers
+                    .filter(u => u.active !== false)
+                    .map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.role === 'MANUTENCAO' ? '⭐ MANUTENÇÃO' : u.role})
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-emerald-400/70 mt-1">
+                  Apenas usuários com perfil MANUTENÇÃO serão validados.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-emerald-200 mb-1">
+                  Senha do Perfil MANUTENÇÃO
+                </label>
+                <input
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="Digite a senha de manutenção"
+                  required
+                  className="w-full p-2.5 rounded-xl border border-emerald-800 bg-emerald-900/60 text-white text-xs font-bold outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAuthGateModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-emerald-300 hover:bg-emerald-900"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAuthValidating}
+                  className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-gray-950 font-black text-xs shadow-md flex items-center gap-1.5"
+                >
+                  {isAuthValidating ? (
+                    <span>Validando...</span>
+                  ) : (
+                    <>
+                      <Wrench className="w-3.5 h-3.5" />
+                      <span>Validar & Acessar Gestão</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Gerenciar Atalhos de Acesso Rápido (Autorizado para MANUTENCAO) */}
       {showManageModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
           <div className="w-full max-w-md bg-emerald-950 border border-emerald-800 rounded-3xl p-6 shadow-2xl space-y-4 text-emerald-100 max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-emerald-800/60 pb-3">
               <div className="flex items-center gap-2">
                 <Settings2 className="w-5 h-5 text-[#FACC15]" />
-                <h3 className="font-extrabold text-sm text-white">
-                  Gerenciar Atalhos de Acesso Rápido
-                </h3>
+                <div>
+                  <h3 className="font-extrabold text-sm text-white">
+                    Gerenciar Atalhos de Acesso Rápido
+                  </h3>
+                  <p className="text-[10px] text-amber-300 font-bold flex items-center gap-1">
+                    <Wrench className="w-2.5 h-2.5" />
+                    Autorizado por: {authorizedMaintenanceUser?.name || 'MANUTENÇÃO'}
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
@@ -492,7 +639,7 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                 onClick={() => setShowManageModal(false)}
                 className="px-5 py-2.5 rounded-xl bg-amber-400 text-gray-950 font-bold text-xs shadow-md hover:bg-amber-300"
               >
-                Pronto
+                Salvar & Fechar
               </button>
             </div>
           </div>

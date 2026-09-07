@@ -38,30 +38,39 @@ onAuthStateChanged(auth, (user) => {
   }
 });
 
+let pendingAuthPromise: Promise<FirebaseUser | null> | null = null;
+
 /**
  * Ensures a valid Firebase Authentication session is established.
- * Attempts anonymous sign-in if no currentUser exists.
+ * Attempts anonymous sign-in if no currentUser exists, avoiding duplicate in-flight requests.
  */
 export async function ensureFirebaseAuth(): Promise<FirebaseUser | null> {
   if (auth.currentUser) {
     return auth.currentUser;
   }
 
-  try {
-    const cred = await signInAnonymously(auth);
-    console.log(`[Firebase Auth] Autenticado com sucesso: UID=${cred.user.uid}`);
-    return cred.user;
-  } catch (error: any) {
-    if (error?.code === 'auth/configuration-not-found') {
-      console.warn(
-        "[Firebase Auth] O provedor Anônimo ainda não está ativado no Firebase Console (andrade-agro).\n" +
-        "Para ativar: Firebase Console -> Build -> Authentication -> Sign-in method -> Anonymous -> Ativar."
-      );
-    } else {
-      console.warn("[Firebase Auth] Erro ao autenticar:", error?.message || error);
-    }
-    return null;
+  if (pendingAuthPromise) {
+    return pendingAuthPromise;
   }
+
+  pendingAuthPromise = (async () => {
+    try {
+      const cred = await signInAnonymously(auth);
+      console.log(`[Firebase Auth] Autenticado com sucesso: UID=${cred.user.uid}`);
+      return cred.user;
+    } catch (error: any) {
+      if (error?.code === 'auth/configuration-not-found') {
+        console.info("[Firebase Auth] Provedor anônimo aguardando ativação no console.");
+      } else {
+        console.warn("[Firebase Auth] Aviso ao verificar sessão:", error?.message || error);
+      }
+      return null;
+    } finally {
+      pendingAuthPromise = null;
+    }
+  })();
+
+  return pendingAuthPromise;
 }
 
 // Helper to remove any undefined properties before writing to Firestore
@@ -92,17 +101,5 @@ export function safeUpdateDoc(docRef: DocumentReference, data: any) {
   return updateDoc(docRef, sanitizeForFirestore(data));
 }
 
-// Test Firestore connection on boot
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'system', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('offline')) {
-      console.warn("[Firebase] Client appears offline or checking connection:", error.message);
-    }
-  }
-}
-
-testConnection();
 
 

@@ -11,7 +11,7 @@ import {
   addFuelLog, updateFuelLog, deleteFuelLog, addVehicle, updateVehicle, deleteVehicle,
   addMaintenance, updateMaintenance, deleteMaintenance, addGasStation, updateGasStation, deleteGasStation, addUser,
   updateUser, deleteUser, resetUserPassword, resolveAlert, updateSettings, logoutUser,
-  getStorageLoadingState, getFirestoreLoadError, StorageLoadingState
+  getStorageLoadingState, getFirestoreLoadError, StorageLoadingState, retryFirestoreConnection
 } from './utils/storage';
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
 import { Header } from './components/Header';
@@ -291,22 +291,22 @@ export default function App() {
     );
   }
 
-  // If storage is ERROR, render Connection Error Screen
-  if (storageStatus === 'ERROR') {
+  // If storage is ERROR and we have NO data to display and no authenticated user, render Connection Error Screen
+  if (storageStatus === 'ERROR' && vehicles.length === 0 && !currentUser) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#031d16] text-slate-100 font-sans">
-        <div className="w-full max-w-md p-8 rounded-3xl bg-[#042d23] border border-rose-900/60 shadow-2xl text-center space-y-6">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-rose-950/80 border border-rose-800 flex items-center justify-center">
-            <AlertTriangle className="w-8 h-8 text-rose-400" />
+        <div className="w-full max-w-md p-8 rounded-3xl bg-[#042d23] border border-amber-900/60 shadow-2xl text-center space-y-6">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-950/80 border border-amber-800 flex items-center justify-center">
+            <AlertTriangle className="w-8 h-8 text-amber-400" />
           </div>
           <div className="space-y-2">
-            <h2 className="text-lg font-black text-white">Falha na Conexão com o Banco de Dados</h2>
-            <p className="text-xs text-rose-200/80">
-              {getFirestoreLoadError() || 'Não foi possível conectar ao Firestore. Verifique sua conexão com a internet ou tente recarregar.'}
+            <h2 className="text-lg font-black text-white">Instabilidade Temporária de Conexão</h2>
+            <p className="text-xs text-amber-200/80">
+              {getFirestoreLoadError() || 'Não foi possível sincronizar os dados no momento. Verifique sua conexão com a internet.'}
             </p>
           </div>
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => retryFirestoreConnection()}
             className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg transition-transform active:scale-95"
           >
             Tentar Reconectar
@@ -347,6 +347,22 @@ export default function App() {
       {/* Main Content Column */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         
+        {/* Connection Notice Banner when temporary offline or reconnecting */}
+        {getFirestoreLoadError() && (
+          <div className="bg-amber-950/90 border-b border-amber-800/80 px-4 py-2 text-xs text-amber-200 flex items-center justify-between gap-3 shadow-md z-30">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Instabilidade temporária na conexão. Seus dados continuam disponíveis localmente.</span>
+            </div>
+            <button
+              onClick={() => retryFirestoreConnection()}
+              className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] transition-all shrink-0 active:scale-95"
+            >
+              Reconectar
+            </button>
+          </div>
+        )}
+
         {/* Top Header */}
         <Header
           currentUser={currentUser}

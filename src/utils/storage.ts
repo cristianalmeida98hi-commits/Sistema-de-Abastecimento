@@ -56,9 +56,12 @@ let cache = {
   settings: INITIAL_SETTINGS as SystemSettings
 };
 
+const CACHE_STORAGE_KEY = 'andradeagro_local_cache_v2';
 let isInitialized = false;
 let notifyDebounceTimer: any = null;
 let alertCheckDebounceTimer: any = null;
+let saveLocalCacheTimer: any = null;
+let activeFirestoreUnsubscribers: (() => void)[] = [];
 
 export type StorageLoadingState = 'LOADING' | 'LOADED_EMPTY' | 'LOADED_WITH_DATA' | 'ERROR';
 
@@ -66,12 +69,60 @@ let storageLoadingState: StorageLoadingState = 'LOADING';
 let firestoreLoadError: string | null = null;
 const loadedCollections = new Set<string>();
 
+// Pre-load persistent local cache to guarantee zero-latency rendering and offline protection
+function loadInitialCacheFromStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    const saved = localStorage.getItem(CACHE_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed === 'object') {
+        if (Array.isArray(parsed.users) && parsed.users.length > 0) cache.users = parsed.users;
+        if (Array.isArray(parsed.vehicles) && parsed.vehicles.length > 0) cache.vehicles = parsed.vehicles;
+        if (Array.isArray(parsed.gasStations) && parsed.gasStations.length > 0) cache.gasStations = parsed.gasStations;
+        if (Array.isArray(parsed.centralTanks) && parsed.centralTanks.length > 0) cache.centralTanks = parsed.centralTanks;
+        if (Array.isArray(parsed.tankMovements) && parsed.tankMovements.length > 0) cache.tankMovements = parsed.tankMovements;
+        if (Array.isArray(parsed.fuelLogs) && parsed.fuelLogs.length > 0) cache.fuelLogs = parsed.fuelLogs;
+        if (Array.isArray(parsed.fuelRefills) && parsed.fuelRefills.length > 0) cache.fuelRefills = parsed.fuelRefills;
+        if (Array.isArray(parsed.maintenanceLogs) && parsed.maintenanceLogs.length > 0) cache.maintenanceLogs = parsed.maintenanceLogs;
+        if (Array.isArray(parsed.machineIssues) && parsed.machineIssues.length > 0) cache.machineIssues = parsed.machineIssues;
+        if (Array.isArray(parsed.preventiveItems) && parsed.preventiveItems.length > 0) cache.preventiveItems = parsed.preventiveItems;
+        if (Array.isArray(parsed.alerts)) cache.alerts = parsed.alerts;
+        if (parsed.settings) cache.settings = { ...INITIAL_SETTINGS, ...parsed.settings };
+
+        if (cache.vehicles.length > 0 || cache.users.length > 0) {
+          storageLoadingState = 'LOADED_WITH_DATA';
+        }
+      }
+    }
+  } catch (e) {
+    // Non-fatal, continuing to live network fetch
+  }
+}
+
+// Immediately hydrate cache so initial render is instantaneous
+loadInitialCacheFromStorage();
+
+function persistLocalCacheDebounced() {
+  if (typeof window === 'undefined') return;
+  if (saveLocalCacheTimer) clearTimeout(saveLocalCacheTimer);
+  saveLocalCacheTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(cache));
+    } catch {
+      // ignore storage quota errors
+    }
+  }, 800);
+}
+
 function updateLoadingStatus() {
-  if (storageLoadingState === 'ERROR') return;
   const hasCore = loadedCollections.has('vehicles') && loadedCollections.has('users');
   if (hasCore) {
     const hasData = cache.vehicles.length > 0 || cache.users.length > 0;
     storageLoadingState = hasData ? 'LOADED_WITH_DATA' : 'LOADED_EMPTY';
+    firestoreLoadError = null;
+  } else if (cache.vehicles.length > 0 || cache.users.length > 0) {
+    storageLoadingState = 'LOADED_WITH_DATA';
   }
 }
 
@@ -87,134 +138,187 @@ export function isStorageReady(): boolean {
   return storageLoadingState === 'LOADED_WITH_DATA' || storageLoadingState === 'LOADED_EMPTY';
 }
 
+// Clean up any active listeners to prevent duplicates and memory leaks
+export function clearFirestoreListeners() {
+  for (const unsub of activeFirestoreUnsubscribers) {
+    try {
+      unsub();
+    } catch {
+      // ignore
+    }
+  }
+  activeFirestoreUnsubscribers = [];
+}
+
 // Internal Firestore Listeners Setup
 function setupFirestoreListeners() {
+  // Prevent duplicate listeners
+  clearFirestoreListeners();
+
   try {
     // 1. Users Subscription
-    onSnapshot(collection(db, 'users'), (snapshot) => {
+    const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
-      cache.users = items;
+      if (items.length > 0 || cache.users.length === 0) {
+        cache.users = items;
+      }
       loadedCollections.add('users');
+      firestoreLoadError = null;
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => {
       console.warn('[Firestore Users Connection]', err?.message || err);
-      firestoreLoadError = err?.message || 'Erro ao carregar usuários';
-      storageLoadingState = 'ERROR';
+      if (cache.users.length === 0 && cache.vehicles.length === 0) {
+        firestoreLoadError = 'Falha ao sincronizar usuários com o banco de dados.';
+        storageLoadingState = 'ERROR';
+      }
       notifyDataUpdated();
     });
+    activeFirestoreUnsubscribers.push(unsubUsers);
 
     // 2. Vehicles / Machines Subscription
-    onSnapshot(collection(db, 'vehicles'), (snapshot) => {
+    const unsubVehicles = onSnapshot(collection(db, 'vehicles'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Vehicle));
-      cache.vehicles = items;
+      if (items.length > 0 || cache.vehicles.length === 0) {
+        cache.vehicles = items;
+      }
       loadedCollections.add('vehicles');
+      firestoreLoadError = null;
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => {
       console.warn('[Firestore Vehicles Connection]', err?.message || err);
-      firestoreLoadError = err?.message || 'Erro ao carregar máquinas';
-      storageLoadingState = 'ERROR';
+      if (cache.vehicles.length === 0 && cache.users.length === 0) {
+        firestoreLoadError = 'Falha ao sincronizar máquinas e equipamentos com o banco de dados.';
+        storageLoadingState = 'ERROR';
+      }
       notifyDataUpdated();
     });
+    activeFirestoreUnsubscribers.push(unsubVehicles);
 
     // 3. Central Tanks Subscription (Tanques Centrais: Quadra e Itapeva)
-    onSnapshot(collection(db, 'central_tanks'), (snapshot) => {
+    const unsubCentralTanks = onSnapshot(collection(db, 'central_tanks'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as CentralTank));
-      cache.centralTanks = items;
+      if (items.length > 0 || cache.centralTanks.length === 0) {
+        cache.centralTanks = items;
+      }
       loadedCollections.add('central_tanks');
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore CentralTanks Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubCentralTanks);
 
     // 3.1 Tank Movements Subscription
-    onSnapshot(collection(db, 'tank_movements'), (snapshot) => {
+    const unsubTankMovements = onSnapshot(collection(db, 'tank_movements'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as TankMovement));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-      cache.tankMovements = items;
+      if (items.length > 0 || cache.tankMovements.length === 0) {
+        cache.tankMovements = items;
+      }
       loadedCollections.add('tank_movements');
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore TankMovements Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubTankMovements);
 
     // 3.2 Gas Stations Subscription
-    onSnapshot(collection(db, 'gas_stations'), (snapshot) => {
+    const unsubGasStations = onSnapshot(collection(db, 'gas_stations'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GasStation));
-      cache.gasStations = items;
+      if (items.length > 0 || cache.gasStations.length === 0) {
+        cache.gasStations = items;
+      }
       loadedCollections.add('gas_stations');
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore GasStations Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubGasStations);
 
     // 4. Fuel Logs Subscription
-    onSnapshot(collection(db, 'fuel_logs'), (snapshot) => {
+    const unsubFuelLogs = onSnapshot(collection(db, 'fuel_logs'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelLog));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-      cache.fuelLogs = items;
+      if (items.length > 0 || cache.fuelLogs.length === 0) {
+        cache.fuelLogs = items;
+      }
       loadedCollections.add('fuel_logs');
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore FuelLogs Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubFuelLogs);
 
     // 4.1 Fuel Refills Subscription
-    onSnapshot(collection(db, 'fuel_refills'), (snapshot) => {
+    const unsubFuelRefills = onSnapshot(collection(db, 'fuel_refills'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as FuelRefill));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-      cache.fuelRefills = items;
+      if (items.length > 0 || cache.fuelRefills.length === 0) {
+        cache.fuelRefills = items;
+      }
       loadedCollections.add('fuel_refills');
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore FuelRefills Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubFuelRefills);
 
     // 5. Maintenance Logs Subscription
-    onSnapshot(collection(db, 'maintenance_logs'), (snapshot) => {
+    const unsubMaintenanceLogs = onSnapshot(collection(db, 'maintenance_logs'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MaintenanceLog));
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      cache.maintenanceLogs = items;
+      if (items.length > 0 || cache.maintenanceLogs.length === 0) {
+        cache.maintenanceLogs = items;
+      }
       loadedCollections.add('maintenance_logs');
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore MaintenanceLogs Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubMaintenanceLogs);
 
     // 6. Machine Issues Subscription
-    onSnapshot(collection(db, 'machine_issues'), (snapshot) => {
+    const unsubIssues = onSnapshot(collection(db, 'machine_issues'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as MachineIssue));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-      cache.machineIssues = items;
+      if (items.length > 0 || cache.machineIssues.length === 0) {
+        cache.machineIssues = items;
+      }
       loadedCollections.add('machine_issues');
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore Issues Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubIssues);
 
     // 7. Preventive Items Subscription
-    onSnapshot(collection(db, 'preventive_items'), (snapshot) => {
+    const unsubPreventive = onSnapshot(collection(db, 'preventive_items'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as PreventiveMaintenanceItem));
-      cache.preventiveItems = items;
+      if (items.length > 0 || cache.preventiveItems.length === 0) {
+        cache.preventiveItems = items;
+      }
       loadedCollections.add('preventive_items');
       updateLoadingStatus();
       notifyDataUpdated();
     }, (err) => console.warn('[Firestore Preventive Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubPreventive);
 
     // 8. Alerts Subscription
-    onSnapshot(collection(db, 'alerts'), (snapshot) => {
+    const unsubAlerts = onSnapshot(collection(db, 'alerts'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SmartAlert));
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       cache.alerts = items;
       loadedCollections.add('alerts');
-      notifyDataUpdated(false); // don't re-trigger alert check when alerts arrive
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore Alerts Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubAlerts);
 
     // 9. Audit Logs Subscription
-    onSnapshot(collection(db, 'audit_logs'), (snapshot) => {
+    const unsubAudit = onSnapshot(collection(db, 'audit_logs'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
       cache.auditLogs = items;
       loadedCollections.add('audit_logs');
       notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore AuditLogs Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubAudit);
 
     // 10. System Settings Subscription
-    onSnapshot(collection(db, 'settings'), (snapshot) => {
+    const unsubSettings = onSnapshot(collection(db, 'settings'), (snapshot) => {
       if (!snapshot.empty) {
         const configDoc = snapshot.docs.find(d => d.id === 'config') || snapshot.docs[0];
         if (configDoc) {
@@ -224,13 +328,27 @@ function setupFirestoreListeners() {
         }
       }
     }, (err) => console.warn('[Firestore Settings Connection]', err?.message || err));
+    activeFirestoreUnsubscribers.push(unsubSettings);
 
   } catch (err) {
     console.error('[Firestore init error]', err);
-    firestoreLoadError = String(err);
-    storageLoadingState = 'ERROR';
+    if (cache.vehicles.length === 0 && cache.users.length === 0) {
+      firestoreLoadError = 'Falha temporária ao inicializar o banco de dados.';
+      storageLoadingState = 'ERROR';
+    }
     notifyDataUpdated();
   }
+}
+
+// User-invoked or automatic reconnection attempt
+export function retryFirestoreConnection() {
+  firestoreLoadError = null;
+  if (cache.vehicles.length === 0 && cache.users.length === 0) {
+    storageLoadingState = 'LOADING';
+  }
+  ensureFirebaseAuth().catch(() => {});
+  setupFirestoreListeners();
+  notifyDataUpdated();
 }
 
 // Initialize Firebase Firestore Real-Time Listeners
@@ -248,6 +366,12 @@ export function initStorage() {
     } catch (e) {
       // ignore
     }
+
+    // Auto-reconnect when device regains network connectivity
+    window.addEventListener('online', () => {
+      console.log('[Andrade Agro] Conexão com a rede restabelecida. Reconectando...');
+      retryFirestoreConnection();
+    });
   }
 
   // Attempt to ensure Firebase Auth session asynchronously without blocking real-time subscriptions
@@ -260,13 +384,14 @@ export function notifyDataUpdated(shouldCheckAlerts: boolean = true) {
     if (notifyDebounceTimer) clearTimeout(notifyDebounceTimer);
     notifyDebounceTimer = setTimeout(() => {
       window.dispatchEvent(new Event('andradeagro_data_updated'));
-    }, 40);
+      persistLocalCacheDebounced();
+    }, 60);
 
-    if (shouldCheckAlerts) {
+    if (shouldCheckAlerts && isStorageReady() && cache.vehicles.length > 0) {
       if (alertCheckDebounceTimer) clearTimeout(alertCheckDebounceTimer);
       alertCheckDebounceTimer = setTimeout(() => {
         checkAutomatedAlerts();
-      }, 300);
+      }, 500);
     }
   }
 }

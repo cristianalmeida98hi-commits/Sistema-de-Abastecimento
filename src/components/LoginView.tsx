@@ -19,10 +19,22 @@ interface LoginViewProps {
 export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, successMessage }) => {
   const [email, setEmail] = useState(() => getRememberedEmail());
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(() => !!getRememberedEmail());
+  const [rememberMe, setRememberMe] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return !!localStorage.getItem('andradeagro_persistent_admin_session_v1') || !!getRememberedEmail();
+    }
+    return false;
+  });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [loggingInUserId, setLoggingInUserId] = useState<string | null>(null);
+  
+  // Ensure view starts at top on opening login
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.scrollTo(0, 0);
+    }
+  }, []);
   
   // Quick Access Management
   const [allUsers, setAllUsers] = useState<User[]>(() => getUsers());
@@ -67,9 +79,13 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
     }, 250);
   };
 
-  // Direct 1-Click Login for Quick Access Shortcuts
+  // Direct 1-Click Login for Quick Access Shortcuts (Employees & Maintenance Only)
   const handleQuickLogin = (user: User) => {
     if (isLoading || loggingInUserId) return;
+    if (user.role === 'ADMIN') {
+      setErrorMessage('Administradores devem autenticar informando e-mail e senha.');
+      return;
+    }
     setErrorMessage(null);
     setLoggingInUserId(user.id);
 
@@ -141,15 +157,14 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
       handleOpenManagement();
       return;
     }
-    const allActiveIds = allUsers.filter(u => u.active !== false).map(u => u.id);
-    setQuickAccessIds(allActiveIds);
-    await setQuickAccessUserIds(allActiveIds);
+    const allPublicIds = allUsers.filter(u => u.active !== false && u.role !== 'ADMIN').map(u => u.id);
+    setQuickAccessIds(allPublicIds);
+    await setQuickAccessUserIds(allPublicIds);
   };
 
   const activeUsers = allUsers.filter(u => u.active !== false);
-  const maintenanceUsers = activeUsers.filter(u => u.role === 'MANUTENCAO');
-  const visibleShortcuts = activeUsers.filter(u => quickAccessIds.includes(u.id));
-  const adminShortcuts = visibleShortcuts.filter(u => u.role === 'ADMIN');
+  const publicUsers = activeUsers.filter(u => u.role !== 'ADMIN');
+  const visibleShortcuts = publicUsers.filter(u => quickAccessIds.includes(u.id));
   const maintenanceShortcuts = visibleShortcuts.filter(u => u.role === 'MANUTENCAO');
   const employeeShortcuts = visibleShortcuts.filter(u => u.role === 'FUNCIONARIO');
 
@@ -230,12 +245,15 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                     setRememberMe(e.target.checked);
                     if (!e.target.checked) {
                       clearRememberedEmail();
+                      if (typeof window !== 'undefined') {
+                        localStorage.removeItem('andradeagro_persistent_admin_session_v1');
+                      }
                     }
                   }}
                   className="w-4 h-4 rounded border-emerald-800 bg-emerald-950 text-[#064E3B] focus:ring-[#064E3B]"
                 />
                 <span className="text-xs font-semibold text-emerald-300">
-                  Lembrar e-mail neste navegador
+                  Manter minha conta conectada neste dispositivo
                 </span>
               </label>
             </div>
@@ -293,53 +311,6 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
               </div>
             ) : (
               <>
-                {/* Seção Administradores */}
-                {adminShortcuts.length > 0 && (
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-1">
-                      <Shield className="w-3 h-3 text-[#FACC15]" />
-                      Administradores (Painel Completo)
-                    </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                      {adminShortcuts.map(user => {
-                        const isThisLoggingIn = loggingInUserId === user.id;
-                        return (
-                          <div
-                            key={user.id}
-                            onClick={() => handleQuickLogin(user)}
-                            title={`Clique para entrar imediatamente como ${user.name}`}
-                            className={`p-2.5 rounded-2xl border text-left transition-all hover:border-[#FACC15] hover:bg-emerald-900/70 bg-emerald-950/60 border-emerald-900 cursor-pointer relative group ${
-                              isThisLoggingIn ? 'ring-2 ring-[#FACC15] bg-emerald-900/90' : ''
-                            } ${loggingInUserId && !isThisLoggingIn ? 'opacity-50 pointer-events-none' : ''}`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-extrabold text-[#FACC15] truncate flex items-center gap-1.5">
-                                {isThisLoggingIn && (
-                                  <div className="w-3 h-3 border-2 border-[#FACC15] border-t-transparent rounded-full animate-spin shrink-0"></div>
-                                )}
-                                <span className="truncate">{user.name}</span>
-                              </span>
-                              <span className="text-[9px] font-bold bg-[#FACC15]/20 text-[#FACC15] px-1.5 py-0.5 rounded shrink-0">
-                                ADMIN
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between mt-0.5">
-                              <p className="text-[10px] text-emerald-300/80 truncate">
-                                {user.email}
-                              </p>
-                              {isThisLoggingIn && (
-                                <span className="text-[9px] font-bold text-[#FACC15] animate-pulse">
-                                  Entrando...
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
                 {/* Seção Manutenção */}
                 {maintenanceShortcuts.length > 0 && (
                   <div className="space-y-1 pt-1">
@@ -582,11 +553,11 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
             </div>
 
             <p className="text-xs text-emerald-300/80">
-              Marque os administradores e funcionários que deseja exibir nos cartões de acesso rápido da tela inicial:
+              Marque os funcionários e técnicos que deseja exibir nos cartões de acesso rápido da tela inicial (Administradores devem autenticar com e-mail e senha):
             </p>
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-              {activeUsers.map(user => {
+              {publicUsers.map(user => {
                 const isSelected = quickAccessIds.includes(user.id);
                 return (
                   <label

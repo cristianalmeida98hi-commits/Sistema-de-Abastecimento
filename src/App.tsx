@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   initStorage, getCurrentUser, getUsers, getVehicles, getGasStations, 
   getFuelLogs, getMaintenanceLogs, getAlerts, getAuditLogs, getSettings,
@@ -51,6 +51,9 @@ export default function App() {
   const [settings, setSettings] = useState<SystemSettings>(() => getSettings());
   const [storageStatus, setStorageStatus] = useState<StorageLoadingState>(() => getStorageLoadingState());
 
+  // Main scrollable content reference
+  const mainContentRef = useRef<HTMLElement>(null);
+
   // UI State
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [loginSuccessMessage, setLoginSuccessMessage] = useState<string | null>(null);
@@ -71,10 +74,27 @@ export default function App() {
 
   const darkMode = true;
 
-  // 2. Storage initialization
+  // 2. Storage initialization & initial scroll-to-top
   useEffect(() => {
     initStorage();
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
   }, []);
+
+  // Guarantee scroll starts at top on login, user change, or tab navigation
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = 0;
+    }
+  }, [activeTab, currentUser?.id]);
 
   // 3. Sync state on storage/Firestore updates
   const refreshState = useCallback(() => {
@@ -156,6 +176,15 @@ export default function App() {
       setActiveTab('operator-fueling');
     } else {
       setActiveTab('dashboard');
+    }
+
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = 0;
     }
 
     if (typeof window !== 'undefined' && window.location.hash) {
@@ -334,7 +363,7 @@ export default function App() {
         />
 
         {/* Content View Container */}
-        <main className="flex-1 p-3 sm:p-6 lg:p-8 overflow-y-auto max-w-[1600px] w-full mx-auto">
+        <main ref={mainContentRef} className="flex-1 p-3 sm:p-6 lg:p-8 overflow-y-auto max-w-[1600px] w-full mx-auto">
           {activeTab === 'operator-fueling' && (
               <OperatorFuelingView
                 currentUser={currentUser}

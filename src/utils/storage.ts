@@ -19,7 +19,8 @@ import {
 
 const SESSION_KEYS = {
   SESSION_USER: 'andradeagro_session_user_v1',
-  REMEMBERED_EMAIL: 'andradeagro_remembered_email_v1'
+  REMEMBERED_EMAIL: 'andradeagro_remembered_email_v1',
+  PERSISTENT_ADMIN_SESSION: 'andradeagro_persistent_admin_session_v1'
 };
 
 // Helper to remove any undefined fields before saving to Firestore (Firestore rejects undefined)
@@ -314,22 +315,67 @@ export function clearRememberedEmail(): void {
 export function getCurrentUser(): User | null {
   try {
     if (typeof window === 'undefined') return null;
+
+    // 1. Check active session in sessionStorage
     const sessionStr = sessionStorage.getItem(SESSION_KEYS.SESSION_USER);
-    if (!sessionStr) return null;
-
-    const parsedUser: User = JSON.parse(sessionStr);
-    if (!parsedUser || !parsedUser.id) return null;
-
-    // Validate against fresh active cache
-    const live = cache.users.find(u => u.id === parsedUser.id || u.email?.toLowerCase() === parsedUser.email?.toLowerCase());
-    if (live) {
-      if (live.active === false) {
-        logoutUser();
-        return null;
+    if (sessionStr) {
+      const parsedUser: User = JSON.parse(sessionStr);
+      if (parsedUser && parsedUser.id) {
+        // Validate against fresh active cache
+        const live = cache.users.find(u => u.id === parsedUser.id || u.email?.toLowerCase() === parsedUser.email?.toLowerCase());
+        if (live) {
+          if (live.active === false) {
+            logoutUser();
+            return null;
+          }
+          return live;
+        }
+        return parsedUser;
       }
-      return live;
     }
-    return parsedUser;
+
+    // 2. Check persistent administrator session on this specific device/browser
+    const persistentStr = localStorage.getItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
+    if (persistentStr) {
+      try {
+        const sessionData = JSON.parse(persistentStr);
+        if (sessionData && sessionData.userId && sessionData.email && sessionData.role === 'ADMIN') {
+          const users = getUsers();
+          const live = users.find(u => 
+            u.id === sessionData.userId || 
+            u.email?.toLowerCase() === sessionData.email.toLowerCase()
+          );
+
+          if (live) {
+            if (live.active === false || live.role !== 'ADMIN') {
+              localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
+              return null;
+            }
+            const safe = sanitizeUserForClient(live);
+            sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(safe));
+            return live;
+          } else {
+            // Fallback during initial boot before Firestore users arrive
+            const fallbackAdmin: User = {
+              id: sessionData.userId,
+              name: sessionData.name || 'Administrador',
+              email: sessionData.email,
+              role: 'ADMIN',
+              department: sessionData.department || 'Diretoria',
+              active: true
+            };
+            sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(fallbackAdmin));
+            return fallbackAdmin;
+          }
+        } else {
+          localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
+        }
+      } catch {
+        localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
+      }
+    }
+
+    return null;
   } catch (err) {
     console.error('Error reading current user session:', err);
     return null;
@@ -365,15 +411,31 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
 
   const safeUser = sanitizeUserForClient(user);
 
-  // Update session with sanitized user
+  // Update active session with sanitized user
   setCurrentUserSession(safeUser);
 
-  // Handle remember email
+  // Handle persistence on this specific device
   if (typeof window !== 'undefined') {
     if (rememberMe) {
       localStorage.setItem(SESSION_KEYS.REMEMBERED_EMAIL, targetEmail);
+
+      // Only administrators get a persistent device session
+      if (user.role === 'ADMIN') {
+        const persistentSession = {
+          userId: user.id,
+          email: user.email.toLowerCase(),
+          role: user.role,
+          name: user.name,
+          department: user.department,
+          createdAt: Date.now()
+        };
+        localStorage.setItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION, JSON.stringify(persistentSession));
+      } else {
+        localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
+      }
     } else {
       localStorage.removeItem(SESSION_KEYS.REMEMBERED_EMAIL);
+      localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
     }
   }
 
@@ -394,6 +456,11 @@ export function loginUserById(userId: string, rememberMe: boolean): { success: b
     return { success: false, error: 'Usuário não encontrado no sistema.' };
   }
 
+  // STRICT SECURITY CHECK: Administrators cannot login via 1-click quick access
+  if (user.role === 'ADMIN') {
+    return { success: false, error: 'Administradores devem autenticar informando e-mail e senha.' };
+  }
+
   if (user.active === false) {
     return { success: false, error: 'Este usuário está inativo no sistema.' };
   }
@@ -403,6 +470,8 @@ export function loginUserById(userId: string, rememberMe: boolean): { success: b
   setCurrentUserSession(safeUser);
 
   if (typeof window !== 'undefined') {
+    // Quick access login never persists administrator session
+    localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
     if (rememberMe && user.email) {
       localStorage.setItem(SESSION_KEYS.REMEMBERED_EMAIL, user.email.toLowerCase());
     }
@@ -423,6 +492,9 @@ export function logoutUser(): void {
     }
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
+      localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
+      localStorage.removeItem('andradeagro_remembered_user_v1');
+      localStorage.removeItem('andradeagro_remembered_user');
     }
     notifyDataUpdated(false);
   } catch (err) {

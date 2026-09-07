@@ -27,15 +27,30 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
   const canEdit = canEditSystemData(currentUser.role);
   const centralTanks = getCentralTanks();
 
+  // Helpers to handle price input with comma (,) or dot (.) decimal separators
+  const parseFuelPrice = (val: string | number | undefined | null): number => {
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    if (!val) return 0;
+    const clean = String(val).replace(',', '.').trim();
+    const parsed = parseFloat(clean);
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  const formatPriceForInput = (val: number | string | undefined | null, fallback = '0,00'): string => {
+    if (val === undefined || val === null || val === '') return fallback;
+    if (typeof val === 'string') return val;
+    return String(val).replace('.', ',');
+  };
+
   // Form states
   const [name, setName] = useState('');
   const [type, setType] = useState<'INTERNO' | 'EXTERNO'>('INTERNO');
   const [supplierName, setSupplierName] = useState('');
   const [location, setLocation] = useState('');
-  const [dieselS10Price, setDieselS10Price] = useState(5.79);
-  const [dieselS500Price, setDieselS500Price] = useState(5.59);
-  const [gasolinaPrice, setGasolinaPrice] = useState(6.09);
-  const [etanolPrice, setEtanolPrice] = useState(3.89);
+  const [dieselS10Price, setDieselS10Price] = useState('5,79');
+  const [dieselS500Price, setDieselS500Price] = useState('5,59');
+  const [gasolinaPrice, setGasolinaPrice] = useState('6,09');
+  const [etanolPrice, setEtanolPrice] = useState('3,89');
 
   const handleOpenAdd = () => {
     setEditingStation(null);
@@ -43,10 +58,10 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
     setType('INTERNO');
     setSupplierName('');
     setLocation('');
-    setDieselS10Price(5.79);
-    setDieselS500Price(5.59);
-    setGasolinaPrice(6.09);
-    setEtanolPrice(3.89);
+    setDieselS10Price('5,79');
+    setDieselS500Price('5,59');
+    setGasolinaPrice('6,09');
+    setEtanolPrice('3,89');
     setShowModal(true);
   };
 
@@ -56,15 +71,20 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
     setType(stn.type);
     setSupplierName(stn.supplierName);
     setLocation(stn.location);
-    setDieselS10Price(stn.pricePerLiter.DIESEL_S10 || 5.79);
-    setDieselS500Price(stn.pricePerLiter.DIESEL_S500 || 5.59);
-    setGasolinaPrice(stn.pricePerLiter.GASOLINA_COMUM || 6.09);
-    setEtanolPrice(stn.pricePerLiter.ETANOL || 3.89);
+    setDieselS10Price(formatPriceForInput(stn.pricePerLiter.DIESEL_S10, '5,79'));
+    setDieselS500Price(formatPriceForInput(stn.pricePerLiter.DIESEL_S500, '5,59'));
+    setGasolinaPrice(formatPriceForInput(stn.pricePerLiter.GASOLINA_COMUM, '6,09'));
+    setEtanolPrice(formatPriceForInput(stn.pricePerLiter.ETANOL, '3,89'));
     setShowModal(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const s10 = parseFuelPrice(dieselS10Price);
+    const s500 = parseFuelPrice(dieselS500Price);
+    const gas = parseFuelPrice(gasolinaPrice);
+    const eta = parseFuelPrice(etanolPrice);
+
     if (editingStation) {
       onUpdateStation(editingStation.id, {
         name,
@@ -72,11 +92,11 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
         supplierName,
         location,
         pricePerLiter: {
-          DIESEL_S10: dieselS10Price,
-          DIESEL_S500: dieselS500Price,
-          GASOLINA_COMUM: gasolinaPrice,
-          GASOLINA_GRID: gasolinaPrice + 0.30,
-          ETANOL: etanolPrice,
+          DIESEL_S10: s10,
+          DIESEL_S500: s500,
+          GASOLINA_COMUM: gas,
+          GASOLINA_GRID: gas > 0 ? Number((gas + 0.30).toFixed(2)) : 0,
+          ETANOL: eta,
           ARLA_32: 2.50,
           NENHUM: 0
         }
@@ -88,11 +108,11 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
         supplierName,
         location,
         pricePerLiter: {
-          DIESEL_S10: dieselS10Price,
-          DIESEL_S500: dieselS500Price,
-          GASOLINA_COMUM: gasolinaPrice,
-          GASOLINA_GRID: gasolinaPrice + 0.30,
-          ETANOL: etanolPrice,
+          DIESEL_S10: s10,
+          DIESEL_S500: s500,
+          GASOLINA_COMUM: gas,
+          GASOLINA_GRID: gas > 0 ? Number((gas + 0.30).toFixed(2)) : 0,
+          ETANOL: eta,
           ARLA_32: 2.50,
           NENHUM: 0
         },
@@ -331,43 +351,47 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-bold mb-1">Preço Diesel S10 (R$)</label>
+                  <label className="block font-bold mb-1">Preço Diesel S10 (R$/L)</label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Ex: 5,79 ou 5.79"
                     value={dieselS10Price}
-                    onChange={(e) => setDieselS10Price(parseFloat(e.target.value) || 0)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    onChange={(e) => setDieselS10Price(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 text-gray-900'}`}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-1">Preço Diesel S500 (R$)</label>
+                  <label className="block font-bold mb-1">Preço Diesel S500 (R$/L)</label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Ex: 5,59 ou 5.59"
                     value={dieselS500Price}
-                    onChange={(e) => setDieselS500Price(parseFloat(e.target.value) || 0)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    onChange={(e) => setDieselS500Price(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 text-gray-900'}`}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-1">Preço Gasolina (R$)</label>
+                  <label className="block font-bold mb-1">Preço Gasolina (R$/L)</label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Ex: 6,09 ou 6.09"
                     value={gasolinaPrice}
-                    onChange={(e) => setGasolinaPrice(parseFloat(e.target.value) || 0)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    onChange={(e) => setGasolinaPrice(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 text-gray-900'}`}
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-1">Preço Etanol (R$)</label>
+                  <label className="block font-bold mb-1">Preço Etanol (R$/L)</label>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Ex: 3,89 ou 3.89"
                     value={etanolPrice}
-                    onChange={(e) => setEtanolPrice(parseFloat(e.target.value) || 0)}
-                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
+                    onChange={(e) => setEtanolPrice(e.target.value)}
+                    className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800 text-white' : 'bg-gray-50 text-gray-900'}`}
                   />
                 </div>
               </div>

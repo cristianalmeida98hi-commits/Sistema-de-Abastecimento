@@ -473,6 +473,7 @@ export default function App() {
                 fuelLogs={fuelLogs}
                 currentUser={currentUser}
                 onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
+                onOpenQRScanner={() => setIsQRScannerModalOpen(true)}
                 darkMode={darkMode}
               />
             )}

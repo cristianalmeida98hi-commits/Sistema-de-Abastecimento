@@ -15,6 +15,7 @@ interface QRCodeModuleViewProps {
   fuelLogs: FuelLog[];
   currentUser: User;
   onOpenDigitalSheet?: (vehicle: Vehicle) => void;
+  onOpenQRScanner?: () => void;
   darkMode: boolean;
 }
 
@@ -23,6 +24,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
   fuelLogs,
   currentUser,
   onOpenDigitalSheet,
+  onOpenQRScanner,
   darkMode
 }) => {
   const [activeTab, setActiveTab] = useState<'GENERATOR' | 'SCANNER'>('GENERATOR');
@@ -1382,6 +1384,24 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
               </p>
 
               <div className="space-y-3">
+                {onOpenQRScanner && (
+                  <button
+                    onClick={onOpenQRScanner}
+                    className="w-full py-3.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-transform active:scale-95 border border-emerald-700/60"
+                  >
+                    <Camera className="w-5 h-5 text-[#FACC15]" />
+                    <span>ABRIR LEITOR COM CÂMERA DO DISPOSITIVO</span>
+                  </button>
+                )}
+
+                <div className="relative flex items-center justify-center my-2">
+                  <div className="border-t border-slate-200 dark:border-emerald-800/60 w-full" />
+                  <span className="bg-white dark:bg-[#042d23] px-3 text-[10px] uppercase font-bold text-slate-400 dark:text-emerald-400 shrink-0">
+                    Ou selecione manualmente
+                  </span>
+                  <div className="border-t border-slate-200 dark:border-emerald-800/60 w-full" />
+                </div>
+
                 <select
                   value={scannedVehicleId}
                   onChange={(e) => setScannedVehicleId(e.target.value)}
@@ -1401,7 +1421,7 @@ export const QRCodeModuleView: React.FC<QRCodeModuleViewProps> = ({
                   className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-md"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Escanear & Buscar Dados Atualizados</span>
+                  <span>Buscar Dados da Máquina</span>
                 </button>
               </div>
             </div>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { 
-  Search, Bell, Plus, LogOut, CheckCircle2, AlertTriangle, Menu 
+  Search, Bell, Plus, LogOut, CheckCircle2, AlertTriangle, Menu, QrCode 
 } from 'lucide-react';
 import { User, SmartAlert } from '../types';
 
@@ -22,6 +22,7 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
   currentUser,
   onLogout,
   onOpenFuelingModal,
+  onOpenQRScanner,
   onNavigate,
   alerts = [],
   searchQuery,
@@ -77,8 +78,19 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
           </div>
 
           {/* Actions & User Profile */}
-          <div className="flex items-center gap-1.5 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2.5">
             
+            {/* Quick QR Code Scanner Button */}
+            <button
+              onClick={onOpenQRScanner}
+              className="bg-emerald-950/80 hover:bg-emerald-900 text-slate-100 font-bold text-xs px-3 sm:px-3.5 py-2 min-h-[44px] rounded-full shadow-sm flex items-center justify-center gap-1.5 transition-all active:scale-95 border border-emerald-700/60"
+              title="Ler QR Code da Máquina"
+              aria-label="Ler QR Code"
+            >
+              <QrCode className="w-5 h-5 sm:w-4 sm:h-4 text-[#FACC15]" />
+              <span className="hidden md:inline">Ler QR Code</span>
+            </button>
+
             {/* Quick Fuel Log Button */}
             <button
               onClick={onOpenFuelingModal}

@@ -248,6 +248,8 @@ export const OperatorDigitalSheetsView: React.FC<OperatorDigitalSheetsViewProps>
                           src={vehicle.photoUrl} 
                           alt={vehicle.model} 
                           referrerPolicy="no-referrer"
+                          loading="lazy"
+                          decoding="async"
                           onError={(e) => {
                             (e.currentTarget as HTMLElement).style.display = 'none';
                           }}

@@ -18,23 +18,53 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { CheckCircle2, Tractor, AlertTriangle, RefreshCw } from 'lucide-react';
 
-import { DashboardView } from './components/DashboardView';
-import { FuelLogsView } from './components/FuelLogsView';
-import { FleetManagementView } from './components/FleetManagementView';
-import { MaintenanceView } from './components/MaintenanceView';
-import { GasStationsView } from './components/GasStationsView';
-import { StaffView } from './components/StaffView';
-import { ReportsView } from './components/ReportsView';
-import { AlertsView } from './components/AlertsView';
-import { AuditLogsView } from './components/AuditLogsView';
-import { SettingsAndAboutView } from './components/SettingsAndAboutView';
-import { OperatorFuelingView } from './components/OperatorFuelingView';
-import { FuelingFormModal } from './components/FuelingFormModal';
-import { QRCodeScannerModal } from './components/QRCodeScannerModal';
-import { QRCodeModuleView } from './components/QRCodeModuleView';
-import { MachineDigitalSheetModal } from './components/MachineDigitalSheetModal';
-import { OperatorDigitalSheetsView } from './components/OperatorDigitalSheetsView';
-import { LoginView } from './components/LoginView';
+// Code-split dynamic views to drastically reduce initial bundle size and accelerate time-to-first-paint
+const DashboardView = React.lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
+const FuelLogsView = React.lazy(() => import('./components/FuelLogsView').then(m => ({ default: m.FuelLogsView })));
+const FleetManagementView = React.lazy(() => import('./components/FleetManagementView').then(m => ({ default: m.FleetManagementView })));
+const MaintenanceView = React.lazy(() => import('./components/MaintenanceView').then(m => ({ default: m.MaintenanceView })));
+const GasStationsView = React.lazy(() => import('./components/GasStationsView').then(m => ({ default: m.GasStationsView })));
+const StaffView = React.lazy(() => import('./components/StaffView').then(m => ({ default: m.StaffView })));
+const ReportsView = React.lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
+const AlertsView = React.lazy(() => import('./components/AlertsView').then(m => ({ default: m.AlertsView })));
+const AuditLogsView = React.lazy(() => import('./components/AuditLogsView').then(m => ({ default: m.AuditLogsView })));
+const SettingsAndAboutView = React.lazy(() => import('./components/SettingsAndAboutView').then(m => ({ default: m.SettingsAndAboutView })));
+const OperatorFuelingView = React.lazy(() => import('./components/OperatorFuelingView').then(m => ({ default: m.OperatorFuelingView })));
+const OperatorDigitalSheetsView = React.lazy(() => import('./components/OperatorDigitalSheetsView').then(m => ({ default: m.OperatorDigitalSheetsView })));
+const QRCodeModuleView = React.lazy(() => import('./components/QRCodeModuleView').then(m => ({ default: m.QRCodeModuleView })));
+const LoginView = React.lazy(() => import('./components/LoginView').then(m => ({ default: m.LoginView })));
+
+// Dynamic modals loaded on demand
+const FuelingFormModal = React.lazy(() => import('./components/FuelingFormModal').then(m => ({ default: m.FuelingFormModal })));
+const QRCodeScannerModal = React.lazy(() => import('./components/QRCodeScannerModal').then(m => ({ default: m.QRCodeScannerModal })));
+const MachineDigitalSheetModal = React.lazy(() => import('./components/MachineDigitalSheetModal').then(m => ({ default: m.MachineDigitalSheetModal })));
+
+function ViewLoadingFallback() {
+  return (
+    <div className="w-full min-h-[380px] rounded-3xl bg-[#042d23]/50 border border-emerald-800/40 p-8 flex flex-col items-center justify-center space-y-4 animate-pulse">
+      <div className="w-14 h-14 rounded-2xl bg-[#064E3B] border border-[#FACC15]/30 flex items-center justify-center shadow-lg">
+        <Tractor className="w-7 h-7 text-[#FACC15] animate-pulse" />
+      </div>
+      <div className="text-center space-y-1">
+        <p className="text-xs font-bold text-white tracking-wide">Carregando módulo Andrade Agro...</p>
+        <p className="text-[11px] text-emerald-300/60">Aguarde um instante</p>
+      </div>
+    </div>
+  );
+}
+
+function LoginLoadingFallback() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-[#031d16] text-slate-100 font-sans">
+      <div className="w-full max-w-md p-8 rounded-3xl bg-[#042d23] border border-emerald-800/60 shadow-2xl text-center space-y-4 animate-pulse">
+        <div className="w-16 h-16 mx-auto rounded-3xl bg-[#064E3B] border border-[#FACC15]/40 flex items-center justify-center">
+          <Tractor className="w-8 h-8 text-[#FACC15]" />
+        </div>
+        <p className="text-xs text-emerald-300/80 font-bold">Carregando Andrade Agro...</p>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   // 1. All useState Hooks grouped strictly at the top
@@ -96,27 +126,56 @@ export default function App() {
     }
   }, [activeTab, currentUser?.id]);
 
-  // 3. Sync state on storage/Firestore updates
+  // 3. Sync state on storage/Firestore updates with non-blocking transition
   const refreshState = useCallback(() => {
-    const freshUser = getCurrentUser();
-    setCurrentUser(freshUser);
-    setUsers(getUsers());
-    setVehicles(getVehicles());
-    setGasStations(getGasStations());
-    setFuelLogs(getFuelLogs());
-    setMaintenanceLogs(getMaintenanceLogs());
-    setMachineIssues(getMachineIssues());
-    setPreventiveItems(getPreventiveItems());
-    setAlerts(getAlerts());
-    setAuditLogs(getAuditLogs());
-    setSettings(getSettings());
-    setStorageStatus(getStorageLoadingState());
+    React.startTransition(() => {
+      const freshUser = getCurrentUser();
+      setCurrentUser(freshUser);
+      setUsers(getUsers());
+      setVehicles(getVehicles());
+      setGasStations(getGasStations());
+      setFuelLogs(getFuelLogs());
+      setMaintenanceLogs(getMaintenanceLogs());
+      setMachineIssues(getMachineIssues());
+      setPreventiveItems(getPreventiveItems());
+      setAlerts(getAlerts());
+      setAuditLogs(getAuditLogs());
+      setSettings(getSettings());
+      setStorageStatus(getStorageLoadingState());
+    });
   }, []);
 
   useEffect(() => {
     window.addEventListener('andradeagro_data_updated', refreshState);
     return () => window.removeEventListener('andradeagro_data_updated', refreshState);
   }, [refreshState]);
+
+  // Intelligent idle prefetching of next views to guarantee instantaneous tab transitions
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const prefetchViews = () => {
+      if (currentUser?.role === 'FUNCIONARIO') {
+        import('./components/OperatorDigitalSheetsView');
+        import('./components/FuelingFormModal');
+        import('./components/QRCodeScannerModal');
+      } else if (currentUser) {
+        import('./components/DashboardView');
+        import('./components/FleetManagementView');
+        import('./components/FuelLogsView');
+        import('./components/MaintenanceView');
+        import('./components/FuelingFormModal');
+      } else {
+        import('./components/LoginView');
+      }
+    };
+    if ('requestIdleCallback' in window) {
+      const handle = (window as any).requestIdleCallback(prefetchViews, { timeout: 2000 });
+      return () => (window as any).cancelIdleCallback(handle);
+    } else {
+      const timer = setTimeout(prefetchViews, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [currentUser?.role]);
 
   // 4. Sync tab when currentUser changes or logs in
   useEffect(() => {
@@ -319,11 +378,13 @@ export default function App() {
   // If not authenticated, render Login Screen
   if (!currentUser) {
     return (
-      <LoginView
-        onLoginSuccess={handleLoginSuccess}
-        darkMode={darkMode}
-        successMessage={loginSuccessMessage}
-      />
+      <React.Suspense fallback={<LoginLoadingFallback />}>
+        <LoginView
+          onLoginSuccess={handleLoginSuccess}
+          darkMode={darkMode}
+          successMessage={loginSuccessMessage}
+        />
+      </React.Suspense>
     );
   }
 
@@ -380,7 +441,8 @@ export default function App() {
 
         {/* Content View Container */}
         <main ref={mainContentRef} className="flex-1 p-3 sm:p-6 lg:p-8 overflow-y-auto max-w-[1600px] w-full mx-auto">
-          {activeTab === 'operator-fueling' && (
+          <React.Suspense fallback={<ViewLoadingFallback />}>
+            {activeTab === 'operator-fueling' && (
               <OperatorFuelingView
                 currentUser={currentUser}
                 vehicles={vehicles}
@@ -548,63 +610,66 @@ export default function App() {
                 darkMode={darkMode}
               />
             )}
+          </React.Suspense>
         </main>
       </div>
 
       {/* Global Modals */}
-      {isFuelingModalOpen && (
-        <FuelingFormModal
-          isOpen={isFuelingModalOpen}
-          onClose={() => setIsFuelingModalOpen(false)}
-          onSubmit={handleAddFuelLog}
-          vehicles={vehicles}
-          gasStations={gasStations}
-          users={users}
-          currentUser={currentUser}
-          previousLogs={fuelLogs}
-          settings={settings}
-          preSelectedVehicleId={preSelectedVehicleId}
-          darkMode={darkMode}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        {isFuelingModalOpen && (
+          <FuelingFormModal
+            isOpen={isFuelingModalOpen}
+            onClose={() => setIsFuelingModalOpen(false)}
+            onSubmit={handleAddFuelLog}
+            vehicles={vehicles}
+            gasStations={gasStations}
+            users={users}
+            currentUser={currentUser}
+            previousLogs={fuelLogs}
+            settings={settings}
+            preSelectedVehicleId={preSelectedVehicleId}
+            darkMode={darkMode}
+          />
+        )}
 
-      {isQRScannerModalOpen && (
-        <QRCodeScannerModal
-          isOpen={isQRScannerModalOpen}
-          onClose={() => setIsQRScannerModalOpen(false)}
-          vehicles={vehicles}
-          fuelLogs={fuelLogs}
-          onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
-          darkMode={darkMode}
-        />
-      )}
+        {isQRScannerModalOpen && (
+          <QRCodeScannerModal
+            isOpen={isQRScannerModalOpen}
+            onClose={() => setIsQRScannerModalOpen(false)}
+            vehicles={vehicles}
+            fuelLogs={fuelLogs}
+            onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
+            darkMode={darkMode}
+          />
+        )}
 
-      {selectedDigitalSheetVehicle && (
-        <MachineDigitalSheetModal
-          isOpen={!!selectedDigitalSheetVehicle}
-          onClose={() => {
-            setSelectedDigitalSheetVehicle(null);
-            if (typeof window !== 'undefined' && window.location.hash) {
-              history.pushState("", document.title, window.location.pathname + window.location.search);
-            }
-          }}
-          vehicle={vehicles.find(v => v.id === selectedDigitalSheetVehicle.id) || selectedDigitalSheetVehicle}
-          fuelLogs={fuelLogs}
-          maintenanceLogs={maintenanceLogs}
-          machineIssues={machineIssues}
-          preventiveItems={preventiveItems}
-          currentUser={currentUser}
-          initialTab="OVERVIEW"
-          onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
-          onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}
-          onDeleteMaintenance={(id) => { deleteMaintenance(id); refreshState(); }}
-          onReportProblemSubmit={(issueData) => { addMachineIssue(issueData); refreshState(); }}
-          onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => { recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes); refreshState(); }}
-          onResolveIssue={(issueId) => { resolveMachineIssue(issueId); refreshState(); }}
-          onUpdateVehicleStatus={(vehicleId, newStatus) => { updateVehicle(vehicleId, { status: newStatus }); refreshState(); }}
-          darkMode={darkMode}
-        />
-      )}
+        {selectedDigitalSheetVehicle && (
+          <MachineDigitalSheetModal
+            isOpen={!!selectedDigitalSheetVehicle}
+            onClose={() => {
+              setSelectedDigitalSheetVehicle(null);
+              if (typeof window !== 'undefined' && window.location.hash) {
+                history.pushState("", document.title, window.location.pathname + window.location.search);
+              }
+            }}
+            vehicle={vehicles.find(v => v.id === selectedDigitalSheetVehicle.id) || selectedDigitalSheetVehicle}
+            fuelLogs={fuelLogs}
+            maintenanceLogs={maintenanceLogs}
+            machineIssues={machineIssues}
+            preventiveItems={preventiveItems}
+            currentUser={currentUser}
+            initialTab="OVERVIEW"
+            onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
+            onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}
+            onDeleteMaintenance={(id) => { deleteMaintenance(id); refreshState(); }}
+            onReportProblemSubmit={(issueData) => { addMachineIssue(issueData); refreshState(); }}
+            onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => { recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes); refreshState(); }}
+            onResolveIssue={(issueId) => { resolveMachineIssue(issueId); refreshState(); }}
+            onUpdateVehicleStatus={(vehicleId, newStatus) => { updateVehicle(vehicleId, { status: newStatus }); refreshState(); }}
+            darkMode={darkMode}
+          />
+        )}
+      </React.Suspense>
 
       {/* Fueling Success Feedback Toast / Overlay (Problem 4) */}
       {fuelingSuccessFeedback?.show && (

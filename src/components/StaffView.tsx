@@ -290,6 +290,8 @@ export const StaffViewComponent: React.FC<StaffViewProps> = ({
                   src={u.avatar}
                   alt={u.name}
                   referrerPolicy="no-referrer"
+                  loading="lazy"
+                  decoding="async"
                   onError={(e) => {
                     (e.target as HTMLImageElement).style.display = 'none';
                   }}

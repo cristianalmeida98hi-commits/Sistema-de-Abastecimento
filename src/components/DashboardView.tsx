@@ -147,13 +147,17 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
     return Array.from(map.values());
   }, [fuelLogs]);
 
-  const topVehicle = equipmentConsumption
-    .filter(e => e.category === 'VEICULO')
-    .sort((a, b) => b.liters - a.liters)[0];
+  const topVehicle = useMemo(() => {
+    return equipmentConsumption
+      .filter(e => e.category === 'VEICULO')
+      .sort((a, b) => b.liters - a.liters)[0];
+  }, [equipmentConsumption]);
 
-  const topTractorOrMachine = equipmentConsumption
-    .filter(e => e.category === 'TRATOR' || e.category === 'MAQUINA_AGRICOLA')
-    .sort((a, b) => b.liters - a.liters)[0];
+  const topTractorOrMachine = useMemo(() => {
+    return equipmentConsumption
+      .filter(e => e.category === 'TRATOR' || e.category === 'MAQUINA_AGRICOLA')
+      .sort((a, b) => b.liters - a.liters)[0];
+  }, [equipmentConsumption]);
 
   // Top Operator of TODAY (Filtered strictly to today's fuelings)
   const todayTopOperator = useMemo(() => {

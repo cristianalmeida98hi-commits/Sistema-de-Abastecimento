@@ -108,11 +108,13 @@ function persistLocalCacheDebounced() {
   if (saveLocalCacheTimer) clearTimeout(saveLocalCacheTimer);
   saveLocalCacheTimer = setTimeout(() => {
     try {
-      localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(cache));
+      // Exclude volatile/large auditLogs from localStorage to save CPU and avoid quota issues
+      const { auditLogs, ...persistentCache } = cache;
+      localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(persistentCache));
     } catch {
       // ignore storage quota errors
     }
-  }, 800);
+  }, 1200);
 }
 
 function updateLoadingStatus() {
@@ -385,13 +387,13 @@ export function notifyDataUpdated(shouldCheckAlerts: boolean = true) {
     notifyDebounceTimer = setTimeout(() => {
       window.dispatchEvent(new Event('andradeagro_data_updated'));
       persistLocalCacheDebounced();
-    }, 60);
+    }, 120);
 
     if (shouldCheckAlerts && isStorageReady() && cache.vehicles.length > 0) {
       if (alertCheckDebounceTimer) clearTimeout(alertCheckDebounceTimer);
       alertCheckDebounceTimer = setTimeout(() => {
         checkAutomatedAlerts();
-      }, 500);
+      }, 1500);
     }
   }
 }

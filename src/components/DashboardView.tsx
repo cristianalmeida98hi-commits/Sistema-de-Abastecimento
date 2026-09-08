@@ -45,7 +45,16 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
 }) => {
   const [selectedTankForConfig, setSelectedTankForConfig] = useState<CentralTank | null>(null);
   const [selectedCategoryForActivity, setSelectedCategoryForActivity] = useState<string>('ALL');
+  const [areChartsReady, setAreChartsReady] = useState<boolean>(false);
   const currentUser = getCurrentUser() || { id: 'usr-admin', name: 'Administrador', role: 'ADMIN' } as User;
+
+  React.useEffect(() => {
+    // Delay heavy chart mounting by 1 frame to let Bento metrics and tank cards paint at 60fps on mobile
+    const id = requestAnimationFrame(() => {
+      setAreChartsReady(true);
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   // Central Tanks statuses memoized
   const centralTanks = useMemo(() => {
@@ -441,33 +450,37 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
             </span>
           </div>
 
-          <div className="h-64 sm:h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={monthlyHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorGastoBento" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#064E3B" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#064E3B" stopOpacity={0.0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#064e3b" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} />
-                <YAxis tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} tickFormatter={(v) => `R$${v/1000}k`} />
-                <Tooltip 
-                  formatter={(val: any) => [formatCurrency(Number(val)), 'Total Gasto']}
-                  contentStyle={{
-                    backgroundColor: '#022c22',
-                    borderColor: '#065f46',
-                    borderRadius: '16px',
-                    fontSize: '12px',
-                    fontWeight: 'bold',
-                    color: '#f8fafc',
-                    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'
-                  }}
-                />
-                <Area type="monotone" dataKey="Gasto" stroke="#FACC15" strokeWidth={3} fillOpacity={1} fill="url(#colorGastoBento)" />
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="h-64 sm:h-72 w-full flex items-center justify-center">
+            {areChartsReady ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={monthlyHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorGastoBento" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#064E3B" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#064E3B" stopOpacity={0.0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#064e3b" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} />
+                  <YAxis tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} tickFormatter={(v) => `R$${v/1000}k`} />
+                  <Tooltip 
+                    formatter={(val: any) => [formatCurrency(Number(val)), 'Total Gasto']}
+                    contentStyle={{
+                      backgroundColor: '#022c22',
+                      borderColor: '#065f46',
+                      borderRadius: '16px',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      color: '#f8fafc',
+                      boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'
+                    }}
+                  />
+                  <Area type="monotone" dataKey="Gasto" stroke="#FACC15" strokeWidth={3} fillOpacity={1} fill="url(#colorGastoBento)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="w-full h-full rounded-2xl bg-emerald-950/40 animate-pulse border border-emerald-900/30" />
+            )}
           </div>
 
           {/* Sector Bars Preview inside Bento Card */}
@@ -818,38 +831,42 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               {/* Donut Chart Visual */}
               <div className="h-52 w-full flex items-center justify-center my-2">
                 {categoryConsumption.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <RechartsPieChart>
-                      <Pie
-                        data={categoryConsumption}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={75}
-                        paddingAngle={4}
-                        dataKey="liters"
-                        nameKey="label"
-                      >
-                        {categoryConsumption.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color || '#10B981'} stroke="#042d23" strokeWidth={2} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(val: any, name: any, item: any) => [
-                          `${Number(val).toLocaleString('pt-BR')} L (${item.payload.percentage}%)`,
-                          item.payload.label
-                        ]}
-                        contentStyle={{
-                          backgroundColor: '#022c22',
-                          borderColor: '#065f46',
-                          borderRadius: '16px',
-                          fontSize: '12px',
-                          fontWeight: 'bold',
-                          color: '#f8fafc',
-                        }}
-                      />
-                    </RechartsPieChart>
-                  </ResponsiveContainer>
+                  areChartsReady ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RechartsPieChart>
+                        <Pie
+                          data={categoryConsumption}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={75}
+                          paddingAngle={4}
+                          dataKey="liters"
+                          nameKey="label"
+                        >
+                          {categoryConsumption.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color || '#10B981'} stroke="#042d23" strokeWidth={2} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(val: any, name: any, item: any) => [
+                            `${Number(val).toLocaleString('pt-BR')} L (${item.payload.percentage}%)`,
+                            item.payload.label
+                          ]}
+                          contentStyle={{
+                            backgroundColor: '#022c22',
+                            borderColor: '#065f46',
+                            borderRadius: '16px',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            color: '#f8fafc'
+                          }}
+                        />
+                      </RechartsPieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="w-32 h-32 rounded-full border-4 border-emerald-800/40 border-t-[#FACC15] animate-spin" />
+                  )
                 ) : (
                   <div className="text-center text-xs text-emerald-300 font-medium">
                     Nenhum abastecimento para exibir no gráfico.
@@ -952,39 +969,43 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               </div>
 
               {/* Bar Chart Visual of Top Activities */}
-              <div className="h-44 w-full mb-3">
+              <div className="h-44 w-full mb-3 flex items-center justify-center">
                 {activityConsumption.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={activityConsumption.slice(0, 6)}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#064e3b" horizontal={false} />
-                      <XAxis type="number" tick={{ fontSize: 10, fill: '#a7f3d0' }} />
-                      <YAxis 
-                        dataKey="activity" 
-                        type="category" 
-                        tick={{ fontSize: 10, fill: '#f8fafc', fontWeight: 'bold' }} 
-                        width={95}
-                      />
-                      <Tooltip
-                        formatter={(val: any, name: any, item: any) => [
-                          `${Number(val).toLocaleString('pt-BR')} Litros (${item.payload.percentage}%)`,
-                          item.payload.isCustom ? `⭐ ${item.payload.activity} (Personalizada)` : item.payload.activity
-                        ]}
-                        contentStyle={{
-                          backgroundColor: '#022c22',
-                          borderColor: '#065f46',
-                          borderRadius: '16px',
-                          fontSize: '12px',
-                          fontWeight: 'bold',
-                          color: '#f8fafc',
-                        }}
-                      />
-                      <Bar dataKey="liters" fill="#FACC15" radius={[0, 8, 8, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  areChartsReady ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={activityConsumption.slice(0, 6)}
+                        layout="vertical"
+                        margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#064e3b" horizontal={false} />
+                        <XAxis type="number" tick={{ fontSize: 10, fill: '#a7f3d0' }} />
+                        <YAxis 
+                          dataKey="activity" 
+                          type="category" 
+                          tick={{ fontSize: 10, fill: '#f8fafc', fontWeight: 'bold' }} 
+                          width={95}
+                        />
+                        <Tooltip
+                          formatter={(val: any, name: any, item: any) => [
+                            `${Number(val).toLocaleString('pt-BR')} Litros (${item.payload.percentage}%)`,
+                            item.payload.isCustom ? `⭐ ${item.payload.activity} (Personalizada)` : item.payload.activity
+                          ]}
+                          contentStyle={{
+                            backgroundColor: '#022c22',
+                            borderColor: '#065f46',
+                            borderRadius: '16px',
+                            fontSize: '12px',
+                            fontWeight: 'bold',
+                            color: '#f8fafc',
+                          }}
+                        />
+                        <Bar dataKey="liters" fill="#FACC15" radius={[0, 8, 8, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="w-full h-full rounded-2xl bg-emerald-950/40 animate-pulse border border-emerald-900/30" />
+                  )
                 ) : (
                   <div className="h-full flex items-center justify-center text-xs text-emerald-300 font-medium">
                     Nenhuma atividade encontrada para a categoria selecionada.

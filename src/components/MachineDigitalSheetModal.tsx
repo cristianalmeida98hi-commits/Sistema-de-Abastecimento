@@ -597,6 +597,8 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                       src={vehicle.photoUrl} 
                       alt={vehicle.model} 
                       referrerPolicy="no-referrer"
+                      loading="lazy"
+                      decoding="async"
                       onError={(e) => {
                         (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1592861956120-e524fc739696?w=600&auto=format&fit=crop&q=80';
                       }}

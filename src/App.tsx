@@ -16,7 +16,7 @@ import {
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
-import { CheckCircle2, Tractor, AlertTriangle, RefreshCw } from 'lucide-react';
+import { CheckCircle2, Tractor, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
 
 // Code-split dynamic views to drastically reduce initial bundle size and accelerate time-to-first-paint
 const DashboardView = React.lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
@@ -101,16 +101,27 @@ export default function App() {
     liters: number;
     equipmentName: string;
   } | null>(null);
+  const [isOffline, setIsOffline] = useState<boolean>(() => typeof navigator !== 'undefined' ? !navigator.onLine : false);
+  const [loadingTakingLonger, setLoadingTakingLonger] = useState<boolean>(false);
 
   const darkMode = true;
 
-  // 2. Storage initialization & initial scroll-to-top
+  // 2. Storage initialization & network listeners
   useEffect(() => {
     initStorage();
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
       document.documentElement.scrollTop = 0;
       document.body.scrollTop = 0;
+
+      const handleOnline = () => setIsOffline(false);
+      const handleOffline = () => setIsOffline(true);
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      };
     }
   }, []);
 
@@ -150,10 +161,15 @@ export default function App() {
     return () => window.removeEventListener('andradeagro_data_updated', refreshState);
   }, [refreshState]);
 
-  // Intelligent idle prefetching of next views to guarantee instantaneous tab transitions
+  // Intelligent idle prefetching of next views (optimized: mobile leaves memory and bandwidth dedicated to active view)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const prefetchViews = () => {
+      const isMobile = window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if (isMobile) {
+        // On mobile devices, keep memory lean and load views strictly on demand when user navigates
+        return;
+      }
       if (currentUser?.role === 'FUNCIONARIO') {
         import('./components/OperatorDigitalSheetsView');
         import('./components/FuelingFormModal');
@@ -176,6 +192,31 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [currentUser?.role]);
+
+  // Mobile / slow connection detection: inform user and allow cached data fallback after timeout
+  useEffect(() => {
+    if (storageStatus === 'LOADING') {
+      const timer = setTimeout(() => {
+        setLoadingTakingLonger(true);
+      }, 4500);
+
+      // Safety fallback: after 7.5s, if cache has vehicles or users, transition smoothly to loaded
+      const fallbackTimer = setTimeout(() => {
+        const cachedVehicles = getVehicles();
+        if (cachedVehicles.length > 0) {
+          console.warn('[Andrade Agro Mobile] Sincronização demorada. Carregando dados do cache local...');
+          setStorageStatus('LOADED_WITH_DATA');
+        }
+      }, 7500);
+
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(fallbackTimer);
+      };
+    } else {
+      setLoadingTakingLonger(false);
+    }
+  }, [storageStatus]);
 
   // 4. Sync tab when currentUser changes or logs in
   useEffect(() => {
@@ -345,6 +386,21 @@ export default function App() {
               <span>Aguarde um instante</span>
             </div>
           </div>
+
+          {loadingTakingLonger && (
+            <div className="pt-2 border-t border-emerald-800/40 space-y-2.5 animate-in fade-in duration-300">
+              <p className="text-[11px] text-amber-300 font-medium">
+                Conexão móvel com oscilação. Deseja tentar restabelecer o sinal?
+              </p>
+              <button
+                onClick={() => retryFirestoreConnection()}
+                className="px-3.5 py-1.5 bg-emerald-800/80 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold border border-emerald-600/50 flex items-center justify-center gap-1.5 mx-auto transition-all active:scale-95"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Tentar Reconectar
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -408,6 +464,19 @@ export default function App() {
       {/* Main Content Column */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         
+        {/* Offline Status Banner */}
+        {isOffline && (
+          <div className="bg-emerald-950/95 border-b border-emerald-800/80 px-4 py-2 text-xs text-emerald-200 flex items-center justify-between gap-3 shadow-md z-30">
+            <div className="flex items-center gap-2">
+              <WifiOff className="w-4 h-4 text-[#FACC15] shrink-0" />
+              <span>Modo Offline: Dados locais disponíveis. O sistema sincronizará assim que a conexão retornar.</span>
+            </div>
+            <span className="text-[10px] uppercase font-black text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 shrink-0">
+              Offline
+            </span>
+          </div>
+        )}
+
         {/* Connection Notice Banner when temporary offline or reconnecting */}
         {getFirestoreLoadError() && (
           <div className="bg-amber-950/90 border-b border-amber-800/80 px-4 py-2 text-xs text-amber-200 flex items-center justify-between gap-3 shadow-md z-30">

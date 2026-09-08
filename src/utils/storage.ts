@@ -303,7 +303,9 @@ function setupFirestoreListeners() {
     const unsubAlerts = onSnapshot(collection(db, 'alerts'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as SmartAlert));
       items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      cache.alerts = items;
+      if (items.length > 0 || cache.alerts.length === 0) {
+        cache.alerts = items;
+      }
       loadedCollections.add('alerts');
       notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore Alerts Connection]', err?.message || err));
@@ -313,7 +315,9 @@ function setupFirestoreListeners() {
     const unsubAudit = onSnapshot(collection(db, 'audit_logs'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
       items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-      cache.auditLogs = items;
+      if (items.length > 0 || cache.auditLogs.length === 0) {
+        cache.auditLogs = items;
+      }
       loadedCollections.add('audit_logs');
       notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore AuditLogs Connection]', err?.message || err));
@@ -371,8 +375,44 @@ export function initStorage() {
 
     // Auto-reconnect when device regains network connectivity
     window.addEventListener('online', () => {
-      console.log('[Andrade Agro] Conexão com a rede restabelecida. Reconectando...');
+      console.log('[Andrade Agro Mobile] Conexão com a rede restabelecida. Reconectando...');
       retryFirestoreConnection();
+    });
+
+    window.addEventListener('offline', () => {
+      console.warn('[Andrade Agro Mobile] Dispositivo offline. Mantendo dados e frotas do cache local.');
+      window.dispatchEvent(new Event('andradeagro_network_status'));
+    });
+
+    // Mobile background suspension & PWA resume handling
+    let lastBackgroundSuspendTime = 0;
+    let lastWakeupSyncTime = 0;
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        lastBackgroundSuspendTime = Date.now();
+      } else if (document.visibilityState === 'visible') {
+        const now = Date.now();
+        const suspendedDuration = lastBackgroundSuspendTime > 0 ? now - lastBackgroundSuspendTime : 0;
+        // Resync only if suspended for more than 20 seconds and at least 15 seconds since last sync
+        if (suspendedDuration > 20000 && (now - lastWakeupSyncTime) > 15000) {
+          lastWakeupSyncTime = now;
+          console.log(`[Andrade Agro Mobile] Retorno do segundo plano (${Math.round(suspendedDuration / 1000)}s). Sincronizando estado com segurança...`);
+          ensureFirebaseAuth().catch(() => {});
+          setupFirestoreListeners();
+          notifyDataUpdated(false);
+        }
+      }
+    });
+
+    // Mobile bfcache restoration (back-forward cache in mobile browsers)
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        console.log('[Andrade Agro Mobile] Página restaurada do cache bfcache. Atualizando estado...');
+        ensureFirebaseAuth().catch(() => {});
+        setupFirestoreListeners();
+        notifyDataUpdated(false);
+      }
     });
   }
 

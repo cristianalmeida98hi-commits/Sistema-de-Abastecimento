@@ -261,15 +261,27 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
     }
   }, [isSuccess, vehicles, stopCamera, onClose, onOpenDigitalSheet]);
 
-  // Start camera when modal opens, stop on close or unmount
+  // Start camera when modal opens, stop on close, unmount, or mobile background suspension
   useEffect(() => {
     if (isOpen) {
       startCamera();
     }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        stopCamera();
+      } else if (document.visibilityState === 'visible' && isOpen && !isSuccess) {
+        startCamera();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       stopCamera();
     };
-  }, [isOpen]);
+  }, [isOpen, isSuccess, startCamera, stopCamera]);
 
   // Frame processing loop for QR detection
   useEffect(() => {

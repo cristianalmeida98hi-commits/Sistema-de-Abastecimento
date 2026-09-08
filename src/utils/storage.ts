@@ -1085,8 +1085,47 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
 }
 
 export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>): Promise<void> {
+  const caller = getCurrentUser();
+  if (!caller || (caller.role !== 'ADMIN' && caller.role !== 'MANUTENCAO')) {
+    throw new Error('Acesso negado: Somente os perfis Administrador e Manutenção possuem permissão para editar registros de abastecimento.');
+  }
+
+  const current = cache.fuelLogs.find(l => l.id === id);
+  if (!current) {
+    throw new Error('Registro de abastecimento não encontrado.');
+  }
+
+  // Recalculate dependent values strictly for this edited record
+  const finalLiters = updatedFields.liters !== undefined ? Number(updatedFields.liters) : current.liters;
+  const finalPrice = updatedFields.pricePerLiter !== undefined ? Number(updatedFields.pricePerLiter) : current.pricePerLiter;
+  const recalculatedTotalValue = Number((finalLiters * finalPrice).toFixed(2));
+
+  let recalculatedCostPerKm = current.costPerKm;
+  let recalculatedCostPerHour = current.costPerHour;
+
+  if (current.equipmentCategory === 'VEICULO') {
+    if (current.kmAtFueling !== undefined && current.previousKmOrHour !== undefined && current.kmAtFueling > current.previousKmOrHour) {
+      const diff = current.kmAtFueling - current.previousKmOrHour;
+      if (diff > 0) {
+        recalculatedCostPerKm = Number((recalculatedTotalValue / diff).toFixed(3));
+      }
+    }
+  } else {
+    if (current.hourmeterAtFueling !== undefined && current.previousKmOrHour !== undefined && current.hourmeterAtFueling > current.previousKmOrHour) {
+      const diff = current.hourmeterAtFueling - current.previousKmOrHour;
+      if (diff > 0) {
+        recalculatedCostPerHour = Number((recalculatedTotalValue / diff).toFixed(2));
+      }
+    }
+  }
+
   const cleaned = cleanUndefined({
     ...updatedFields,
+    liters: finalLiters,
+    pricePerLiter: finalPrice,
+    totalValue: recalculatedTotalValue,
+    costPerKm: recalculatedCostPerKm,
+    costPerHour: recalculatedCostPerHour,
     updatedAt: new Date().toISOString()
   });
 
@@ -1094,7 +1133,7 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
   notifyDataUpdated();
 
   await updateDoc(doc(db, 'fuel_logs', id), cleaned);
-  logAuditEvent('EDITAR', 'Abastecimento', `Atualizou o registro de abastecimento ID ${id}.`);
+  logAuditEvent('EDITAR', 'Abastecimento', `${caller.name} (${caller.role}) atualizou o abastecimento ID ${id} (${current.equipmentName}). Preço: R$ ${finalPrice.toFixed(3)}, Total: R$ ${recalculatedTotalValue.toFixed(2)}.`);
 }
 
 export async function deleteFuelLog(id: string): Promise<void> {
@@ -1280,7 +1319,12 @@ export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<Mai
     if (isOilChange) {
       const alertsToResolve = cache.alerts.filter(
         a => a.equipmentId === targetVehicle.id && 
-        (a.type === 'OIL_CHANGE_DUE' || a.id === `alt-oil-${targetVehicle.id}` || a.id === `alt-km-${targetVehicle.id}`) &&
+        (
+          a.type === 'OIL_CHANGE_DUE' || 
+          a.id === `alt-oil-${targetVehicle.id}` || 
+          a.id === `alt-km-${targetVehicle.id}` ||
+          (a.title && (a.title.toLowerCase().includes('óleo') || a.title.toLowerCase().includes('oleo')))
+        ) &&
         !a.resolved
       );
 
@@ -1296,6 +1340,31 @@ export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<Mai
           });
         } catch (e) {
           console.warn('[addMaintenance] Could not update alert in Firestore:', e);
+        }
+      }
+
+      // Auto-resolve any pending reported issues related strictly to oil change on this vehicle
+      const oilIssuesToResolve = (cache.machineIssues || []).filter(
+        iss => iss.equipmentId === targetVehicle.id &&
+        iss.status === 'ABERTO' &&
+        (
+          iss.description.toLowerCase().includes('troca de óleo') ||
+          iss.description.toLowerCase().includes('troca de oleo') ||
+          iss.description.toLowerCase().includes('óleo do motor') ||
+          iss.description.toLowerCase().includes('oleo do motor') ||
+          iss.description.toLowerCase().includes('óleo vencid') ||
+          iss.description.toLowerCase().includes('oleo vencid') ||
+          iss.description.toLowerCase().includes('revisão de óleo') ||
+          iss.description.toLowerCase().includes('revisao de oleo') ||
+          iss.description.toLowerCase().includes('troca de lubrificante')
+        )
+      );
+      for (const iss of oilIssuesToResolve) {
+        iss.status = 'RESOLVIDO';
+        try {
+          await updateDoc(doc(db, 'machine_issues', iss.id), { status: 'RESOLVIDO' });
+        } catch (e) {
+          console.warn('[addMaintenance] Could not update machine issue in Firestore:', e);
         }
       }
 
@@ -1565,12 +1634,12 @@ export async function deleteUser(id: string): Promise<void> {
 }
 
 // Alerts Mutator
-export async function resolveAlert(id: string): Promise<void> {
+export async function resolveAlert(id: string, resolvedByName?: string): Promise<void> {
   const user = getCurrentUser();
   const fields = cleanUndefined({
     resolved: true,
     resolvedAt: new Date().toISOString(),
-    resolvedBy: user?.name || 'Administrador'
+    resolvedBy: resolvedByName || user?.name || 'Administrador'
   });
 
   cache.alerts = cache.alerts.map(a => a.id === id ? { ...a, ...fields } as SmartAlert : a);
@@ -1711,14 +1780,44 @@ export async function recordOilChange(
     await setDoc(doc(db, 'preventive_items', oilPrevItem.id), updatedItem);
   }
 
-  // Resolve existing alerts for this machine
-  const existingAlert = cache.alerts.find(a => 
-    a.id === `alt-oil-${equipmentId}` || 
-    a.id === `alt-km-${equipmentId}` || 
-    (a.equipmentId === equipmentId && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE'))
+  // Resolve ALL existing oil alerts for this equipment
+  const alertsToResolve = cache.alerts.filter(a => 
+    a.equipmentId === equipmentId && 
+    (
+      a.type === 'OIL_CHANGE_DUE' || 
+      a.id === `alt-oil-${equipmentId}` || 
+      a.id === `alt-km-${equipmentId}` || 
+      (a.title && (a.title.toLowerCase().includes('óleo') || a.title.toLowerCase().includes('oleo')))
+    ) &&
+    !a.resolved
   );
-  if (existingAlert && !existingAlert.resolved) {
-    await resolveAlert(existingAlert.id);
+  for (const a of alertsToResolve) {
+    await resolveAlert(a.id, 'Troca de Óleo Registrada');
+  }
+
+  // Auto-resolve any pending reported issues related strictly to oil change on this vehicle
+  const oilIssuesToResolve = (cache.machineIssues || []).filter(
+    iss => iss.equipmentId === equipmentId &&
+    iss.status === 'ABERTO' &&
+    (
+      iss.description.toLowerCase().includes('troca de óleo') ||
+      iss.description.toLowerCase().includes('troca de oleo') ||
+      iss.description.toLowerCase().includes('óleo do motor') ||
+      iss.description.toLowerCase().includes('oleo do motor') ||
+      iss.description.toLowerCase().includes('óleo vencid') ||
+      iss.description.toLowerCase().includes('oleo vencid') ||
+      iss.description.toLowerCase().includes('revisão de óleo') ||
+      iss.description.toLowerCase().includes('revisao de oleo') ||
+      iss.description.toLowerCase().includes('troca de lubrificante')
+    )
+  );
+  for (const iss of oilIssuesToResolve) {
+    iss.status = 'RESOLVIDO';
+    try {
+      await updateDoc(doc(db, 'machine_issues', iss.id), { status: 'RESOLVIDO' });
+    } catch (e) {
+      console.warn('[recordOilChange] Could not update machine issue in Firestore:', e);
+    }
   }
 
   const unitLabel = isKm ? 'km' : 'h';
@@ -1980,15 +2079,23 @@ export function checkAutomatedAlerts() {
               cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== mntAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'))];
               setDoc(doc(db, 'alerts', mntAlertId), alertObj).catch(console.error);
             }
-          } else if (existingMntAlert && !existingMntAlert.resolved) {
-            // Machine maintenance has been completed or is well within safe bounds
-            const resolvedAlert: SmartAlert = cleanUndefined({
-              ...existingMntAlert,
-              resolved: true,
-              resolvedBy: 'Sistema (Troca de Óleo em Dia)'
-            });
-            cache.alerts = cache.alerts.map(a => a.id === existingMntAlert.id ? resolvedAlert : a);
-            setDoc(doc(db, 'alerts', existingMntAlert.id), resolvedAlert).catch(console.error);
+          } else {
+            // Machine maintenance has been completed or is well within safe bounds: resolve all open oil alerts for this equipment
+            const openAlerts = cache.alerts.filter(a => 
+              (a.id === mntAlertId || a.equipmentId === v.id) && 
+              (a.type === 'OIL_CHANGE_DUE' || a.id === mntAlertId || (a.title && (a.title.toLowerCase().includes('óleo') || a.title.toLowerCase().includes('oleo')))) &&
+              !a.resolved
+            );
+            for (const openAlt of openAlerts) {
+              const resolvedAlert: SmartAlert = cleanUndefined({
+                ...openAlt,
+                resolved: true,
+                resolvedAt: new Date().toISOString(),
+                resolvedBy: 'Sistema (Troca de Óleo em Dia)'
+              });
+              cache.alerts = cache.alerts.map(a => a.id === openAlt.id ? resolvedAlert : a);
+              setDoc(doc(db, 'alerts', openAlt.id), resolvedAlert).catch(console.error);
+            }
           }
         }
       } else {
@@ -2006,14 +2113,20 @@ export function checkAutomatedAlerts() {
         const existingKmAlert = cache.alerts.find(a => a.id === kmAlertId || (a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')));
 
         if (!isOilControlActive) {
-          if (existingKmAlert && !existingKmAlert.resolved) {
+          const openAlerts = cache.alerts.filter(a => 
+            (a.id === kmAlertId || a.equipmentId === v.id) && 
+            (a.type === 'OIL_CHANGE_DUE' || a.id === kmAlertId || (a.title && (a.title.toLowerCase().includes('óleo') || a.title.toLowerCase().includes('oleo')))) &&
+            !a.resolved
+          );
+          for (const openAlt of openAlerts) {
             const resolvedAlert: SmartAlert = cleanUndefined({
-              ...existingKmAlert,
+              ...openAlt,
               resolved: true,
+              resolvedAt: new Date().toISOString(),
               resolvedBy: 'Sistema (Controle Desativado)'
             });
-            cache.alerts = cache.alerts.map(a => a.id === existingKmAlert.id ? resolvedAlert : a);
-            setDoc(doc(db, 'alerts', existingKmAlert.id), resolvedAlert).catch(console.error);
+            cache.alerts = cache.alerts.map(a => a.id === openAlt.id ? resolvedAlert : a);
+            setDoc(doc(db, 'alerts', openAlt.id), resolvedAlert).catch(console.error);
           }
           return;
         }
@@ -2070,15 +2183,23 @@ export function checkAutomatedAlerts() {
               cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId && !(a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')))];
               setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
             }
-          } else if (existingKmAlert && !existingKmAlert.resolved) {
-            // In day
-            const resolvedAlert: SmartAlert = cleanUndefined({
-              ...existingKmAlert,
-              resolved: true,
-              resolvedBy: 'Sistema (Troca de Óleo em Dia)'
-            });
-            cache.alerts = cache.alerts.map(a => a.id === existingKmAlert.id ? resolvedAlert : a);
-            setDoc(doc(db, 'alerts', existingKmAlert.id), resolvedAlert).catch(console.error);
+          } else {
+            // In day: resolve all open oil alerts for this vehicle
+            const openAlerts = cache.alerts.filter(a => 
+              (a.id === kmAlertId || a.equipmentId === v.id) && 
+              (a.type === 'OIL_CHANGE_DUE' || a.id === kmAlertId || (a.title && (a.title.toLowerCase().includes('óleo') || a.title.toLowerCase().includes('oleo')))) &&
+              !a.resolved
+            );
+            for (const openAlt of openAlerts) {
+              const resolvedAlert: SmartAlert = cleanUndefined({
+                ...openAlt,
+                resolved: true,
+                resolvedAt: new Date().toISOString(),
+                resolvedBy: 'Sistema (Troca de Óleo em Dia)'
+              });
+              cache.alerts = cache.alerts.map(a => a.id === openAlt.id ? resolvedAlert : a);
+              setDoc(doc(db, 'alerts', openAlt.id), resolvedAlert).catch(console.error);
+            }
           }
         }
       }

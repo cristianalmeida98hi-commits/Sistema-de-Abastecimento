@@ -502,6 +502,8 @@ export default function App() {
           onOpenQRScanner={() => setIsQRScannerModalOpen(true)}
           onNavigate={(tab) => { setActiveTab(tab); setIsMobileMenuOpen(false); }}
           alerts={alerts}
+          vehicles={vehicles}
+          onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
           darkMode={darkMode}
           searchQuery={searchQuery}
           onSearchChange={(q) => setSearchQuery(q)}
@@ -531,7 +533,7 @@ export default function App() {
                 currentUser={currentUser}
                 settings={settings}
                 onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
-                onUpdateFuelLog={(id, fields) => updateFuelLog(id, fields)}
+                onUpdateFuelLog={async (id, fields) => { await updateFuelLog(id, fields); refreshState(); }}
                 onDeleteFuelLog={(id) => deleteFuelLog(id)}
                 darkMode={darkMode}
                 searchQuery={searchQuery}
@@ -558,7 +560,7 @@ export default function App() {
                 currentUser={currentUser}
                 settings={settings}
                 onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
-                onUpdateFuelLog={(id, fields) => updateFuelLog(id, fields)}
+                onUpdateFuelLog={async (id, fields) => { await updateFuelLog(id, fields); refreshState(); }}
                 onDeleteFuelLog={(id) => deleteFuelLog(id)}
                 darkMode={darkMode}
                 searchQuery={searchQuery}
@@ -659,7 +661,9 @@ export default function App() {
               <AlertsView
                 alerts={alerts}
                 currentUser={currentUser}
-                onResolveAlert={(id) => resolveAlert(id)}
+                onResolveAlert={(id) => { resolveAlert(id); refreshState(); }}
+                vehicles={vehicles}
+                onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
                 darkMode={darkMode}
               />
             )}
@@ -726,6 +730,7 @@ export default function App() {
             maintenanceLogs={maintenanceLogs}
             machineIssues={machineIssues}
             preventiveItems={preventiveItems}
+            alerts={alerts}
             currentUser={currentUser}
             initialTab="OVERVIEW"
             onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}

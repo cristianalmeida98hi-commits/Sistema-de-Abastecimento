@@ -1,19 +1,23 @@
 import React from 'react';
-import { AlertTriangle, CheckCircle2, ShieldAlert } from 'lucide-react';
-import { SmartAlert, User } from '../types';
+import { AlertTriangle, CheckCircle2, ShieldAlert, Truck } from 'lucide-react';
+import { SmartAlert, User, Vehicle } from '../types';
 import { formatDateBR } from '../utils/calculations';
 
 interface AlertsViewProps {
   alerts: SmartAlert[];
   currentUser: User;
   onResolveAlert: (id: string) => void;
+  vehicles?: Vehicle[];
+  onOpenDigitalSheet?: (vehicle: Vehicle) => void;
   darkMode?: boolean;
 }
 
 export const AlertsView: React.FC<AlertsViewProps> = ({
   alerts,
   currentUser,
-  onResolveAlert
+  onResolveAlert,
+  vehicles = [],
+  onOpenDigitalSheet
 }) => {
   const unresolvedAlerts = alerts.filter(a => !a.resolved);
   const resolvedAlerts = alerts.filter(a => a.resolved);
@@ -70,13 +74,32 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
                 </div>
               </div>
 
-              <button
-                onClick={() => onResolveAlert(alert.id)}
-                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold text-xs shrink-0 flex items-center gap-1.5 shadow-sm"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Resolver Alerta</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {(() => {
+                  const targetVehicle = alert.equipmentId && vehicles ? vehicles.find(v => v.id === alert.equipmentId) : undefined;
+                  if (targetVehicle && onOpenDigitalSheet) {
+                    return (
+                      <button
+                        onClick={() => onOpenDigitalSheet(targetVehicle)}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
+                        title={`Abrir ficha de ${targetVehicle.model}`}
+                      >
+                        <Truck className="w-4 h-4 text-[#FACC15]" />
+                        <span>Ficha ({targetVehicle.patrimonyCode || targetVehicle.licensePlate || 'Máquina'})</span>
+                      </button>
+                    );
+                  }
+                  return null;
+                })()}
+
+                <button
+                  onClick={() => onResolveAlert(alert.id)}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold text-xs flex items-center gap-1.5 shadow-sm"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Resolver Alerta</span>
+                </button>
+              </div>
             </div>
           ))
         )}

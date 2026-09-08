@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, Tooltip, CartesianGrid 
@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 import { 
   Vehicle, FuelLog, MaintenanceLog, MachineIssue, 
-  PreventiveMaintenanceItem, PreventiveItemKey, User, MaintenanceType, canEditSystemData 
+  PreventiveMaintenanceItem, PreventiveItemKey, User, MaintenanceType, canEditSystemData,
+  SmartAlert
 } from '../types';
 import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
 import { getConsolidatedCapacities, getCapacityTypeEmoji, getMachineSubtypeName } from '../utils/capacities';
@@ -28,6 +29,7 @@ interface MachineDigitalSheetModalProps {
   maintenanceLogs: MaintenanceLog[];
   machineIssues: MachineIssue[];
   preventiveItems: PreventiveMaintenanceItem[];
+  alerts?: SmartAlert[];
   currentUser: User;
   onOpenFuelingModalWithEquipment?: (equipmentId: string) => void;
   onAddMaintenance?: (log: Omit<MaintenanceLog, 'id'>) => void;
@@ -49,6 +51,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
   maintenanceLogs = [],
   machineIssues = [],
   preventiveItems = [],
+  alerts = [],
   currentUser,
   onOpenFuelingModalWithEquipment,
   onAddMaintenance,
@@ -71,6 +74,25 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
   const [recordHourmeter, setRecordHourmeter] = useState<number>(vehicle.currentHourmeter || vehicle.currentKm || 0);
   const [recordNotes, setRecordNotes] = useState<string>('');
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [selectedAlertDetail, setSelectedAlertDetail] = useState<{
+    id: string;
+    title: string;
+    desc: string;
+    type: 'RED' | 'YELLOW' | 'BLUE';
+    isOilAlert?: boolean;
+    isIssueAlert?: boolean;
+    isPreventiveAlert?: boolean;
+  } | null>(null);
+
+  // Synchronize internal form values whenever the active vehicle changes
+  useEffect(() => {
+    setRecordHourmeter(vehicle.currentHourmeter || vehicle.currentKm || 0);
+    setOilConfigActive(vehicle.oilChangeControlActive !== false);
+    const isKm = vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
+    setDirectOilHourmeter(isKm ? (vehicle.currentKm || 0) : (vehicle.currentHourmeter || 0));
+    setMntMeter(vehicle.currentHourmeter || vehicle.currentKm || 0);
+    setSelectedAlertDetail(null);
+  }, [vehicle.id]);
 
   // Oil Change Direct Registration & Configuration State
   const [isOilConfigOpen, setIsOilConfigOpen] = useState(false);
@@ -231,48 +253,135 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
     return { status: 'GREEN', label: 'Em dia 🟢', color: 'bg-emerald-600 text-white', hoursRemaining };
   };
 
-  // Machine Alerts List
-  const machineAlerts = useMemo(() => {
-    const list: { title: string; desc: string; type: 'RED' | 'YELLOW' | 'BLUE' }[] = [];
+  // Open issues strictly for THIS vehicle, excluding any residual issue about oil change if oil is in day
+  const openIssues = useMemo(() => {
+    const oilStatus = calculateOilChangeStatus(vehicle);
+    return machineReportedIssues.filter(i => {
+      if (i.status !== 'ABERTO') return false;
+      const isOil = i.description.toLowerCase().includes('troca de óleo') ||
+                    i.description.toLowerCase().includes('troca de oleo') ||
+                    i.description.toLowerCase().includes('óleo do motor') ||
+                    i.description.toLowerCase().includes('oleo do motor') ||
+                    i.description.toLowerCase().includes('óleo vencid') ||
+                    i.description.toLowerCase().includes('oleo vencid');
+      // If oil is in day, do not treat resolved oil change as a pending issue
+      if (isOil && oilStatus.status === 'EM_DIA') {
+        return false;
+      }
+      return true;
+    });
+  }, [machineReportedIssues, vehicle]);
 
-    // Overdue or upcoming preventive maintenance
+  // Machine Alerts List - strictly filtered and scoped to this vehicle.id
+  const machineAlerts = useMemo(() => {
+    const list: {
+      id: string;
+      title: string;
+      desc: string;
+      type: 'RED' | 'YELLOW' | 'BLUE';
+      isOilAlert?: boolean;
+      isIssueAlert?: boolean;
+      isPreventiveAlert?: boolean;
+    }[] = [];
+
+    // 1. Check real-time oil change status directly for this vehicle
+    const oilStatus = calculateOilChangeStatus(vehicle);
+    if (oilStatus.isOilActive) {
+      if (oilStatus.status === 'ATRASADA') {
+        list.push({
+          id: `oil-alert-${vehicle.id}`,
+          title: `🔴 Troca de óleo pendente: ${vehicle.model}`,
+          desc: `Veículo: ${vehicle.model} (${vehicle.patrimonyCode || vehicle.licensePlate || 'Frota'}). Atrasada em ${oilStatus.hoursOrKmOverdue.toLocaleString('pt-BR')} ${oilStatus.unit}. Troca prevista para ${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit}.`,
+          type: 'RED',
+          isOilAlert: true
+        });
+      } else if (oilStatus.status === 'PROXIMA') {
+        list.push({
+          id: `oil-alert-${vehicle.id}`,
+          title: `🟡 Troca de óleo próxima: ${vehicle.model}`,
+          desc: `Veículo: ${vehicle.model} (${vehicle.patrimonyCode || vehicle.licensePlate || 'Frota'}). Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${oilStatus.unit} para a próxima troca programada (${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit}).`,
+          type: 'YELLOW',
+          isOilAlert: true
+        });
+      }
+    }
+
+    // 2. Direct Smart Alerts - MUST STRICTLY MATCH alert.equipmentId === vehicle.id
+    if (alerts && alerts.length > 0) {
+      const vehicleSpecificAlerts = alerts.filter(a => 
+        !a.resolved && 
+        a.equipmentId === vehicle.id
+      );
+
+      vehicleSpecificAlerts.forEach(alt => {
+        const isOilType = alt.type === 'OIL_CHANGE_DUE' || 
+                          (alt.title && (alt.title.toLowerCase().includes('óleo') || alt.title.toLowerCase().includes('oleo')));
+        // If it's an oil alert and vehicle oil is already in day, ignore stale/residual alert
+        if (isOilType && oilStatus.status === 'EM_DIA') {
+          return;
+        }
+        // If we already added the calculated oil alert, don't duplicate
+        if (isOilType && list.some(l => l.isOilAlert)) {
+          return;
+        }
+        list.push({
+          id: alt.id,
+          title: alt.title,
+          desc: alt.description,
+          type: alt.severity === 'ALTA' ? 'RED' : 'YELLOW',
+          isOilAlert: isOilType
+        });
+      });
+    }
+
+    // 3. Overdue or upcoming preventive maintenance items strictly for THIS vehicle
     machinePreventiveItems.forEach(item => {
+      // If this preventive item is for motor oil and oilStatus is already EM_DIA, do not show as overdue
+      if ((item.itemKey === 'TROCA_OLEO_MOTOR' || item.itemKey === 'FILTRO_OLEO') && oilStatus.status === 'EM_DIA') {
+        return;
+      }
       const st = getPreventiveStatus(item);
       if (st.status === 'RED') {
         list.push({
+          id: `prev-${item.id}`,
           title: `⚠️ Manutenção Atrasada: ${item.itemName}`,
           desc: `Ultrapassou o horímetro previsto (${item.nextScheduledHourmeter}h) em ${Math.abs(st.hoursRemaining)} horas!`,
-          type: 'RED'
+          type: 'RED',
+          isPreventiveAlert: true
         });
       } else if (st.status === 'YELLOW') {
         list.push({
+          id: `prev-${item.id}`,
           title: `⏰ Manutenção Próxima: ${item.itemName}`,
           desc: `Faltam apenas ${st.hoursRemaining} horas para atingir o limite de ${item.nextScheduledHourmeter}h.`,
-          type: 'YELLOW'
+          type: 'YELLOW',
+          isPreventiveAlert: true
         });
       }
     });
 
-    // Unresolved issues
-    const openIssues = machineReportedIssues.filter(i => i.status === 'ABERTO');
+    // 4. Unresolved issues strictly for THIS vehicle
     if (openIssues.length > 0) {
       list.push({
+        id: `issues-${vehicle.id}`,
         title: `🚨 ${openIssues.length} Problema(s) Pendente(s)`,
         desc: `Defeitos informados por operadores aguardando resolução na oficina.`,
-        type: 'RED'
+        type: 'RED',
+        isIssueAlert: true
       });
     }
 
     if (vehicle.status === 'EM_MANUTENCAO') {
       list.push({
+        id: `status-${vehicle.id}`,
         title: `🛠️ Equipamento em Manutenção`,
-        desc: `Esta máquina está atualmente sinalizada como em manutenção preventiva/corretiva.`,
+        desc: `Esta máquina (${vehicle.model}) está atualmente sinalizada como em manutenção preventiva/corretiva.`,
         type: 'YELLOW'
       });
     }
 
     return list;
-  }, [machinePreventiveItems, machineReportedIssues, vehicle.status, currentMeter]);
+  }, [machinePreventiveItems, openIssues, vehicle, currentMeter, alerts]);
 
   // Combined timeline of events
   const combinedTimeline = useMemo(() => {
@@ -792,19 +901,36 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
             <div className="space-y-2">
               {machineAlerts.map((alt, idx) => (
                 <div 
-                  key={idx}
-                  className={`p-3 rounded-2xl border text-xs flex items-start gap-3 ${
+                  key={alt.id || idx}
+                  onClick={() => {
+                    if (alt.isIssueAlert) {
+                      setActiveTab('ISSUES');
+                    } else if (alt.isPreventiveAlert) {
+                      setActiveTab('PREVENTIVE');
+                    } else {
+                      setSelectedAlertDetail(alt);
+                    }
+                  }}
+                  className={`p-3 rounded-2xl border text-xs flex items-center justify-between gap-3 cursor-pointer transition-all shadow-sm ${
                     alt.type === 'RED'
-                      ? 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300'
+                      ? 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300 hover:border-red-500/60 hover:bg-red-500/20'
                       : alt.type === 'YELLOW'
-                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-200'
-                        : 'bg-blue-500/10 border-blue-500/30 text-blue-800 dark:text-blue-200'
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-200 hover:border-amber-500/60 hover:bg-amber-500/20'
+                        : 'bg-blue-500/10 border-blue-500/30 text-blue-800 dark:text-blue-200 hover:border-blue-500/60 hover:bg-blue-500/20'
                   }`}
+                  role="button"
+                  title="Clique para ver detalhes do alerta desta máquina"
                 >
-                  <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="font-extrabold block">{alt.title}</strong>
-                    <span className="text-[11px] opacity-90">{alt.desc}</span>
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="font-extrabold block">{alt.title}</strong>
+                      <span className="text-[11px] opacity-90">{alt.desc}</span>
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-1 text-[11px] font-bold opacity-80 pl-2">
+                    <span className="hidden sm:inline">Ver detalhes</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
                   </div>
                 </div>
               ))}
@@ -870,7 +996,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
               }`}
             >
               <AlertTriangle className="w-4 h-4 text-[#FACC15]" />
-              <span>Problemas ({machineReportedIssues.length})</span>
+              <span>Problemas ({openIssues.length > 0 ? `${openIssues.length} pendente(s)` : '0 pendentes'})</span>
             </button>
           </div>
 
@@ -2125,62 +2251,76 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                 </div>
               ) : (
                 <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-                  {machineReportedIssues.map(iss => (
-                    <div
-                      key={iss.id}
-                      className={`p-4 rounded-2xl border text-xs space-y-2.5 ${
-                        iss.status === 'ABERTO' 
-                          ? 'bg-red-500/10 border-red-500/30 text-slate-900 dark:text-slate-100'
-                          : 'bg-emerald-500/10 border-emerald-500/30 text-slate-900 dark:text-slate-100'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2 py-0.5 rounded-md font-black text-[9px] uppercase ${
-                            iss.status === 'ABERTO' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
-                          }`}>
-                            {iss.status}
-                          </span>
-                          <span className="font-bold text-slate-600 dark:text-emerald-300">
-                            Relatado por {iss.reportedByUserName}
+                  {machineReportedIssues.map(iss => {
+                    const oilStatus = calculateOilChangeStatus(vehicle);
+                    const isOilIssue = iss.description.toLowerCase().includes('troca de óleo') ||
+                                       iss.description.toLowerCase().includes('troca de oleo') ||
+                                       iss.description.toLowerCase().includes('óleo do motor') ||
+                                       iss.description.toLowerCase().includes('oleo do motor') ||
+                                       iss.description.toLowerCase().includes('óleo vencid') ||
+                                       iss.description.toLowerCase().includes('oleo vencid');
+                    const isAutoResolvedByOil = isOilIssue && oilStatus.status === 'EM_DIA';
+                    const isEffectivelyOpen = iss.status === 'ABERTO' && !isAutoResolvedByOil;
+
+                    return (
+                      <div
+                        key={iss.id}
+                        className={`p-4 rounded-2xl border text-xs space-y-2.5 ${
+                          isEffectivelyOpen 
+                            ? 'bg-red-500/10 border-red-500/30 text-slate-900 dark:text-slate-100'
+                            : 'bg-emerald-500/10 border-emerald-500/30 text-slate-900 dark:text-slate-100'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-md font-black text-[9px] uppercase ${
+                              isEffectivelyOpen ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
+                            }`}>
+                              {isAutoResolvedByOil ? 'RESOLVIDO (TROCA DE ÓLEO CONCLUÍDA)' : iss.status}
+                            </span>
+                            <span className="font-bold text-slate-600 dark:text-emerald-300">
+                              Relatado por {iss.reportedByUserName}
+                            </span>
+                          </div>
+
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(iss.dateTime).toLocaleDateString('pt-BR')} {new Date(iss.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
 
-                        <span className="text-[10px] text-slate-400">
-                          {new Date(iss.dateTime).toLocaleDateString('pt-BR')} {new Date(iss.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-
-                      <p className="font-medium text-slate-800 dark:text-slate-200">
-                        "{iss.description}"
-                      </p>
-
-                      {iss.photoUrl && (
-                        <div className="w-36 h-28 rounded-xl overflow-hidden border">
-                          <img src={iss.photoUrl} alt="Foto do defeito" className="w-full h-full object-cover" />
-                        </div>
-                      )}
-
-                      {iss.status === 'ABERTO' && onResolveIssue && (
-                        <button
-                          onClick={() => {
-                            onResolveIssue(iss.id);
-                            setActionSuccessMsg('Problema marcado como resolvido!');
-                          }}
-                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Marcar Como Resolvido</span>
-                        </button>
-                      )}
-
-                      {iss.status === 'RESOLVIDO' && (
-                        <p className="text-[10px] text-emerald-600 dark:text-emerald-300 font-bold">
-                          Resolvido por {iss.resolvedBy || 'Gestor'} em {iss.resolvedAt ? new Date(iss.resolvedAt).toLocaleDateString('pt-BR') : ''}
+                        <p className="font-medium text-slate-800 dark:text-slate-200">
+                          "{iss.description}"
                         </p>
-                      )}
-                    </div>
-                  ))}
+
+                        {iss.photoUrl && (
+                          <div className="w-36 h-28 rounded-xl overflow-hidden border">
+                            <img src={iss.photoUrl} alt="Foto do defeito" className="w-full h-full object-cover" />
+                          </div>
+                        )}
+
+                        {isEffectivelyOpen && onResolveIssue && (
+                          <button
+                            onClick={() => {
+                              onResolveIssue(iss.id);
+                              setActionSuccessMsg('Problema marcado como resolvido!');
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Marcar Como Resolvido</span>
+                          </button>
+                        )}
+
+                        {!isEffectivelyOpen && (
+                          <p className="text-[10px] text-emerald-600 dark:text-emerald-300 font-bold">
+                            {isAutoResolvedByOil
+                              ? 'Resolvido automaticamente: Troca de óleo realizada com sucesso para este veículo.'
+                              : `Resolvido por ${iss.resolvedBy || 'Gestor'} em ${iss.resolvedAt ? new Date(iss.resolvedAt).toLocaleDateString('pt-BR') : ''}`}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2360,6 +2500,146 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Sub-modal: Detalhes do Alerta do Veículo */}
+        {selectedAlertDetail && (
+          <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className={`w-full max-w-lg rounded-3xl p-5 sm:p-6 border shadow-2xl space-y-4 animate-in zoom-in-95 ${
+              darkMode ? 'bg-[#04281f] border-amber-500/40 text-white' : 'bg-white border-amber-300 text-slate-900'
+            }`}>
+              <div className="flex items-center justify-between border-b pb-3 border-amber-500/20">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className={`w-5 h-5 ${selectedAlertDetail.type === 'RED' ? 'text-red-500' : 'text-amber-500'}`} />
+                  <h3 className="font-extrabold text-sm sm:text-base">
+                    Detalhes do Alerta
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setSelectedAlertDetail(null)}
+                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Tipo do Alerta */}
+              <div className={`p-3.5 rounded-2xl border space-y-1 ${
+                selectedAlertDetail.type === 'RED'
+                  ? 'bg-red-500/10 border-red-500/30'
+                  : 'bg-amber-500/10 border-amber-500/30'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-300">
+                    Tipo do Alerta
+                  </span>
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                    selectedAlertDetail.type === 'RED' ? 'bg-red-600 text-white' : 'bg-amber-500 text-slate-950'
+                  }`}>
+                    {selectedAlertDetail.type === 'RED' ? 'Gravidade ALTA' : 'Gravidade MÉDIA'}
+                  </span>
+                </div>
+                <p className="font-extrabold text-sm">
+                  {selectedAlertDetail.isOilAlert ? 'Troca de Óleo Pendente' : selectedAlertDetail.title}
+                </p>
+                <p className="text-xs opacity-90 leading-relaxed">
+                  {selectedAlertDetail.desc}
+                </p>
+              </div>
+
+              {/* Veículo / Máquina Correspondente */}
+              <div className={`space-y-2 p-3.5 rounded-2xl border text-xs ${
+                darkMode ? 'bg-emerald-950/40 border-emerald-900/60' : 'bg-slate-50 border-slate-200'
+              }`}>
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-emerald-400 block">
+                  Veículo / Máquina Correspondente
+                </span>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <strong className="text-sm font-extrabold block">
+                      {vehicle.model}
+                    </strong>
+                    <span className="text-[11px] opacity-75">
+                      Identificador / Placa: <strong>{vehicle.patrimonyCode || vehicle.licensePlate || vehicle.id}</strong> • {vehicle.category === 'MAQUINA_AGRICOLA' ? 'Máquina Agrícola' : vehicle.category === 'TRATOR' ? 'Trator' : 'Veículo'} • {vehicle.manufacturer}
+                    </span>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-xl text-[10px] font-black bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shrink-0">
+                    {vehicle.sector}
+                  </span>
+                </div>
+              </div>
+
+              {/* Informações Relevantes Exclusivas Deste Veículo */}
+              {(() => {
+                const oilSt = calculateOilChangeStatus(vehicle);
+                return (
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className={`p-3 rounded-xl border ${darkMode ? 'bg-black/30 border-emerald-900/40' : 'bg-slate-50 border-slate-200'}`}>
+                      <span className="text-[10px] text-slate-400 font-bold block">
+                        {oilSt.unit === 'km' ? 'Odômetro Atual' : 'Horímetro Atual'}
+                      </span>
+                      <strong className="text-sm text-emerald-600 dark:text-emerald-200">
+                        {oilSt.currentMeter.toLocaleString('pt-BR')} {oilSt.unit}
+                      </strong>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border ${darkMode ? 'bg-black/30 border-emerald-900/40' : 'bg-slate-50 border-slate-200'}`}>
+                      <span className="text-[10px] text-slate-400 font-bold block">
+                        Próxima Troca Prevista
+                      </span>
+                      <strong className="text-sm text-amber-600 dark:text-amber-400">
+                        {oilSt.nextMeter.toLocaleString('pt-BR')} {oilSt.unit}
+                      </strong>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border ${darkMode ? 'bg-black/30 border-emerald-900/40' : 'bg-slate-50 border-slate-200'}`}>
+                      <span className="text-[10px] text-slate-400 font-bold block">
+                        Última Troca Registrada
+                      </span>
+                      <strong className="text-xs">
+                        {oilSt.lastDate ? new Date(oilSt.lastDate).toLocaleDateString('pt-BR') : 'Não registrada'} ({oilSt.lastMeter.toLocaleString('pt-BR')} {oilSt.unit})
+                      </strong>
+                    </div>
+
+                    <div className={`p-3 rounded-xl border ${darkMode ? 'bg-black/30 border-emerald-900/40' : 'bg-slate-50 border-slate-200'}`}>
+                      <span className="text-[10px] text-slate-400 font-bold block">
+                        Intervalo Programado
+                      </span>
+                      <strong className="text-xs">
+                        {oilSt.interval.toLocaleString('pt-BR')} {oilSt.unit}
+                      </strong>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Ações */}
+              <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-emerald-900/50">
+                <button
+                  onClick={() => setSelectedAlertDetail(null)}
+                  className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-bold border border-slate-300 dark:border-emerald-800 text-slate-700 dark:text-emerald-200 hover:bg-slate-100 dark:hover:bg-emerald-900/50"
+                >
+                  Fechar
+                </button>
+                {selectedAlertDetail.isOilAlert && canEdit && (
+                  <button
+                    onClick={() => {
+                      setSelectedAlertDetail(null);
+                      const isKm = vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
+                      setDirectOilHourmeter(isKm ? (vehicle.currentKm || 0) : (vehicle.currentHourmeter || 0));
+                      setDirectOilDate(new Date().toISOString().slice(0, 10));
+                      setDirectOilPerformedBy(currentUser?.name || '');
+                      setIsDirectOilChangeOpen(true);
+                    }}
+                    className="w-full sm:w-auto px-4 py-2 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-400 text-slate-950 flex items-center justify-center gap-1.5 shadow-md"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Registrar Troca de Óleo Deste Veículo</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}

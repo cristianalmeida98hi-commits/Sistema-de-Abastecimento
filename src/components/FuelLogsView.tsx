@@ -8,6 +8,7 @@ import {
   formatCurrency, formatDateTimeBR, getFuelTypeName, exportFuelLogsPDF, exportFuelLogsCSV,
   getOperationTypeName, getActivityTypeName, OPERATION_OPTIONS, getActivitiesForOperation
 } from '../utils/calculations';
+import { EditFuelLogModal } from './EditFuelLogModal';
 
 interface FuelLogsViewProps {
   fuelLogs: FuelLog[];
@@ -17,7 +18,7 @@ interface FuelLogsViewProps {
   currentUser: User;
   settings: SystemSettings;
   onOpenFuelingModal: () => void;
-  onUpdateFuelLog: (id: string, log: Partial<FuelLog>) => void;
+  onUpdateFuelLog: (id: string, log: Partial<FuelLog>) => Promise<void> | void;
   onDeleteFuelLog: (id: string) => void;
   darkMode?: boolean;
   searchQuery: string;
@@ -50,23 +51,8 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
   // Drawer / Inspector
   const [inspectingLog, setInspectingLog] = useState<FuelLog | null>(null);
 
-  // Edit Modal
+  // Edit Modal State - lightweight reference, isolated editing in EditFuelLogModal
   const [editingLog, setEditingLog] = useState<FuelLog | null>(null);
-  const [editLiters, setEditLiters] = useState<number>(0);
-  const [editPricePerLiter, setEditPricePerLiter] = useState<number>(0);
-  const [editOperationType, setEditOperationType] = useState<OperationType>('GRAMA');
-  const [editActivityType, setEditActivityType] = useState<ActivityType>('CORTE');
-  const [editObservations, setEditObservations] = useState<string>('');
-
-  const editAvailableActivities = useMemo(() => {
-    return getActivitiesForOperation(editOperationType);
-  }, [editOperationType]);
-
-  const handleEditOperationChange = (newOp: OperationType) => {
-    setEditOperationType(newOp);
-    const acts = getActivitiesForOperation(newOp);
-    setEditActivityType((acts[0]?.id || 'OUTRAS') as ActivityType);
-  };
 
   // Combined Search
   const activeSearch = searchQuery || localSearch;
@@ -118,42 +104,24 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
   const totalCost = filteredLogs.reduce((acc, l) => acc + l.totalValue, 0);
   const avgPrice = totalLiters > 0 ? totalCost / totalLiters : 0;
 
-  // Check if user can edit this log
-  const canEditLog = (log: FuelLog): boolean => {
-    if (canEditSystemData(currentUser.role)) return true;
-    
-    // Employee edit restriction window
-    const createdAtTime = new Date(log.createdAt).getTime();
-    const nowTime = Date.now();
-    const diffHours = (nowTime - createdAtTime) / (1000 * 60 * 60);
-
-    return diffHours <= settings.employeeEditTimeLimitHours && log.createdById === currentUser.id;
+  // Check if user can edit this log - STRICT PERMISSION: only ADMINISTRADOR and MANUTENCAO
+  const canEditLog = (log?: FuelLog | null): boolean => {
+    return currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO';
   };
 
   const handleOpenEdit = (log: FuelLog) => {
+    if (!canEditLog(log)) {
+      alert('Acesso negado: Somente perfis Administrador e Manutenção possuem autorização para editar registros de abastecimento.');
+      return;
+    }
     setEditingLog(log);
-    setEditLiters(log.liters);
-    setEditPricePerLiter(log.pricePerLiter);
-    setEditOperationType((log.operationType || 'GRAMA') as OperationType);
-    setEditActivityType((log.activityType || 'CORTE') as ActivityType);
-    setEditObservations(log.observations || '');
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingLog) return;
-
-    const totalValue = Number((editLiters * editPricePerLiter).toFixed(2));
-    onUpdateFuelLog(editingLog.id, {
-      liters: editLiters,
-      pricePerLiter: editPricePerLiter,
-      totalValue,
-      operationType: editOperationType,
-      activityType: editActivityType,
-      observations: editObservations
-    });
-
-    setEditingLog(null);
+  const handleSaveEdit = async (id: string, updatedFields: Partial<FuelLog>) => {
+    if (!canEditLog()) {
+      throw new Error('Acesso negado: Somente Administrador e Manutenção têm permissão para editar abastecimentos.');
+    }
+    await onUpdateFuelLog(id, updatedFields);
   };
 
   const handleExportPDF = () => {
@@ -541,145 +509,41 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
               )}
             </div>
 
-            <div className="pt-3 border-t text-right">
+            <div className="pt-3 border-t flex items-center justify-end gap-2">
               <button
                 onClick={() => setInspectingLog(null)}
-                className="px-4 py-2 rounded-xl bg-emerald-800 text-white font-bold text-xs"
+                className="px-4 py-2 rounded-xl bg-emerald-800/60 hover:bg-emerald-800 text-white font-bold text-xs transition-colors"
               >
                 Fechar
               </button>
+              {canEditLog(inspectingLog) && (
+                <button
+                  onClick={() => {
+                    const target = inspectingLog;
+                    setInspectingLog(null);
+                    handleOpenEdit(target);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-sm transition-all"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Editar Abastecimento</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Edit Log Modal */}
-      {editingLog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-          <div className={`w-full max-w-md rounded-2xl shadow-2xl border p-5 space-y-4 ${
-            darkMode ? 'bg-emerald-950 border-emerald-800 text-emerald-100' : 'bg-white border-emerald-100 text-gray-900'
-          }`}>
-            <div className="flex items-center justify-between border-b pb-3 border-emerald-800/20">
-              <span className="font-bold text-sm">Editar Abastecimento</span>
-              <button onClick={() => setEditingLog(null)} className="p-1 rounded-lg hover:bg-emerald-500/10">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveEdit} className="space-y-3 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1">Tipo de Operação *</label>
-                  <select
-                    value={editOperationType}
-                    onChange={(e) => handleEditOperationChange(e.target.value as OperationType)}
-                    className={`w-full p-2 rounded-xl border font-bold ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
-                  >
-                    {OPERATION_OPTIONS.map(op => (
-                      <option key={op.id} value={op.id}>{op.emoji} {op.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1">Atividade *</label>
-                  <select
-                    value={editActivityType}
-                    onChange={(e) => setEditActivityType(e.target.value as ActivityType)}
-                    className={`w-full p-2 rounded-xl border font-bold ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
-                  >
-                    {editAvailableActivities.map(act => (
-                      <option key={act.id} value={act.id}>{act.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1">Litros Abastecidos</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={editLiters}
-                  onChange={(e) => setEditLiters(parseFloat(e.target.value) || 0)}
-                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
-                />
-              </div>
-
-              {(() => {
-                const currentStation = gasStations.find(s => s.id === editingLog.gasStationId);
-                const isInternal = currentStation ? currentStation.type === 'INTERNO' : (editingLog.gasStationName?.toLowerCase().includes('sede') ?? false);
-
-                return (
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block font-bold">Valor por Litro (R$)</label>
-                      {isInternal ? (
-                        <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded-full border border-emerald-700/60 flex items-center gap-1">
-                          <Lock className="w-2.5 h-2.5" />
-                          Posto Interno (Preço Travado)
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-700/60">
-                          Posto Externo (Preço Editável)
-                        </span>
-                      )}
-                    </div>
-                    <input
-                      type="number"
-                      step="0.001"
-                      disabled={isInternal}
-                      readOnly={isInternal}
-                      value={editPricePerLiter}
-                      onChange={(e) => setEditPricePerLiter(parseFloat(e.target.value) || 0)}
-                      className={`w-full p-2 rounded-xl border ${
-                        isInternal 
-                          ? 'opacity-70 cursor-not-allowed bg-emerald-950/50 border-emerald-900 text-slate-300' 
-                          : darkMode ? 'bg-emerald-900/40 border-emerald-800 font-black text-amber-300' : 'bg-gray-50 font-black text-amber-700'
-                      }`}
-                    />
-                    {isInternal && (
-                      <p className="text-[10px] text-emerald-400/80 mt-1">
-                        Regra de Posto Interno: o preço é travado e segue o cadastro padrão do posto da fazenda.
-                      </p>
-                    )}
-                  </div>
-                );
-              })()}
-
-              <div className="p-2 rounded-xl bg-amber-500/10 font-bold">
-                Novo Total: {formatCurrency(editLiters * editPricePerLiter)}
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1">Observações</label>
-                <textarea
-                  rows={2}
-                  value={editObservations}
-                  onChange={(e) => setEditObservations(e.target.value)}
-                  className={`w-full p-2 rounded-xl border ${darkMode ? 'bg-emerald-900/40 border-emerald-800' : 'bg-gray-50'}`}
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingLog(null)}
-                  className="px-3 py-1.5 rounded-xl hover:bg-emerald-500/10"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-amber-500 text-gray-950 font-bold"
-                >
-                  Salvar Alterações
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Edit Log Modal - Isolated component with fluid decimal input & zero parent re-render lag */}
+      <EditFuelLogModal
+        isOpen={Boolean(editingLog)}
+        log={editingLog}
+        gasStations={gasStations}
+        currentUser={currentUser}
+        onClose={() => setEditingLog(null)}
+        onSave={handleSaveEdit}
+        darkMode={darkMode}
+      />
 
     </div>
   );

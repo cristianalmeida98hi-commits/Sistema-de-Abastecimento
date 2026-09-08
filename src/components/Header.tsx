@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Search, Bell, Plus, LogOut, CheckCircle2, AlertTriangle, Menu, QrCode 
 } from 'lucide-react';
-import { User, SmartAlert } from '../types';
+import { User, SmartAlert, Vehicle } from '../types';
 
 interface HeaderProps {
   currentUser: User;
@@ -12,6 +12,8 @@ interface HeaderProps {
   onOpenQRScanner: () => void;
   onNavigate: (tab: string) => void;
   alerts: SmartAlert[];
+  vehicles?: Vehicle[];
+  onOpenDigitalSheet?: (vehicle: Vehicle) => void;
   darkMode?: boolean;
   searchQuery: string;
   onSearchChange: (q: string) => void;
@@ -25,6 +27,8 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
   onOpenQRScanner,
   onNavigate,
   alerts = [],
+  vehicles = [],
+  onOpenDigitalSheet,
   searchQuery,
   onSearchChange,
   onToggleMobileMenu,
@@ -137,23 +141,39 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
                       </div>
                     ) : (
                       <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                        {unresolvedAlerts.slice(0, 4).map(alert => (
-                          <div 
-                            key={alert.id}
-                            onClick={() => { setShowAlertsDropdown(false); onNavigate('alerts'); }}
-                            className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
-                              alert.severity === 'ALTA' 
-                                ? 'bg-red-50 border-red-100 text-red-900 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-200' 
-                                : 'bg-emerald-50 border-emerald-100 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-200'
-                            }`}
-                          >
-                            <div className="font-semibold flex items-center justify-between mb-0.5">
-                              <span>{alert.title}</span>
-                              <span className="text-[10px] opacity-75">{alert.date}</span>
+                        {unresolvedAlerts.slice(0, 4).map(alert => {
+                          const targetVehicle = alert.equipmentId && vehicles ? vehicles.find(v => v.id === alert.equipmentId) : undefined;
+                          return (
+                            <div 
+                              key={alert.id}
+                              onClick={() => {
+                                setShowAlertsDropdown(false);
+                                if (targetVehicle && onOpenDigitalSheet) {
+                                  onOpenDigitalSheet(targetVehicle);
+                                } else {
+                                  onNavigate('alerts');
+                                }
+                              }}
+                              className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
+                                alert.severity === 'ALTA' 
+                                  ? 'bg-red-50 border-red-100 text-red-900 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-200' 
+                                  : 'bg-emerald-50 border-emerald-100 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-200'
+                              }`}
+                              title={targetVehicle ? `Abrir ficha técnica de ${targetVehicle.model}` : 'Ver alertas'}
+                            >
+                              <div className="font-semibold flex items-center justify-between mb-0.5">
+                                <span>{alert.title}</span>
+                                <span className="text-[10px] opacity-75">{alert.date}</span>
+                              </div>
+                              <p className="text-[11px] opacity-90 line-clamp-2">{alert.description}</p>
+                              {targetVehicle && (
+                                <span className="text-[10px] font-bold text-amber-500 mt-1 block">
+                                  ➜ Abrir Ficha: {targetVehicle.model} ({targetVehicle.patrimonyCode || targetVehicle.licensePlate || 'Frota'})
+                                </span>
+                              )}
                             </div>
-                            <p className="text-[11px] opacity-90 line-clamp-2">{alert.description}</p>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

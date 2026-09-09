@@ -37,8 +37,8 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
   const unresolvedAlerts = React.useMemo(() => (alerts || []).filter(a => !a.resolved), [alerts]);
 
   return (
-    <header className="sticky top-0 z-30 border-b transition-colors h-16 flex items-center bg-[#04281f]/95 border-emerald-900/60 text-[#f8fafc] backdrop-blur-md">
-      <div className="w-full px-3 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-30 border-b transition-colors pt-safe min-h-[4rem] flex items-center bg-[#04281f]/95 border-emerald-900/60 text-[#f8fafc] backdrop-blur-md">
+      <div className="w-full px-3 sm:px-6 lg:px-8 py-2 sm:py-0">
         <div className="flex items-center justify-between gap-2 sm:gap-4">
           
           {/* Section Title & Mobile Toggle */}

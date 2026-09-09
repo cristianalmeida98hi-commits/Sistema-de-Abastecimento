@@ -187,7 +187,7 @@ export const SidebarComponent: React.FC<SidebarProps> = ({
             onClick={onCloseMobile}
           />
           {/* Drawer Body */}
-          <aside className={`relative w-72 max-w-[85vw] h-full flex flex-col shadow-2xl transition-all duration-300 ease-in-out ${
+          <aside className={`relative w-72 max-w-[85vw] h-full pt-safe pb-safe flex flex-col shadow-2xl transition-all duration-300 ease-in-out ${
             darkMode 
               ? 'bg-[#043327] border-r border-emerald-900/40 text-slate-100' 
               : 'bg-[#064E3B] text-white'

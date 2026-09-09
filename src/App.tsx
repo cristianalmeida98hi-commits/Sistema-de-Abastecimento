@@ -106,38 +106,7 @@ export default function App() {
 
   const darkMode = true;
 
-  // 2. Storage initialization & network listeners
-  useEffect(() => {
-    initStorage();
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-
-      const handleOnline = () => setIsOffline(false);
-      const handleOffline = () => setIsOffline(true);
-      window.addEventListener('online', handleOnline);
-      window.addEventListener('offline', handleOffline);
-      return () => {
-        window.removeEventListener('online', handleOnline);
-        window.removeEventListener('offline', handleOffline);
-      };
-    }
-  }, []);
-
-  // Guarantee scroll starts at top on login, user change, or tab navigation
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-    }
-    if (mainContentRef.current) {
-      mainContentRef.current.scrollTop = 0;
-    }
-  }, [activeTab, currentUser?.id]);
-
-  // 3. Sync state on storage/Firestore updates with non-blocking transition
+  // 2. Sync state on storage/Firestore updates with non-blocking transition
   const refreshState = useCallback(() => {
     React.startTransition(() => {
       const freshUser = getCurrentUser();
@@ -155,6 +124,57 @@ export default function App() {
       setStorageStatus(getStorageLoadingState());
     });
   }, []);
+
+  // Storage initialization, cross-platform mobile lifecycle & network listeners
+  useEffect(() => {
+    initStorage();
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+
+      const handleOnline = () => {
+        setIsOffline(false);
+        refreshState();
+      };
+      const handleOffline = () => setIsOffline(true);
+
+      const handleResume = () => {
+        setIsOffline(!navigator.onLine);
+        refreshState();
+      };
+
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      window.addEventListener('andradeagro_network_status', handleResume);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') handleResume();
+      });
+      window.addEventListener('pageshow', handleResume);
+      window.addEventListener('focus', handleResume);
+
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+        window.removeEventListener('andradeagro_network_status', handleResume);
+        document.removeEventListener('visibilitychange', handleResume);
+        window.removeEventListener('pageshow', handleResume);
+        window.removeEventListener('focus', handleResume);
+      };
+    }
+  }, [refreshState]);
+
+  // Guarantee scroll starts at top on login, user change, or tab navigation
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = 0;
+    }
+  }, [activeTab, currentUser?.id]);
 
   useEffect(() => {
     window.addEventListener('andradeagro_data_updated', refreshState);
@@ -511,7 +531,7 @@ export default function App() {
         />
 
         {/* Content View Container */}
-        <main ref={mainContentRef} className="flex-1 p-3 sm:p-6 lg:p-8 overflow-y-auto max-w-[1600px] w-full mx-auto">
+        <main ref={mainContentRef} className="flex-1 p-3 sm:p-6 lg:p-8 pb-safe overflow-y-auto max-w-[1600px] w-full mx-auto">
           <React.Suspense fallback={<ViewLoadingFallback />}>
             {activeTab === 'operator-fueling' && (
               <OperatorFuelingView

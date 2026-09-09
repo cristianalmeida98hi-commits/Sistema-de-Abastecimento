@@ -20,7 +20,8 @@ import {
 const SESSION_KEYS = {
   SESSION_USER: 'andradeagro_session_user_v1',
   REMEMBERED_EMAIL: 'andradeagro_remembered_email_v1',
-  PERSISTENT_ADMIN_SESSION: 'andradeagro_persistent_admin_session_v1'
+  PERSISTENT_ADMIN_SESSION: 'andradeagro_persistent_admin_session_v1',
+  PERSISTENT_SESSION: 'andradeagro_persistent_session_v2'
 };
 
 // Helper to remove any undefined fields before saving to Firestore (Firestore rejects undefined)
@@ -384,35 +385,40 @@ export function initStorage() {
       window.dispatchEvent(new Event('andradeagro_network_status'));
     });
 
-    // Mobile background suspension & PWA resume handling
+    // Mobile background suspension & PWA resume handling for Android Chrome & iOS Safari
     let lastBackgroundSuspendTime = 0;
     let lastWakeupSyncTime = 0;
+
+    const handleMobileResume = () => {
+      const now = Date.now();
+      const suspendedDuration = lastBackgroundSuspendTime > 0 ? now - lastBackgroundSuspendTime : 0;
+      // Resync when app was suspended for at least 3.5 seconds and at least 4 seconds have passed since last wakeup sync
+      if ((suspendedDuration > 3500 || suspendedDuration === 0) && (now - lastWakeupSyncTime) > 4000) {
+        lastWakeupSyncTime = now;
+        lastBackgroundSuspendTime = 0;
+        console.log(`[Andrade Agro Mobile] Retorno do segundo plano (${Math.round(suspendedDuration / 1000)}s). Verificando conexão e estado...`);
+        ensureFirebaseAuth().catch(() => {});
+        setupFirestoreListeners();
+        notifyDataUpdated(false);
+      }
+    };
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         lastBackgroundSuspendTime = Date.now();
       } else if (document.visibilityState === 'visible') {
-        const now = Date.now();
-        const suspendedDuration = lastBackgroundSuspendTime > 0 ? now - lastBackgroundSuspendTime : 0;
-        // Resync only if suspended for more than 20 seconds and at least 15 seconds since last sync
-        if (suspendedDuration > 20000 && (now - lastWakeupSyncTime) > 15000) {
-          lastWakeupSyncTime = now;
-          console.log(`[Andrade Agro Mobile] Retorno do segundo plano (${Math.round(suspendedDuration / 1000)}s). Sincronizando estado com segurança...`);
-          ensureFirebaseAuth().catch(() => {});
-          setupFirestoreListeners();
-          notifyDataUpdated(false);
-        }
+        handleMobileResume();
       }
     });
 
-    // Mobile bfcache restoration (back-forward cache in mobile browsers)
+    // Mobile bfcache restoration (back-forward cache in mobile Safari / Chrome)
     window.addEventListener('pageshow', (event) => {
-      if (event.persisted) {
-        console.log('[Andrade Agro Mobile] Página restaurada do cache bfcache. Atualizando estado...');
-        ensureFirebaseAuth().catch(() => {});
-        setupFirestoreListeners();
-        notifyDataUpdated(false);
-      }
+      handleMobileResume();
+    });
+
+    // Window focus restoration (e.g. switching back from camera, WhatsApp or another app)
+    window.addEventListener('focus', () => {
+      handleMobileResume();
     });
   }
 
@@ -501,43 +507,45 @@ export function getCurrentUser(): User | null {
       }
     }
 
-    // 2. Check persistent administrator session on this specific device/browser
-    const persistentStr = localStorage.getItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
+    // 2. Check persistent device session on this specific device/browser (iOS Safari PWA & Android)
+    const persistentStr = localStorage.getItem(SESSION_KEYS.PERSISTENT_SESSION) || localStorage.getItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
     if (persistentStr) {
       try {
         const sessionData = JSON.parse(persistentStr);
-        if (sessionData && sessionData.userId && sessionData.email && sessionData.role === 'ADMIN') {
+        if (sessionData && sessionData.userId) {
           const users = getUsers();
           const live = users.find(u => 
             u.id === sessionData.userId || 
-            u.email?.toLowerCase() === sessionData.email.toLowerCase()
+            (sessionData.email && u.email?.toLowerCase() === sessionData.email.toLowerCase())
           );
 
           if (live) {
-            if (live.active === false || live.role !== 'ADMIN') {
-              localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
+            if (live.active === false) {
+              logoutUser();
               return null;
             }
             const safe = sanitizeUserForClient(live);
             sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(safe));
             return live;
           } else {
-            // Fallback during initial boot before Firestore users arrive
-            const fallbackAdmin: User = {
+            // Fallback during initial boot/offline before Firestore users arrive
+            const fallbackUser: User = {
               id: sessionData.userId,
-              name: sessionData.name || 'Administrador',
-              email: sessionData.email,
-              role: 'ADMIN',
-              department: sessionData.department || 'Diretoria',
+              name: sessionData.name || (sessionData.role === 'ADMIN' ? 'Administrador' : 'Usuário AndradeAgro'),
+              email: sessionData.email || '',
+              role: sessionData.role || 'FUNCIONARIO',
+              department: sessionData.department || (sessionData.role === 'ADMIN' ? 'Diretoria' : 'Operação'),
               active: true
             };
-            sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(fallbackAdmin));
-            return fallbackAdmin;
+            sessionStorage.setItem(SESSION_KEYS.SESSION_USER, JSON.stringify(fallbackUser));
+            return fallbackUser;
           }
         } else {
+          localStorage.removeItem(SESSION_KEYS.PERSISTENT_SESSION);
           localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
         }
       } catch {
+        localStorage.removeItem(SESSION_KEYS.PERSISTENT_SESSION);
         localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
       }
     }
@@ -586,22 +594,24 @@ export function loginUser(email: string, password: string, rememberMe: boolean):
     if (rememberMe) {
       localStorage.setItem(SESSION_KEYS.REMEMBERED_EMAIL, targetEmail);
 
-      // Only administrators get a persistent device session
+      const persistentSession = {
+        userId: user.id,
+        email: user.email.toLowerCase(),
+        role: user.role,
+        name: user.name,
+        department: user.department,
+        createdAt: Date.now()
+      };
+      localStorage.setItem(SESSION_KEYS.PERSISTENT_SESSION, JSON.stringify(persistentSession));
+
       if (user.role === 'ADMIN') {
-        const persistentSession = {
-          userId: user.id,
-          email: user.email.toLowerCase(),
-          role: user.role,
-          name: user.name,
-          department: user.department,
-          createdAt: Date.now()
-        };
         localStorage.setItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION, JSON.stringify(persistentSession));
       } else {
         localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
       }
     } else {
       localStorage.removeItem(SESSION_KEYS.REMEMBERED_EMAIL);
+      localStorage.removeItem(SESSION_KEYS.PERSISTENT_SESSION);
       localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
     }
   }
@@ -639,8 +649,19 @@ export function loginUserById(userId: string, rememberMe: boolean): { success: b
   if (typeof window !== 'undefined') {
     // Quick access login never persists administrator session
     localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
-    if (rememberMe && user.email) {
-      localStorage.setItem(SESSION_KEYS.REMEMBERED_EMAIL, user.email.toLowerCase());
+    if (rememberMe) {
+      if (user.email) {
+        localStorage.setItem(SESSION_KEYS.REMEMBERED_EMAIL, user.email.toLowerCase());
+      }
+      const persistentSession = {
+        userId: user.id,
+        email: user.email ? user.email.toLowerCase() : '',
+        role: user.role,
+        name: user.name,
+        department: user.department,
+        createdAt: Date.now()
+      };
+      localStorage.setItem(SESSION_KEYS.PERSISTENT_SESSION, JSON.stringify(persistentSession));
     }
   }
 
@@ -659,6 +680,7 @@ export function logoutUser(): void {
     }
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
+      localStorage.removeItem(SESSION_KEYS.PERSISTENT_SESSION);
       localStorage.removeItem(SESSION_KEYS.PERSISTENT_ADMIN_SESSION);
       localStorage.removeItem('andradeagro_remembered_user_v1');
       localStorage.removeItem('andradeagro_remembered_user');

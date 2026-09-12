@@ -209,7 +209,9 @@ export type ActivityType =
   | 'TRANSPORTE_MATERIAIS'
   // Cana
   | 'CORTE_CANA'
+  | 'ADUBACAO_CANA'
   | 'CARREGAMENTO_CANA'
+  | 'ENLEIRAMENTO_PALHA'
   | 'PLANTIO_CANA'
   // Fallbacks
   | 'OUTRAS'
@@ -262,6 +264,8 @@ export interface MaintenanceLog {
   equipmentName: string;
   equipmentPlateOrCode: string;
   date: string;
+  dateTime?: string;
+  createdAt?: string;
   type: MaintenanceType;
   title: string;
   description: string;
@@ -393,3 +397,41 @@ export interface ReportFilter {
   operationType?: OperationType;
   activityType?: ActivityType;
 }
+
+export interface UserDevice {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  token?: string;
+  endpoint?: string;
+  subscription?: {
+    endpoint: string;
+    expirationTime?: number | null;
+    keys: {
+      p256dh: string;
+      auth: string;
+    };
+  };
+  deviceInfo?: {
+    userAgent?: string;
+    platform?: string;
+    isPWA?: boolean;
+    isMobile?: boolean;
+  };
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PushEventType = 'NEW_ISSUE' | 'NEW_MAINTENANCE' | 'OIL_CHANGE_DUE' | 'TEST';
+
+export interface PushNotificationPayload {
+  eventType: PushEventType;
+  eventId: string;
+  equipmentName: string;
+  description: string;
+  equipmentId?: string;
+  url?: string;
+}
+

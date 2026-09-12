@@ -34,8 +34,6 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
   onOpenDigitalSheet,
   darkMode
 }) => {
-  if (!isOpen) return null;
-
   // Video & Stream references
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -356,6 +354,8 @@ export const QRCodeScannerModal: React.FC<QRCodeScannerModalProps> = ({
       }
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in">

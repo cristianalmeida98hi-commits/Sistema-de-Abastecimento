@@ -5,7 +5,7 @@ import {
   Edit, Trash2, Droplets
 } from 'lucide-react';
 import { MaintenanceLog, MaintenanceType, Vehicle, User, canEditSystemData } from '../types';
-import { formatCurrency, formatDateBR } from '../utils/calculations';
+import { formatCurrency, formatDateBR, getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO } from '../utils/calculations';
 
 interface MaintenanceViewProps {
   maintenanceLogs: MaintenanceLog[];
@@ -37,7 +37,7 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
 
   // Form State
   const [equipmentId, setEquipmentId] = useState(vehicles[0]?.id || '');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => getTodayDateSaoPaulo());
   const [type, setType] = useState<MaintenanceType>('REVISAO');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -74,7 +74,7 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
       : (Number(firstEq?.maintenanceIntervalHours) || Number(firstEq?.oilChangeIntervalHours) || 300);
 
     setEquipmentId(firstEq?.id || '');
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(getTodayDateSaoPaulo());
     setType('REVISAO');
     setTitle('');
     setDescription('');
@@ -148,12 +148,15 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
     const eq = vehicles.find(v => v.id === equipmentId);
     if (!eq) return;
 
+    const safeDateTime = createTimestampForDateSaoPaulo(date);
+
     if (editingId) {
       onUpdateMaintenance(editingId, {
         equipmentId: eq.id,
         equipmentName: eq.model,
         equipmentPlateOrCode: eq.licensePlate || eq.patrimonyCode || 'S/PLACA',
         date,
+        dateTime: safeDateTime,
         type,
         title,
         description,
@@ -170,6 +173,8 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
         equipmentName: eq.model,
         equipmentPlateOrCode: eq.licensePlate || eq.patrimonyCode || 'S/PLACA',
         date,
+        dateTime: safeDateTime,
+        createdAt: getNowSaoPauloISO(),
         type,
         title,
         description,

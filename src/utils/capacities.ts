@@ -97,15 +97,61 @@ export function getMachineSubtypeName(subtype?: MachineSubtype | string): string
 
 /**
  * Retorna as capacidades operacionais do veículo consolidadas,
- * garantindo compatibilidade com registros antigos que possuem apenas
- * tankCapacityLiters ou sprayingTankCapacityLiters.
+ * garantindo que a capacidade do tanque de combustível (vehicle.tankCapacityLiters)
+ * registrada no Firestore seja SEMPRE a fonte da verdade atualizada em tempo real.
  */
 export function getConsolidatedCapacities(vehicle: Vehicle): OperationalCapacity[] {
-  if (Array.isArray(vehicle.operationalCapacities)) {
-    return vehicle.operationalCapacities;
+  const hasFuelTank = vehicle.fuelType && vehicle.fuelType !== 'NENHUM' && (Number(vehicle.tankCapacityLiters) || 0) > 0;
+  const currentFuelLiters = Number(vehicle.tankCapacityLiters) || 0;
+
+  if (Array.isArray(vehicle.operationalCapacities) && vehicle.operationalCapacities.length > 0) {
+    const list: OperationalCapacity[] = [];
+    let fuelTankProcessed = false;
+
+    for (const cap of vehicle.operationalCapacities) {
+      if (cap.type === 'COMBUSTIVEL' || cap.id === 'legacy-fuel' || cap.id === 'fuel-tank-main') {
+        if (hasFuelTank) {
+          fuelTankProcessed = true;
+          list.push({
+            ...cap,
+            type: 'COMBUSTIVEL',
+            name: cap.name || 'Tanque de Combustível',
+            value: currentFuelLiters, // Sempre o valor real atual de vehicle.tankCapacityLiters do Firestore
+            unit: 'L'
+          });
+        }
+        // Se fuelType === 'NENHUM' ou capacidade for 0, não inclui tanque de combustível
+      } else {
+        list.push(cap);
+      }
+    }
+
+    // Se o veículo possui combustível configurado mas ainda não tinha o item no array
+    if (hasFuelTank && !fuelTankProcessed) {
+      list.unshift({
+        id: 'fuel-tank-main',
+        type: 'COMBUSTIVEL',
+        name: 'Tanque de Combustível',
+        value: currentFuelLiters,
+        unit: 'L'
+      });
+    }
+
+    return list;
   }
 
   const generated: OperationalCapacity[] = [];
+
+  // Tanque de combustível (sempre com o dado real do Firestore)
+  if (hasFuelTank) {
+    generated.push({
+      id: 'legacy-fuel',
+      type: 'COMBUSTIVEL',
+      name: 'Tanque de Combustível',
+      value: currentFuelLiters,
+      unit: 'L'
+    });
+  }
 
   // Tanque de pulverização
   if ((vehicle.sprayingTankCapacityLiters || 0) > 0 || vehicle.hasSprayingTank || vehicle.sector === 'PULVERIZACAO' || vehicle.machineSubtype === 'PULVERIZADOR') {
@@ -114,22 +160,11 @@ export function getConsolidatedCapacities(vehicle: Vehicle): OperationalCapacity
         id: 'legacy-spray',
         type: 'PULVERIZACAO',
         name: 'Tanque de Pulverização',
-        value: vehicle.sprayingTankCapacityLiters || 0,
+        value: Number(vehicle.sprayingTankCapacityLiters) || 0,
         unit: 'L',
         notes: 'Calda / Defensivos'
       });
     }
-  }
-
-  // Tanque de combustível (apenas se tiver combustível e capacidade > 0)
-  if (vehicle.fuelType && vehicle.fuelType !== 'NENHUM' && (vehicle.tankCapacityLiters || 0) > 0) {
-    generated.push({
-      id: 'legacy-fuel',
-      type: 'COMBUSTIVEL',
-      name: 'Tanque de Combustível',
-      value: vehicle.tankCapacityLiters,
-      unit: 'L'
-    });
   }
 
   return generated;

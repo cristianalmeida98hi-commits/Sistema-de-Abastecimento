@@ -68,9 +68,9 @@ export const OPERATIONS_CONFIG: Record<OperationType, { label: string; emoji: st
     emoji: '🎋',
     activities: [
       { id: 'CORTE_CANA', label: 'Corte de cana' },
-      { id: 'CARREGAMENTO_CANA', label: 'Carregamento de cana' },
+      { id: 'ADUBACAO_CANA', label: 'Adubação de cana' },
       { id: 'TRANSPORTE_CANA', label: 'Transporte de cana' },
-      { id: 'TRANSBORDO', label: 'Transbordo' },
+      { id: 'ENLEIRAMENTO_PALHA', label: 'Enleiramento de palha' },
       { id: 'APLICACAO', label: 'Aplicação' },
       { id: 'PLANTIO_CANA', label: 'Plantio de cana' },
       { id: 'OUTRAS', label: 'Outras' },
@@ -122,6 +122,18 @@ export function getActivityTypeName(activityType?: ActivityType | string | null,
   if (!activityType) return '-';
   const actKey = String(activityType).toUpperCase();
   
+  // Compatibilidade com histórico e novas atividades de Cana
+  if (actKey === 'ADUBACAO_CANA' || actKey === 'ADUBACAO DE CANA') return 'Adubação de cana';
+  if (actKey === 'ENLEIRAMENTO_PALHA' || actKey === 'ENLEIRAMENTO DE PALHA') return 'Enleiramento de palha';
+
+  // Se for registro antigo gravado como 'CARREGAMENTO_CANA'
+  if (actKey === 'CARREGAMENTO_CANA' || actKey === 'CARREGAMENTO DE CANA') return 'Adubação de cana';
+
+  // Se for registro antigo de Cana gravado como 'TRANSBORDO'
+  if (operationType === 'CANA' && actKey === 'TRANSBORDO') {
+    return 'Enleiramento de palha';
+  }
+
   if (operationType) {
     const list = getActivitiesForOperation(operationType);
     const found = list.find(a => a.id.toUpperCase() === actKey || a.label.toLowerCase() === String(activityType).toLowerCase());

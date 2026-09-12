@@ -8,6 +8,24 @@
     <meta property="og:title" content="AndradeAgro" />
     <meta property="og:description" content="Sistema de gestão inteligente do agronegócio para controle de abastecimentos, frotas, máquinas agrícolas, manutenções e consumo de combustível." />
 
+    <!-- Dev Service Worker & Cache Bust Guard to prevent multiple React copies -->
+    <script>
+      (function() {
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.indexOf('ais-dev-') !== -1) {
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              for (var i = 0; i < regs.length; i++) { regs[i].unregister(); }
+            }).catch(function() {});
+          }
+          if ('caches' in window) {
+            caches.keys().then(function(keys) {
+              for (var j = 0; j < keys.length; j++) { caches.delete(keys[j]); }
+            }).catch(function() {});
+          }
+        }
+      })();
+    </script>
+
     <!-- Format Detection Disabled for iOS Safari to avoid breaking equipment codes, hourmeters and dates -->
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
     

@@ -19,11 +19,11 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
   onSubmit,
   darkMode
 }) => {
-  if (!isOpen) return null;
-
   const [description, setDescription] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!isOpen) return null;
 
   // Preset sample issue photo options
   const samplePhotos = [

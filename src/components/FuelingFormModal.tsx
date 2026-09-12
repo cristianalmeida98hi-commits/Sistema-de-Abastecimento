@@ -6,7 +6,8 @@ import {
 import { Vehicle, GasStation, User, FuelType, FuelLog, SystemSettings, OperationType, ActivityType, canEditSystemData } from '../types';
 import { 
   calculateFuelLogMetrics, formatCurrency, getFuelTypeName, getSectorName,
-  getActivitiesForOperation, OPERATION_OPTIONS, getStationFuelPrice 
+  getActivitiesForOperation, OPERATION_OPTIONS, getStationFuelPrice,
+  getTodayDateSaoPaulo, getCurrentTimeSaoPaulo, createTimestampForDateSaoPaulo
 } from '../utils/calculations';
 import { getTankStatus } from '../utils/storage';
 import { VehicleSelector } from './VehicleSelector';
@@ -38,8 +39,6 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   preSelectedVehicleId,
   darkMode
 }) => {
-  if (!isOpen) return null;
-
   // Real-time Tank Stock Status (Sede Fazenda)
   const tankStatus = useMemo(() => getTankStatus(), [isOpen]);
   const isTankLow = tankStatus.currentStock <= 2000;
@@ -52,7 +51,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
 
   // Form states
   const [dateTime, setDateTime] = useState<string>(
-    new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+    () => `${getTodayDateSaoPaulo()}T${getCurrentTimeSaoPaulo()}`
   );
 
   const [equipmentId, setEquipmentId] = useState<string>(() => {
@@ -227,8 +226,12 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
 
     setIsSubmitting(true);
     try {
+      const safeDateTime = dateTime && dateTime.length >= 10
+        ? createTimestampForDateSaoPaulo(dateTime.slice(0, 10), dateTime.slice(11, 16))
+        : createTimestampForDateSaoPaulo(getTodayDateSaoPaulo());
+
       await onSubmit({
-        dateTime,
+        dateTime: safeDateTime,
         equipmentId: selectedEquipment.id,
         equipmentName: selectedEquipment.model,
         equipmentCategory: selectedEquipment.category,
@@ -273,6 +276,8 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
       setIsSubmitting(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-in fade-in">

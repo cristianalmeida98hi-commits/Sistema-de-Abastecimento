@@ -44,7 +44,12 @@ export const EditFuelLogModal: React.FC<EditFuelLogModalProps> = ({
       setLitersInput(log.liters !== undefined ? String(log.liters).replace('.', ',') : '');
       setPriceInput(log.pricePerLiter !== undefined ? String(log.pricePerLiter).replace('.', ',') : '');
       setOperationType((log.operationType || 'GRAMA') as OperationType);
-      setActivityType((log.activityType || 'CORTE') as ActivityType);
+      let initialAct = (log.activityType || 'CORTE') as ActivityType;
+      if (log.operationType === 'CANA') {
+        if (initialAct === 'CARREGAMENTO_CANA') initialAct = 'ADUBACAO_CANA';
+        if (initialAct === 'TRANSBORDO') initialAct = 'ENLEIRAMENTO_PALHA';
+      }
+      setActivityType(initialAct);
       setObservations(log.observations || '');
       setErrorMessage(null);
       setIsSaving(false);

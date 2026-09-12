@@ -17,37 +17,279 @@ export function formatNumber(value: number, decimals: number = 1): string {
   }).format(value || 0);
 }
 
-export function formatDateBR(dateString: string): string {
-  if (!dateString) return '-';
+const TIMEZONE_BR = 'America/Sao_Paulo';
+
+/**
+ * Retorna a data de hoje (YYYY-MM-DD) no fuso horário do Brasil (America/Sao_Paulo).
+ * Garante que em horários noturnos a data local não pule incorretamente para o dia seguinte.
+ */
+export function getTodayDateSaoPaulo(): string {
   try {
-    const d = new Date(dateString);
-    if (isNaN(d.getTime())) return dateString;
-    return d.toLocaleDateString('pt-BR', {
-      day: '2-digit',
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: TIMEZONE_BR,
+      year: 'numeric',
       month: '2-digit',
-      year: 'numeric'
-    });
+      day: '2-digit',
+    }).format(new Date());
   } catch {
-    return dateString;
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 }
 
-export function formatDateTimeBR(dateTimeString: string): string {
-  if (!dateTimeString) return '-';
+/**
+ * Retorna o horário atual (HH:mm) no fuso horário do Brasil (America/Sao_Paulo).
+ */
+export function getCurrentTimeSaoPaulo(): string {
   try {
-    const d = new Date(dateTimeString);
-    if (isNaN(d.getTime())) return dateTimeString;
-    return d.toLocaleString('pt-BR', {
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: TIMEZONE_BR,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date());
+  } catch {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+}
+
+/**
+ * Retorna a data e hora atual no fuso de Brasília em formato ISO com offset -03:00.
+ */
+export function getNowSaoPauloISO(): string {
+  const today = getTodayDateSaoPaulo();
+  const time = getCurrentTimeSaoPaulo();
+  const now = new Date();
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  return `${today}T${time}:${seconds}-03:00`;
+}
+
+/**
+ * Gera um timestamp ISO com offset correto do Brasil (-03:00) para uma data (YYYY-MM-DD)
+ * e hora opcional (HH:mm ou atual).
+ */
+export function createTimestampForDateSaoPaulo(dateStr: string, timeStr?: string): string {
+  if (!dateStr) return getNowSaoPauloISO();
+  const cleanDate = dateStr.trim().slice(0, 10);
+  let hours = '12';
+  let minutes = '00';
+  let seconds = '00';
+
+  if (timeStr && /^\d{2}:\d{2}(:\d{2})?$/.test(timeStr.trim())) {
+    const parts = timeStr.trim().split(':');
+    hours = parts[0];
+    minutes = parts[1];
+    seconds = parts[2] || '00';
+  } else {
+    try {
+      const timeFmt = new Intl.DateTimeFormat('pt-BR', {
+        timeZone: TIMEZONE_BR,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      });
+      const parts = timeFmt.formatToParts(new Date());
+      hours = parts.find(p => p.type === 'hour')?.value || '12';
+      minutes = parts.find(p => p.type === 'minute')?.value || '00';
+      seconds = parts.find(p => p.type === 'second')?.value || '00';
+    } catch {
+      const d = new Date();
+      hours = String(d.getHours()).padStart(2, '0');
+      minutes = String(d.getMinutes()).padStart(2, '0');
+      seconds = String(d.getSeconds()).padStart(2, '0');
+    }
+  }
+
+  return `${cleanDate}T${hours}:${minutes}:${seconds}-03:00`;
+}
+
+/**
+ * Formata qualquer data para DD/MM/AAAA no fuso horário do Brasil (America/Sao_Paulo).
+ * Se a data de entrada for pura (YYYY-MM-DD) ou vier com falso UTC meia-noite,
+ * garante que NUNCA retroceda um dia.
+ */
+export function formatDateBR(dateInput: string | number | Date | any): string {
+  if (!dateInput) return '-';
+  
+  // Suporte a Firestore Timestamp
+  if (typeof dateInput === 'object' && dateInput !== null && !(dateInput instanceof Date)) {
+    if (typeof dateInput.toDate === 'function') {
+      dateInput = dateInput.toDate();
+    } else if (typeof dateInput.seconds === 'number') {
+      dateInput = new Date(dateInput.seconds * 1000);
+    }
+  }
+
+  if (typeof dateInput === 'string') {
+    const trimmed = dateInput.trim();
+    if (!trimmed) return '-';
+
+    // Formato puro YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const [year, month, day] = trimmed.split('-');
+      return `${day}/${month}/${year}`;
+    }
+    // Já formatado como DD/MM/AAAA
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) {
+      return trimmed;
+    }
+    // Falso UTC da meia-noite YYYY-MM-DDT00:00:00...
+    if (/^\d{4}-\d{2}-\d{2}T00:00(:00)?(\.000)?(Z|[+-]\d{2}:\d{2})?$/i.test(trimmed)) {
+      const [datePart] = trimmed.split('T');
+      const [year, month, day] = datePart.split('-');
+      return `${day}/${month}/${year}`;
+    }
+  }
+
+  try {
+    let d: Date;
+    if (typeof dateInput === 'number') {
+      d = new Date(dateInput);
+    } else if (typeof dateInput === 'string') {
+      const trimmed = dateInput.trim();
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(trimmed)) {
+        d = new Date(`${trimmed}-03:00`);
+      } else {
+        d = new Date(trimmed);
+      }
+    } else {
+      d = dateInput;
+    }
+
+    if (isNaN(d.getTime())) return typeof dateInput === 'string' ? dateInput : '-';
+
+    const dateStr = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: TIMEZONE_BR,
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    }).format(d);
+
+    // Proteção rigorosa contra recuo indevido de dia por meia-noite UTC
+    if (typeof dateInput === 'string') {
+      const m = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) {
+        const [, y, mo, da] = m;
+        const expectedDateStr = `${da}/${mo}/${y}`;
+        if (expectedDateStr !== dateStr && (dateInput.includes('T00:00:00') || dateInput.includes('T01:00:00') || dateInput.includes('T02:00:00') || dateInput.includes('T03:00:00'))) {
+          return expectedDateStr;
+        }
+      }
+    }
+
+    return dateStr;
   } catch {
-    return dateTimeString;
+    return String(dateInput);
   }
 }
+
+export const formatDateSaoPaulo = formatDateBR;
+
+/**
+ * Formata data e horário para DD/MM/AAAA HH:mm no fuso horário do Brasil (America/Sao_Paulo).
+ * Garante que:
+ * 1. Strings sem horário (YYYY-MM-DD) ou com meia-noite UTC NÃO exibam o falso "21:00".
+ * 2. Strings com data e hora reais mantenham a data intacta (nunca volte 1 dia) e preservem
+ *    o horário exato em que o evento ocorreu.
+ */
+export function formatDateTimeBR(dateTimeInput: string | number | Date | any): string {
+  if (!dateTimeInput) return '-';
+
+  // Suporte a Firestore Timestamp
+  if (typeof dateTimeInput === 'object' && dateTimeInput !== null && !(dateTimeInput instanceof Date)) {
+    if (typeof dateTimeInput.toDate === 'function') {
+      dateTimeInput = dateTimeInput.toDate();
+    } else if (typeof dateTimeInput.seconds === 'number') {
+      dateTimeInput = new Date(dateTimeInput.seconds * 1000);
+    }
+  }
+
+  if (typeof dateTimeInput === 'string') {
+    const trimmed = dateTimeInput.trim();
+    if (!trimmed) return '-';
+
+    // 1. Formato puro YYYY-MM-DD -> não há horário gravado, não inventar 21:00
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const [year, month, day] = trimmed.split('-');
+      return `${day}/${month}/${year}`;
+    }
+
+    // 2. Falso UTC da meia-noite gerado por serialização UTC de data pura -> não exibir 21:00!
+    if (/^\d{4}-\d{2}-\d{2}T00:00(:00)?(\.000)?(Z|[+-]\d{2}:\d{2})?$/i.test(trimmed)) {
+      const [datePart] = trimmed.split('T');
+      const [year, month, day] = datePart.split('-');
+      return `${day}/${month}/${year}`;
+    }
+
+    // 3. String de datetime-local sem timezone (ex: "2026-09-07T14:30"):
+    // Como foi digitada no Brasil, os valores de data e hora já estão em horário local de Brasília!
+    const noOffsetMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/);
+    if (noOffsetMatch) {
+      const [, y, m, d, hh, mm] = noOffsetMatch;
+      if (hh === '00' && mm === '00') {
+        return `${d}/${m}/${y}`;
+      }
+      return `${d}/${m}/${y} ${hh}:${mm}`;
+    }
+  }
+
+  try {
+    let d: Date;
+    if (typeof dateTimeInput === 'number') {
+      d = new Date(dateTimeInput);
+    } else if (typeof dateTimeInput === 'string') {
+      const trimmed = dateTimeInput.trim();
+      // Se string sem offset, assume fuso de Brasília (-03:00)
+      if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(trimmed)) {
+        d = new Date(`${trimmed}-03:00`);
+      } else {
+        d = new Date(trimmed);
+      }
+    } else {
+      d = dateTimeInput;
+    }
+
+    if (isNaN(d.getTime())) return typeof dateTimeInput === 'string' ? dateTimeInput : '-';
+
+    const dateStr = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: TIMEZONE_BR,
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(d);
+
+    const timeStr = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: TIMEZONE_BR,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(d);
+
+    // Proteção contra offset UTC que converte 00:00 UTC para 21:00 do dia anterior
+    if (typeof dateTimeInput === 'string') {
+      const m = dateTimeInput.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) {
+        const [, y, mo, da] = m;
+        const expectedDateStr = `${da}/${mo}/${y}`;
+        if (expectedDateStr !== dateStr && (timeStr === '21:00' || timeStr === '20:00' || timeStr === '22:00')) {
+          // O dia voltou para trás devido à conversão de meia-noite UTC! Preserva a data real sem o falso 21:00.
+          return expectedDateStr;
+        }
+      }
+    }
+
+    return `${dateStr} ${timeStr}`;
+  } catch {
+    return String(dateTimeInput);
+  }
+}
+
+export const formatDateTimeSaoPaulo = formatDateTimeBR;
 
 export function getFuelTypeName(fuelType: FuelType | string | undefined | null): string {
   if (!fuelType || fuelType === 'NENHUM') return 'Nenhum (Não se aplica)';

@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import webpush from 'web-push';
 import { createServer as createViteServer } from 'vite';
 import { 
   INITIAL_USERS, INITIAL_VEHICLES, INITIAL_GAS_STATIONS, 
@@ -76,6 +77,14 @@ async function startServer() {
       serverDb['andradeagro_settings_v1'] = INITIAL_SETTINGS;
       seeded = true;
     }
+    if (!serverDb['andradeagro_user_devices_v1']) {
+      serverDb['andradeagro_user_devices_v1'] = [];
+      seeded = true;
+    }
+    if (!serverDb['andradeagro_processed_push_events']) {
+      serverDb['andradeagro_processed_push_events'] = [];
+      seeded = true;
+    }
 
     if (seeded) {
       saveDatabase();
@@ -95,6 +104,251 @@ async function startServer() {
   }
 
   loadDatabase();
+
+  // Web Push / FCM VAPID Configuration Setup
+  let vapidKeys = serverDb['andradeagro_vapid_keys'];
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    vapidKeys = {
+      publicKey: process.env.VAPID_PUBLIC_KEY,
+      privateKey: process.env.VAPID_PRIVATE_KEY
+    };
+  } else if (!vapidKeys || !vapidKeys.publicKey || !vapidKeys.privateKey) {
+    vapidKeys = webpush.generateVAPIDKeys();
+    serverDb['andradeagro_vapid_keys'] = vapidKeys;
+    saveDatabase();
+    console.log('[Push Notification] Generated persistent VAPID keys.');
+  }
+
+  const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:suporte@andradeagro.com.br';
+  try {
+    webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
+    console.log('[Push Notification] Web Push VAPID setup successfully configured.');
+  } catch (err) {
+    console.error('[Push Notification] Error configuring VAPID:', err);
+  }
+
+  // Helper function to dispatch push notifications to authorized devices (ADMIN and MANUTENCAO only)
+  async function dispatchPushToAuthorizedUsers(event: {
+    eventType: 'NEW_ISSUE' | 'NEW_MAINTENANCE' | 'OIL_CHANGE_DUE' | 'TEST';
+    eventId: string;
+    equipmentName: string;
+    description: string;
+    equipmentId?: string;
+    targetUserId?: string;
+  }) {
+    const { eventType, eventId, equipmentName, description, equipmentId, targetUserId } = event;
+
+    // Deduplication check
+    let processedList: string[] = serverDb['andradeagro_processed_push_events'] || [];
+    if (processedList.includes(eventId)) {
+      console.log(`[Push Notification] Event ${eventId} already processed. Deduplicating.`);
+      return { success: false, duplicate: true, sentCount: 0 };
+    }
+
+    processedList.push(eventId);
+    if (processedList.length > 500) {
+      processedList = processedList.slice(-500);
+    }
+    serverDb['andradeagro_processed_push_events'] = processedList;
+    saveDatabase();
+
+    let title = '⚠️ Notificação AndradeAgro';
+    let url = '/';
+
+    if (eventType === 'NEW_ISSUE') {
+      title = '⚠️ Novo problema registrado';
+      url = `/?tab=alerts&issueId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+    } else if (eventType === 'NEW_MAINTENANCE') {
+      title = '🔧 Nova manutenção registrada';
+      url = `/?tab=maintenance&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+    } else if (eventType === 'OIL_CHANGE_DUE') {
+      title = '⚠️ Troca de óleo pendente';
+      url = `/?tab=maintenance&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+    } else if (eventType === 'TEST') {
+      title = '🔔 Teste de Notificação Push';
+      url = '/?tab=settings';
+    }
+
+    const notificationBody = eventType === 'OIL_CHANGE_DUE'
+      ? (description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`)
+      : `${equipmentName}\n${description}`.trim();
+
+    const payload = JSON.stringify({
+      title,
+      body: notificationBody,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: `andradeagro-${eventType.toLowerCase()}-${eventId}`,
+      data: {
+        url,
+        eventId,
+        eventType,
+        equipmentId: equipmentId || '',
+        timestamp: new Date().toISOString()
+      }
+    });
+
+    const devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+    // Strict Role Enforcement: Only ADMIN and MANUTENCAO can receive notifications. FUNCIONARIO is excluded!
+    const targetDevices = devices.filter(d => {
+      if (d.active === false) return false;
+      if (!d.subscription || !d.subscription.endpoint) return false;
+      if (targetUserId) return d.userId === targetUserId;
+      return d.userRole === 'ADMIN' || d.userRole === 'MANUTENCAO';
+    });
+
+    console.log(`[Push Notification] Dispatching ${eventType} (${eventId}) to ${targetDevices.length} authorized devices.`);
+
+    let sentCount = 0;
+    let failedCount = 0;
+    const invalidEndpoints: string[] = [];
+
+    await Promise.all(
+      targetDevices.map(async (device) => {
+        try {
+          await webpush.sendNotification(device.subscription, payload);
+          sentCount++;
+        } catch (err: any) {
+          failedCount++;
+          console.warn(`[Push Notification] Error sending push to device:`, err?.statusCode || err?.message);
+          if (err?.statusCode === 404 || err?.statusCode === 410) {
+            invalidEndpoints.push(device.subscription.endpoint);
+          }
+        }
+      })
+    );
+
+    // Clean up expired tokens
+    if (invalidEndpoints.length > 0) {
+      serverDb['andradeagro_user_devices_v1'] = devices.map(d => {
+        if (d.subscription && invalidEndpoints.includes(d.subscription.endpoint)) {
+          return { ...d, active: false, updatedAt: new Date().toISOString() };
+        }
+        return d;
+      });
+      saveDatabase();
+      console.log(`[Push Notification] Deactivated ${invalidEndpoints.length} expired device subscriptions.`);
+    }
+
+    return {
+      success: true,
+      duplicate: false,
+      sentCount,
+      failedCount,
+      recipientsCount: targetDevices.length
+    };
+  }
+
+
+  // PUSH NOTIFICATIONS API
+  app.get('/api/notifications/vapid-public-key', (req, res) => {
+    res.json({ publicKey: vapidKeys.publicKey });
+  });
+
+  app.get('/api/notifications/devices', (req, res) => {
+    res.json({ devices: serverDb['andradeagro_user_devices_v1'] || [] });
+  });
+
+  app.post('/api/notifications/subscribe', (req, res) => {
+    try {
+      const { userId, userName, userRole, subscription, deviceInfo } = req.body;
+      if (!userId || !subscription || !subscription.endpoint) {
+        return res.status(400).json({ error: 'Invalid subscription payload' });
+      }
+
+      let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+      const existingIndex = devices.findIndex((d: any) => 
+        d.subscription && d.subscription.endpoint === subscription.endpoint
+      );
+
+      const deviceRecord = {
+        id: existingIndex >= 0 ? devices[existingIndex].id : `dev-${userId}-${Date.now()}`,
+        userId,
+        userName: userName || 'Usuário',
+        userRole: userRole || 'FUNCIONARIO',
+        endpoint: subscription.endpoint,
+        subscription,
+        deviceInfo: deviceInfo || {},
+        active: true,
+        updatedAt: new Date().toISOString(),
+        createdAt: existingIndex >= 0 ? devices[existingIndex].createdAt : new Date().toISOString()
+      };
+
+      if (existingIndex >= 0) {
+        devices[existingIndex] = deviceRecord;
+      } else {
+        devices.unshift(deviceRecord);
+      }
+
+      serverDb['andradeagro_user_devices_v1'] = devices;
+      saveDatabase();
+      console.log(`[Push Notification] Registered device subscription for ${userName} (${userRole}).`);
+
+      res.json({ success: true, device: deviceRecord });
+    } catch (err: any) {
+      console.error('[Push Notification] Error saving subscription:', err);
+      res.status(500).json({ error: 'Failed to subscribe device' });
+    }
+  });
+
+  app.post('/api/notifications/unsubscribe', (req, res) => {
+    try {
+      const { endpoint, userId } = req.body;
+      let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+
+      devices = devices.map((d: any) => {
+        if ((endpoint && d.subscription && d.subscription.endpoint === endpoint) || 
+            (userId && !endpoint && d.userId === userId)) {
+          return { ...d, active: false, updatedAt: new Date().toISOString() };
+        }
+        return d;
+      });
+
+      serverDb['andradeagro_user_devices_v1'] = devices;
+      saveDatabase();
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to unsubscribe device' });
+    }
+  });
+
+  app.post('/api/notifications/dispatch-event', async (req, res) => {
+    try {
+      const { eventType, eventId, equipmentName, description, equipmentId } = req.body;
+      if (!eventType || !eventId) {
+        return res.status(400).json({ error: 'eventType and eventId are required' });
+      }
+
+      const result = await dispatchPushToAuthorizedUsers({
+        eventType,
+        eventId,
+        equipmentName: equipmentName || 'Equipamento Agrícola',
+        description: description || 'Evento registrado no sistema.',
+        equipmentId
+      });
+
+      res.json(result);
+    } catch (err: any) {
+      console.error('[Push Notification] Error dispatching event:', err);
+      res.status(500).json({ error: 'Failed to dispatch notification' });
+    }
+  });
+
+  app.post('/api/notifications/test', async (req, res) => {
+    try {
+      const { userId } = req.body;
+      const result = await dispatchPushToAuthorizedUsers({
+        eventType: 'TEST',
+        eventId: `test-${Date.now()}`,
+        equipmentName: 'AndradeAgro',
+        description: 'Notificações push em tempo real ativas e funcionando perfeitamente!',
+        targetUserId: userId
+      });
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to send test push' });
+    }
+  });
 
   // API Routes
   app.get('/api/health', (req, res) => {
@@ -289,6 +543,7 @@ async function startServer() {
     const log = req.body;
     let list = serverDb['andradeagro_maintenance_logs_v1'] || [];
     const index = list.findIndex((m: any) => m.id === log.id);
+    const isNew = index < 0;
     if (index >= 0) {
       list[index] = { ...list[index], ...log };
     } else {
@@ -297,6 +552,16 @@ async function startServer() {
     serverDb['andradeagro_maintenance_logs_v1'] = list;
     dbVersion = Date.now();
     saveDatabase();
+
+    if (isNew) {
+      dispatchPushToAuthorizedUsers({
+        eventType: 'NEW_MAINTENANCE',
+        eventId: log.id || `mnt-${Date.now()}`,
+        equipmentName: log.equipmentName || 'Máquina / Veículo',
+        description: log.description || log.type || 'Manutenção registrada.'
+      }).catch(err => console.error('[Push Notification] Error on maintenance trigger:', err));
+    }
+
     res.json({ success: true, data: log });
   });
 
@@ -381,6 +646,7 @@ async function startServer() {
     const issue = req.body;
     let list = serverDb['andradeagro_machine_issues_v1'] || [];
     const index = list.findIndex((i: any) => i.id === issue.id);
+    const isNew = index < 0;
     if (index >= 0) {
       list[index] = { ...list[index], ...issue };
     } else {
@@ -389,6 +655,16 @@ async function startServer() {
     serverDb['andradeagro_machine_issues_v1'] = list;
     dbVersion = Date.now();
     saveDatabase();
+
+    if (isNew) {
+      dispatchPushToAuthorizedUsers({
+        eventType: 'NEW_ISSUE',
+        eventId: issue.id || `iss-${Date.now()}`,
+        equipmentName: issue.equipmentName || 'Máquina Agrícola',
+        description: issue.description || 'Problema reportado.'
+      }).catch(err => console.error('[Push Notification] Error on issue trigger:', err));
+    }
+
     res.json({ success: true, data: issue });
   });
 

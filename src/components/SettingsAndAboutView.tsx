@@ -8,6 +8,7 @@ import {
   resetSystemData, getCentralTanks, getTankStatus, updateCentralTank, getTankMovements 
 } from '../utils/storage';
 import { EditCentralTankModal } from './EditCentralTankModal';
+import { PushNotificationSettingsCard } from './PushNotificationSettingsCard';
 
 interface SettingsAndAboutViewProps {
   settings: SystemSettings;
@@ -711,6 +712,13 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
 
         </div>
       </div>
+
+      {/* PUSH NOTIFICATIONS REAL-TIME (ADMIN & MANUTENCAO) */}
+      {(currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO') && (
+        <div className="pt-2">
+          <PushNotificationSettingsCard currentUser={currentUser} darkMode={darkMode} />
+        </div>
+      )}
 
       {/* SECTION 2: REGRAS OPERACIONAIS & INFORMAÇÕES DA EMPRESA */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">

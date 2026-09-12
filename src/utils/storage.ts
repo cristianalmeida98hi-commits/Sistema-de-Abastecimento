@@ -16,6 +16,12 @@ import {
 import { 
   hashPassword, verifyPassword, canManageUsers, sanitizeUserForClient 
 } from './security';
+import { 
+  dispatchPushNotificationEvent, cleanupPushOnLogout 
+} from './pushNotifications';
+import { 
+  getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO 
+} from './calculations';
 
 const SESSION_KEYS = {
   SESSION_USER: 'andradeagro_session_user_v1',
@@ -677,6 +683,7 @@ export function logoutUser(): void {
     const user = getCurrentUser();
     if (user) {
       logAuditEvent('LOGOUT', 'Autenticação', `Usuário ${user.name} saiu do sistema.`);
+      cleanupPushOnLogout(user).catch(() => {});
     }
     if (typeof window !== 'undefined') {
       sessionStorage.removeItem(SESSION_KEYS.SESSION_USER);
@@ -1011,10 +1018,18 @@ export function logAuditEvent(action: AuditLog['action'], entity: string, detail
 
 // Mutators - All updating Firebase Firestore directly
 export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promise<FuelLog> {
+  let safeDateTime = log.dateTime;
+  if (!safeDateTime) {
+    safeDateTime = getNowSaoPauloISO();
+  } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(safeDateTime.trim())) {
+    safeDateTime = `${safeDateTime.trim()}-03:00`;
+  }
+
   const newLog: FuelLog = {
     ...log,
+    dateTime: safeDateTime,
     id: `log-${Date.now()}`,
-    createdAt: new Date().toISOString()
+    createdAt: getNowSaoPauloISO()
   };
 
   const cleanedLog = cleanUndefined(newLog);
@@ -1044,7 +1059,7 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
 
       await addTankMovement({
         tankId: activeTankId,
-        dateTime: log.dateTime || new Date().toISOString(),
+        dateTime: safeDateTime || getNowSaoPauloISO(),
         type: 'SAIDA_ABASTECIMENTO',
         liters: log.liters,
         previousStock: prevStock,
@@ -1099,6 +1114,7 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
 
     logAuditEvent('CRIAR', 'Abastecimento', `Registrou ${newLog.liters}L em ${newLog.equipmentName} (${newLog.equipmentPlateOrCode}) via ${newLog.gasStationName}.`);
     notifyDataUpdated();
+    checkAutomatedAlerts(true);
     return cleanedLog;
   } catch (err) {
     console.error('[addFuelLog Firestore Error]', err);
@@ -1259,6 +1275,7 @@ export async function updateVehicle(id: string, updatedFields: Partial<Vehicle>)
   try {
     await setDoc(doc(db, 'vehicles', id), cleaned, { merge: true });
     logAuditEvent('EDITAR', 'Equipamento', `Atualizou equipamento ID ${id}.`);
+    checkAutomatedAlerts(true);
   } catch (err) {
     console.error(`[Firestore Error updating vehicle ${id}]`, err);
     throw err;
@@ -1275,8 +1292,13 @@ export async function deleteVehicle(id: string): Promise<void> {
 
 // Maintenance Mutators
 export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<MaintenanceLog> {
+  const safeDate = m.date || getTodayDateSaoPaulo();
+  const safeDateTime = m.dateTime || createTimestampForDateSaoPaulo(safeDate);
   const newMnt: MaintenanceLog = {
     ...m,
+    date: safeDate,
+    dateTime: safeDateTime,
+    createdAt: (m as any).createdAt || getNowSaoPauloISO(),
     id: `mnt-${Date.now()}`
   };
   const cleaned = cleanUndefined(newMnt);
@@ -1408,11 +1430,27 @@ export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<Mai
 
   logAuditEvent('CRIAR', 'Manutenção', `Agendou/Registrou manutenção "${m.title}" em ${m.equipmentName}.`);
   checkAutomatedAlerts();
+
+  // Dispatch real push notification to authorized users (ADMIN and MANUTENCAO)
+  const equipName = targetVehicle ? `${targetVehicle.model} (${targetVehicle.licensePlate || targetVehicle.patrimonyCode || targetVehicle.id})` : (m.equipmentName || m.equipmentId);
+  const shortDesc = m.description || (m.type === 'TROCA_OLEO' ? 'Troca de óleo realizada.' : (m.type === 'REVISAO' ? 'Manutenção preventiva/revisão realizada.' : 'Manutenção realizada.'));
+  dispatchPushNotificationEvent({
+    eventType: 'NEW_MAINTENANCE',
+    eventId: cleaned.id,
+    equipmentName: equipName,
+    equipmentId: cleaned.equipmentId,
+    description: shortDesc
+  }).catch(() => {});
+
   return cleaned;
 }
 
 export async function updateMaintenance(id: string, fields: Partial<MaintenanceLog>): Promise<void> {
-  const cleaned = cleanUndefined(fields);
+  const toUpdate: Partial<MaintenanceLog> = { ...fields };
+  if (toUpdate.date && !toUpdate.dateTime) {
+    toUpdate.dateTime = createTimestampForDateSaoPaulo(toUpdate.date);
+  }
+  const cleaned = cleanUndefined(toUpdate);
   cache.maintenanceLogs = cache.maintenanceLogs.map(m => m.id === id ? { ...m, ...cleaned } : m);
   notifyDataUpdated();
 
@@ -1432,10 +1470,12 @@ export async function deleteMaintenance(id: string): Promise<void> {
 
 // Machine Issue Mutators
 export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' | 'status'>): Promise<MachineIssue> {
+  const currentDateTimeISO = getNowSaoPauloISO();
+  const currentDateBR = getTodayDateSaoPaulo();
   const newIssue: MachineIssue = {
     ...issueData,
     id: `iss-${Date.now()}`,
-    dateTime: new Date().toISOString(),
+    dateTime: currentDateTimeISO,
     status: 'ABERTO'
   };
   const cleaned = cleanUndefined(newIssue);
@@ -1449,7 +1489,7 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
     description: `Operador ${newIssue.reportedByUserName} relatou: "${newIssue.description}"`,
     equipmentId: newIssue.equipmentId,
     equipmentName: newIssue.equipmentName,
-    date: newIssue.dateTime.slice(0, 10),
+    date: currentDateBR,
     resolved: false
   });
   cache.alerts = [newAlert, ...cache.alerts];
@@ -1459,6 +1499,16 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
   await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
 
   logAuditEvent('CRIAR', 'Problema', `Relatou problema em ${newIssue.equipmentName}: ${newIssue.description}`);
+
+  // Dispatch real push notification to authorized users (ADMIN and MANUTENCAO)
+  dispatchPushNotificationEvent({
+    eventType: 'NEW_ISSUE',
+    eventId: cleaned.id,
+    equipmentName: newIssue.equipmentName,
+    equipmentId: newIssue.equipmentId,
+    description: newIssue.description || 'Problema informado pelo operador.'
+  }).catch(() => {});
+
   return cleaned;
 }
 
@@ -1492,9 +1542,10 @@ export async function recordPreventiveService(
   const interval = target?.intervalHours || vehicle?.maintenanceIntervalHours || 300;
 
   if (target) {
+    const todaySaoPaulo = getTodayDateSaoPaulo();
     const updatedItem: PreventiveMaintenanceItem = cleanUndefined({
       ...target,
-      lastServiceDate: new Date().toISOString().slice(0, 10),
+      lastServiceDate: todaySaoPaulo,
       lastServiceHourmeter: currentHourmeter,
       nextScheduledHourmeter: currentHourmeter + interval,
       notes: notes || target.notes
@@ -1510,7 +1561,8 @@ export async function recordPreventiveService(
       equipmentId,
       equipmentName: vehicle?.model || target.itemName,
       equipmentPlateOrCode: vehicle?.patrimonyCode || vehicle?.licensePlate || equipmentId,
-      date: new Date().toISOString().slice(0, 10),
+      date: todaySaoPaulo,
+      dateTime: createTimestampForDateSaoPaulo(todaySaoPaulo),
       type: itemKey.includes('OLEO') ? 'TROCA_OLEO' : (itemKey.includes('FILTRO') ? 'TROCA_FILTROS' : 'REVISAO'),
       title: `Manutenção Preventiva: ${target.itemName}`,
       description: `Serviço realizado no horímetro ${currentHourmeter}h. Próxima programada com +${interval}h (em ${currentHourmeter + interval}h).`,
@@ -1742,7 +1794,7 @@ export async function recordOilChange(
     isKm?: boolean;
   }
 ): Promise<void> {
-  const serviceDate = date || new Date().toISOString().slice(0, 10);
+  const serviceDate = date || getTodayDateSaoPaulo();
   const vehicles = getVehicles();
   const targetVehicle = vehicles.find(v => v.id === equipmentId);
   const isKm = extra?.isKm ?? (targetVehicle?.category === 'VEICULO' || targetVehicle?.maintenanceControlType === 'QUILOMETRAGEM');
@@ -1854,6 +1906,7 @@ export async function recordOilChange(
     equipmentName: targetVehicle?.model || (isKm ? 'Veículo' : 'Máquina Agrícola'),
     equipmentPlateOrCode: targetVehicle?.licensePlate || targetVehicle?.patrimonyCode || equipmentId,
     date: serviceDate,
+    dateTime: createTimestampForDateSaoPaulo(serviceDate),
     type: 'TROCA_OLEO',
     title: `Troca de Óleo do Motor (${recordedMeter.toLocaleString('pt-BR')} ${unitLabel})`,
     description: desc,
@@ -1956,7 +2009,7 @@ export async function setOilChangeConfigAndReference(
 }
 
 // Automated Intelligence Checker for Alerts (Multi-tank & Multi-interval maintenance)
-export function checkAutomatedAlerts() {
+export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
   try {
     const settings = getSettings();
     if (!settings.autoAlertsEnabled) return;
@@ -2068,6 +2121,17 @@ export function checkAutomatedAlerts() {
               });
               cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== mntAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'))];
               setDoc(doc(db, 'alerts', mntAlertId), alertObj).catch(console.error);
+
+              if (triggerPushOnNewAlert) {
+                const cycleEventId = `oil-alert-${v.id}-${nextMnt}`;
+                dispatchPushNotificationEvent({
+                  eventType: 'OIL_CHANGE_DUE',
+                  eventId: cycleEventId,
+                  equipmentName: v.model,
+                  equipmentId: v.id,
+                  description: `O veículo ${v.model} precisa de atenção para troca de óleo.`
+                }).catch(() => {});
+              }
             } else if (!existingMntAlert.resolved && existingMntAlert.description !== desc) {
               const updated = cleanUndefined({
                 ...existingMntAlert,
@@ -2174,6 +2238,17 @@ export function checkAutomatedAlerts() {
               });
               cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId && !(a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')))];
               setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
+
+              if (triggerPushOnNewAlert) {
+                const cycleEventId = `oil-alert-${v.id}-${nextKm}`;
+                dispatchPushNotificationEvent({
+                  eventType: 'OIL_CHANGE_DUE',
+                  eventId: cycleEventId,
+                  equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
+                  equipmentId: v.id,
+                  description: `O veículo ${v.model} precisa de atenção para troca de óleo.`
+                }).catch(() => {});
+              }
             } else if (!existingKmAlert.resolved && existingKmAlert.description !== desc) {
               const updated = cleanUndefined({
                 ...existingKmAlert,

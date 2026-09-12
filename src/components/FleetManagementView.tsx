@@ -4,7 +4,7 @@ import {
   AlertTriangle, Clock, Calendar, Shield, X, Edit3, Trash2, Printer, Eye, Droplet, Layers, Sparkles
 } from 'lucide-react';
 import { Vehicle, EquipmentCategory, FuelType, Sector, User, MaintenanceLog, FuelLog, OperationalCapacity, MachineSubtype, canEditSystemData } from '../types';
-import { formatCurrency, getFuelTypeName, getSectorName, getCategoryLabel } from '../utils/calculations';
+import { formatCurrency, getFuelTypeName, getSectorName, getCategoryLabel, getTodayDateSaoPaulo } from '../utils/calculations';
 import { MachineCapacitiesEditor } from './MachineCapacitiesEditor';
 import { getConsolidatedCapacities, getCapacityTypeEmoji, getMachineSubtypeName } from '../utils/capacities';
 import { calculateOilChangeStatus } from '../utils/maintenanceCalculations';
@@ -85,7 +85,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
   // Quick Oil Change Modal State
   const [oilChangeVehicle, setOilChangeVehicle] = useState<Vehicle | null>(null);
   const [oilHourmeter, setOilHourmeter] = useState<number>(0);
-  const [oilDate, setOilDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [oilDate, setOilDate] = useState<string>(() => getTodayDateSaoPaulo());
   const [oilCost, setOilCost] = useState<number>(0);
   const [oilNotes, setOilNotes] = useState<string>('');
   const [oilType, setOilType] = useState<string>('15W40 Mineral');
@@ -113,7 +113,7 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
       setFiltersReplaced('Filtro de Óleo Lubrificante + Filtro de Combustível');
     }
 
-    setOilDate(new Date().toISOString().slice(0, 10));
+    setOilDate(getTodayDateSaoPaulo());
     setOilCost(0);
     setOilPerformedBy(currentUser.name || 'Mecânico Responsável');
     setOilSupplier('Oficina Interna AndradeAgro');

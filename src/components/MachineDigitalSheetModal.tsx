@@ -15,16 +15,20 @@ import {
   PreventiveMaintenanceItem, PreventiveItemKey, User, MaintenanceType, canEditSystemData,
   SmartAlert
 } from '../types';
-import { formatCurrency, getFuelTypeName, getSectorName } from '../utils/calculations';
+import { 
+  formatCurrency, getFuelTypeName, getSectorName, 
+  formatDateBR, formatDateTimeBR, getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO 
+} from '../utils/calculations';
 import { getConsolidatedCapacities, getCapacityTypeEmoji, getMachineSubtypeName } from '../utils/capacities';
 import { calculateOilChangeStatus, isOilMaintenanceService } from '../utils/maintenanceCalculations';
-import { recordOilChange, setOilChangeConfigAndReference } from '../utils/storage';
+import { recordOilChange, setOilChangeConfigAndReference, getVehicles } from '../utils/storage';
 import { ReportProblemModal } from './ReportProblemModal';
 
 interface MachineDigitalSheetModalProps {
   isOpen: boolean;
   onClose: () => void;
   vehicle: Vehicle;
+  vehicles?: Vehicle[];
   fuelLogs: FuelLog[];
   maintenanceLogs: MaintenanceLog[];
   machineIssues: MachineIssue[];
@@ -43,10 +47,15 @@ interface MachineDigitalSheetModalProps {
   darkMode?: boolean;
 }
 
-export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModalProps> = ({
+interface MachineDigitalSheetInnerProps extends Omit<MachineDigitalSheetModalProps, 'vehicle'> {
+  vehicle: Vehicle;
+}
+
+const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
   isOpen,
   onClose,
   vehicle,
+  vehicles = [],
   fuelLogs = [],
   maintenanceLogs = [],
   machineIssues = [],
@@ -64,8 +73,6 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
   initialTab = 'HISTORY',
   darkMode = true
 }) => {
-  if (!isOpen || !vehicle) return null;
-
   const canEdit = canEditSystemData(currentUser?.role);
 
   const [activeTab, setActiveTab] = useState<'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES'>(initialTab);
@@ -117,7 +124,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
 
   const [isDirectOilChangeOpen, setIsDirectOilChangeOpen] = useState(false);
   const [directOilHourmeter, setDirectOilHourmeter] = useState<number>(vehicle.currentHourmeter || 0);
-  const [directOilDate, setDirectOilDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [directOilDate, setDirectOilDate] = useState<string>(() => getTodayDateSaoPaulo());
   const [directOilType, setDirectOilType] = useState<string>('15W40 Mineral');
   const [directOilLiters, setDirectOilLiters] = useState<number>(20);
   const [directOilFilters, setDirectOilFilters] = useState<string>('Filtro de Óleo Lubrificante + Filtro de Combustível');
@@ -132,7 +139,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
   const [editingMntId, setEditingMntId] = useState<string | null>(null);
   const [mntType, setMntType] = useState<MaintenanceType>('TROCA_OLEO');
   const [mntTitle, setMntTitle] = useState('');
-  const [mntDate, setMntDate] = useState(new Date().toISOString().slice(0, 10));
+  const [mntDate, setMntDate] = useState(() => getTodayDateSaoPaulo());
   const [mntMeter, setMntMeter] = useState<number>(vehicle.currentHourmeter || vehicle.currentKm || 0);
   const [mntDesc, setMntDesc] = useState('');
   const [mntPerformedBy, setMntPerformedBy] = useState(currentUser?.name || '');
@@ -174,7 +181,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
   }, [preventiveItems, vehicle.id]);
 
   // Monthly KPIs & Accumulated Costs
-  const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const currentMonth = getTodayDateSaoPaulo().slice(0, 7); // YYYY-MM
   const monthFuelLogs = useMemo(() => {
     return machineFuelLogs.filter(f => f.dateTime.startsWith(currentMonth));
   }, [machineFuelLogs, currentMonth]);
@@ -220,7 +227,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
       .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime())
       .slice(-10)
       .map(f => ({
-        date: new Date(f.dateTime).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        date: formatDateBR(f.dateTime).slice(0, 5),
         litros: f.liters,
         horimetro: f.hourmeterAtFueling || f.odometerAtFueling || 0,
         custo: f.totalValue
@@ -232,7 +239,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
       .slice(-10)
       .map(m => ({
-        date: new Date(m.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+        date: formatDateBR(m.date).slice(0, 5),
         custo: m.cost,
         horimetro: m.kmOrHourAtService,
         title: m.title
@@ -412,9 +419,10 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
     });
 
     machineMaintenanceLogs.forEach(m => {
+      const eventDate = m.dateTime || (m as any).createdAt || m.date;
       events.push({
         id: `m-${m.id}`,
-        date: m.date,
+        date: eventDate,
         type: 'MAINTENANCE',
         title: `Manutenção: ${m.title}`,
         description: `Horímetro/KM: ${m.kmOrHourAtService}h • Serv: ${m.description} (${m.supplierOrWorkshop})`,
@@ -437,7 +445,25 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
       });
     });
 
-    return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return events.sort((a, b) => {
+      const parseTime = (str: string) => {
+        if (!str) return 0;
+        const trimmed = str.trim();
+        // Se for data pura YYYY-MM-DD, trata ao meio-dia para ordenação estável
+        if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+          const [y, m, d] = trimmed.split('-').map(Number);
+          return new Date(y, m - 1, d, 12, 0, 0).getTime();
+        }
+        // Se for string ISO sem offset (ex: 2026-09-07T14:30), adiciona o fuso de Brasília -03:00
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(trimmed)) {
+          const t = new Date(`${trimmed}-03:00`).getTime();
+          if (!isNaN(t)) return t;
+        }
+        const t = new Date(trimmed).getTime();
+        return isNaN(t) ? 0 : t;
+      };
+      return parseTime(b.date) - parseTime(a.date);
+    });
   }, [machineFuelLogs, machineMaintenanceLogs, machineReportedIssues]);
 
   // Preventive service submit
@@ -518,7 +544,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
     setEditingMntId(null);
     setMntType('TROCA_OLEO');
     setMntTitle('');
-    setMntDate(new Date().toISOString().slice(0, 10));
+    setMntDate(getTodayDateSaoPaulo());
     setMntMeter(vehicle.currentHourmeter || vehicle.currentKm || 0);
     setMntDesc('');
     setMntPerformedBy(currentUser?.name || '');
@@ -552,12 +578,15 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
       return;
     }
 
+    const safeDateTime = createTimestampForDateSaoPaulo(mntDate);
+
     if (editingMntId) {
       if (onUpdateMaintenance) {
         onUpdateMaintenance(editingMntId, {
           type: mntType,
           title: mntTitle,
           date: mntDate,
+          dateTime: safeDateTime,
           kmOrHourAtService: mntMeter,
           description: mntDesc,
           performedBy: mntPerformedBy,
@@ -580,6 +609,8 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
           equipmentName: `${vehicle.model} (${vehicle.patrimonyCode || vehicle.licensePlate || 'MÁQUINA'})`,
           equipmentPlateOrCode: vehicle.patrimonyCode || vehicle.licensePlate || vehicle.id,
           date: mntDate,
+          dateTime: safeDateTime,
+          createdAt: getNowSaoPauloISO(),
           type: mntType,
           title: mntTitle,
           description: mntDesc,
@@ -1085,7 +1116,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                             </span>
                             {oilStatus.lastDate && (
                               <span className="text-[9px] text-slate-400 block mt-0.5">
-                                {new Date(oilStatus.lastDate).toLocaleDateString('pt-BR')}
+                                {formatDateBR(oilStatus.lastDate)}
                               </span>
                             )}
                           </div>
@@ -1171,7 +1202,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                               onClick={() => {
                                 const isKm = oilStatus.unit === 'km' || vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
                                 setDirectOilHourmeter(isKm ? (vehicle.currentKm || 0) : (vehicle.currentHourmeter || 0));
-                                setDirectOilDate(new Date().toISOString().slice(0, 10));
+                                setDirectOilDate(getTodayDateSaoPaulo());
                                 setDirectOilPerformedBy(currentUser?.name || '');
                                 setIsDirectOilChangeOpen(true);
                               }}
@@ -1689,7 +1720,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                         <div className="flex justify-between text-[11px]">
                           <span className="text-slate-500 font-medium">Última Troca / Serviço:</span>
                           <strong className="text-slate-800 dark:text-emerald-200">
-                            {item.lastServiceHourmeter}h ({item.lastServiceDate ? new Date(item.lastServiceDate).toLocaleDateString('pt-BR') : 'Sem data'})
+                            {item.lastServiceHourmeter}h ({item.lastServiceDate ? formatDateBR(item.lastServiceDate) : 'Sem data'})
                           </strong>
                         </div>
                         <div className="flex justify-between text-[11px]">
@@ -1835,7 +1866,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                             </span>
                           </div>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-emerald-900/50 text-slate-600 dark:text-emerald-300">
-                            {new Date(m.date).toLocaleDateString('pt-BR')}
+                            {m.dateTime ? formatDateTimeBR(m.dateTime) : formatDateBR(m.date)}
                           </span>
                         </div>
 
@@ -1906,7 +1937,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
 
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] text-slate-400 font-bold">
-                              🗓️ {new Date(log.date).toLocaleDateString('pt-BR')}
+                              🗓️ {log.dateTime ? formatDateTimeBR(log.dateTime) : formatDateBR(log.date)}
                             </span>
 
                             {/* Maintenance role controls */}
@@ -2002,7 +2033,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                             {item.title}
                           </span>
                           <span className="text-[10px] font-bold text-slate-400">
-                            {new Date(item.date).toLocaleDateString('pt-BR')} {new Date(item.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                            {formatDateTimeBR(item.date)}
                           </span>
                         </div>
 
@@ -2096,7 +2127,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                       <span>Último Abastecimento</span>
                     </span>
                     <span className="text-[10px] text-slate-500">
-                      {lastFueling ? new Date(lastFueling.dateTime).toLocaleDateString('pt-BR') : 'Sem registros'}
+                      {lastFueling ? formatDateTimeBR(lastFueling.dateTime) : 'Sem registros'}
                     </span>
                   </div>
                   {lastFueling ? (
@@ -2117,7 +2148,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                       <span>Última Manutenção</span>
                     </span>
                     <span className="text-[10px] text-slate-500">
-                      {lastMaintenance ? new Date(lastMaintenance.date).toLocaleDateString('pt-BR') : 'Sem registros'}
+                      {lastMaintenance ? formatDateBR(lastMaintenance.date) : 'Sem registros'}
                     </span>
                   </div>
                   {lastMaintenance ? (
@@ -2284,7 +2315,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                           </div>
 
                           <span className="text-[10px] text-slate-400">
-                            {new Date(iss.dateTime).toLocaleDateString('pt-BR')} {new Date(iss.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                            {formatDateTimeBR(iss.dateTime)}
                           </span>
                         </div>
 
@@ -2315,7 +2346,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                           <p className="text-[10px] text-emerald-600 dark:text-emerald-300 font-bold">
                             {isAutoResolvedByOil
                               ? 'Resolvido automaticamente: Troca de óleo realizada com sucesso para este veículo.'
-                              : `Resolvido por ${iss.resolvedBy || 'Gestor'} em ${iss.resolvedAt ? new Date(iss.resolvedAt).toLocaleDateString('pt-BR') : ''}`}
+                              : `Resolvido por ${iss.resolvedBy || 'Gestor'} em ${iss.resolvedAt ? formatDateTimeBR(iss.resolvedAt) : ''}`}
                           </p>
                         )}
                       </div>
@@ -2599,7 +2630,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                         Última Troca Registrada
                       </span>
                       <strong className="text-xs">
-                        {oilSt.lastDate ? new Date(oilSt.lastDate).toLocaleDateString('pt-BR') : 'Não registrada'} ({oilSt.lastMeter.toLocaleString('pt-BR')} {oilSt.unit})
+                        {oilSt.lastDate ? formatDateBR(oilSt.lastDate) : 'Não registrada'} ({oilSt.lastMeter.toLocaleString('pt-BR')} {oilSt.unit})
                       </strong>
                     </div>
 
@@ -2629,7 +2660,7 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
                       setSelectedAlertDetail(null);
                       const isKm = vehicle.category === 'VEICULO' || vehicle.maintenanceControlType === 'QUILOMETRAGEM';
                       setDirectOilHourmeter(isKm ? (vehicle.currentKm || 0) : (vehicle.currentHourmeter || 0));
-                      setDirectOilDate(new Date().toISOString().slice(0, 10));
+                      setDirectOilDate(getTodayDateSaoPaulo());
                       setDirectOilPerformedBy(currentUser?.name || '');
                       setIsDirectOilChangeOpen(true);
                     }}
@@ -2660,6 +2691,32 @@ export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModa
       </div>
     </div>
   );
+};
+
+export const MachineDigitalSheetModalComponent: React.FC<MachineDigitalSheetModalProps> = (props) => {
+  const { isOpen, vehicle: propVehicle, vehicles = [] } = props;
+  const [dataVersion, setDataVersion] = useState(0);
+
+  useEffect(() => {
+    const handleUpdate = () => setDataVersion(v => v + 1);
+    window.addEventListener('andradeagro_data_updated', handleUpdate);
+    return () => window.removeEventListener('andradeagro_data_updated', handleUpdate);
+  }, []);
+
+  const vehicle = useMemo(() => {
+    if (!propVehicle) return propVehicle;
+    if (vehicles && vehicles.length > 0) {
+      const found = vehicles.find(v => v.id === propVehicle.id);
+      if (found) return found;
+    }
+    const fromCache = getVehicles().find(v => v.id === propVehicle.id);
+    if (fromCache) return fromCache;
+    return propVehicle;
+  }, [propVehicle, vehicles, dataVersion]);
+
+  if (!isOpen || !vehicle) return null;
+
+  return <MachineDigitalSheetInner {...props} vehicle={vehicle} />;
 };
 
 export const MachineDigitalSheetModal = React.memo(MachineDigitalSheetModalComponent);

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'andradeagro-shell-v2';
+const CACHE_NAME = 'andradeagro-shell-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -33,6 +33,12 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
 
@@ -40,6 +46,21 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
+
+  // CRITICAL: Never cache Vite dev server modules, hot reload, node_modules, or dev hostnames
+  if (
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.hostname.includes('ais-dev-') ||
+    url.pathname.startsWith('/@') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.searchParams.has('v') ||
+    url.searchParams.has('t') ||
+    url.pathname.includes('hot-update')
+  ) {
+    return; // Pass through directly to network without caching
+  }
 
   // Ignore Firebase, Firestore, external APIs, and WebSocket streams from SW cache
   if (
@@ -53,7 +74,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For HTML navigation requests (opening the app)
+  // For HTML navigation requests (opening the app) - Always Network First
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
@@ -75,20 +96,92 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For static assets (JS, CSS, images, fonts)
+  // For static assets - Network First with Cache Fallback to avoid stale JS versions
   event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      const fetchPromise = fetch(request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const copy = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          }
-          return networkResponse;
-        })
-        .catch(() => cachedResponse);
+    fetch(request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const copy = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        }
+        return networkResponse;
+      })
+      .catch(async () => {
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        return new Response('Offline resource not available', { status: 503, statusText: 'Service Unavailable' });
+      })
+  );
+});
 
-      return cachedResponse || fetchPromise;
+// ============================================================================
+// PUSH NOTIFICATIONS (Firebase Cloud Messaging & Web Push)
+// ============================================================================
+self.addEventListener('push', (event) => {
+  let payload = {
+    title: '⚠️ Notificação AndradeAgro',
+    body: 'Novo evento registrado no sistema.',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    data: { url: '/' }
+  };
+
+  if (event.data) {
+    try {
+      const json = event.data.json();
+      payload = { ...payload, ...json };
+    } catch {
+      payload.body = event.data.text() || payload.body;
+    }
+  }
+
+  // Extract from both standard Web Push and Firebase Cloud Messaging structure
+  const notificationTitle = payload.title || (payload.notification && payload.notification.title) || '⚠️ Notificação AndradeAgro';
+  const notificationBody = payload.body || (payload.notification && payload.notification.body) || (payload.data && payload.data.body) || '';
+  const targetUrl = (payload.data && payload.data.url) || payload.url || (payload.notification && payload.notification.click_action) || '/';
+
+  const notificationOptions = {
+    body: notificationBody,
+    icon: payload.icon || (payload.notification && payload.notification.icon) || '/icon-192.png',
+    badge: payload.badge || '/icon-192.png',
+    data: {
+      url: targetUrl,
+      ...(payload.data || {})
+    },
+    vibrate: [200, 100, 200],
+    tag: payload.tag || (payload.data && payload.data.eventId) || ('andradeagro-event-' + Date.now()),
+    renotify: true,
+    requireInteraction: false
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(notificationTitle, notificationOptions)
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const targetUrl = (event.notification.data && event.notification.data.url)
+    ? event.notification.data.url
+    : '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // If a tab is already open, focus it and navigate
+      for (const client of clientList) {
+        if (client.url && 'focus' in client) {
+          if ('navigate' in client) {
+            client.navigate(targetUrl);
+          }
+          return client.focus();
+        }
+      }
+      // Otherwise open a new window
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
     })
   );
 });
+

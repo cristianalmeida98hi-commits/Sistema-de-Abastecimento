@@ -41,6 +41,22 @@
         "date": { "type": "string" }
       },
       "required": ["id", "vehicleId", "liters"]
+    },
+    "UserDevice": {
+      "title": "UserDevice",
+      "description": "FCM and Web Push device registration for push notifications",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "token": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "token"]
     }
   },
   "firestore": {
@@ -95,6 +111,10 @@
     "settings/{settingId}": {
       "description": "System configuration documents",
       "schema": "Settings"
+    },
+    "user_devices/{deviceId}": {
+      "description": "Authorized user devices for FCM push notifications",
+      "schema": { "$ref": "#/entities/UserDevice" }
     }
   }
 }

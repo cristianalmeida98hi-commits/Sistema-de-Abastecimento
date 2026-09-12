@@ -283,6 +283,38 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashCheck);
   }, [vehicles, storageStatus]);
 
+  // 6. Listen for Push Notification Deep Link parameters (e.g. ?tab=alerts or ?tab=maintenance)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+    const equipmentIdParam = urlParams.get('equipmentId');
+
+    if (tabParam) {
+      if (currentUser) {
+        if (currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO') {
+          if (['alerts', 'maintenance', 'dashboard', 'settings', 'fleet'].includes(tabParam)) {
+            setActiveTab(tabParam);
+          }
+          if (equipmentIdParam) {
+            const currentVehicles = getVehicles();
+            const found = currentVehicles.find(v => v.id === equipmentIdParam || v.licensePlate === equipmentIdParam);
+            if (found) {
+              setSelectedDigitalSheetVehicle(found);
+            }
+          }
+        }
+        // Clean query param without full page reload
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+      } else {
+        sessionStorage.setItem('andradeagro_post_login_tab', tabParam);
+        if (equipmentIdParam) {
+          sessionStorage.setItem('andradeagro_post_login_equipment_id', equipmentIdParam);
+        }
+      }
+    }
+  }, [currentUser]);
+
   // Handlers
   const handleLogout = () => {
     logoutUser();
@@ -292,10 +324,26 @@ export default function App() {
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
     setLoginSuccessMessage(null);
-    if (user.role === 'FUNCIONARIO') {
+
+    const postLoginTab = typeof window !== 'undefined' ? sessionStorage.getItem('andradeagro_post_login_tab') : null;
+    const postLoginEquipmentId = typeof window !== 'undefined' ? sessionStorage.getItem('andradeagro_post_login_equipment_id') : null;
+
+    if (postLoginTab && (user.role === 'ADMIN' || user.role === 'MANUTENCAO')) {
+      sessionStorage.removeItem('andradeagro_post_login_tab');
+      setActiveTab(postLoginTab);
+    } else if (user.role === 'FUNCIONARIO') {
       setActiveTab('operator-fueling');
     } else {
       setActiveTab('dashboard');
+    }
+
+    if (postLoginEquipmentId && (user.role === 'ADMIN' || user.role === 'MANUTENCAO')) {
+      sessionStorage.removeItem('andradeagro_post_login_equipment_id');
+      const currentVehicles = getVehicles();
+      const found = currentVehicles.find(v => v.id === postLoginEquipmentId || v.licensePlate === postLoginEquipmentId);
+      if (found) {
+        setSelectedDigitalSheetVehicle(found);
+      }
     }
 
     if (typeof window !== 'undefined') {
@@ -594,9 +642,9 @@ export default function App() {
                 currentUser={currentUser}
                 maintenanceLogs={maintenanceLogs}
                 fuelLogs={fuelLogs}
-                onAddVehicle={(v) => addVehicle(v)}
-                onUpdateVehicle={(id, fields) => updateVehicle(id, fields)}
-                onDeleteVehicle={(id) => deleteVehicle(id)}
+                onAddVehicle={(v) => { addVehicle(v); refreshState(); }}
+                onUpdateVehicle={async (id, fields) => { await updateVehicle(id, fields); refreshState(); }}
+                onDeleteVehicle={(id) => { deleteVehicle(id); refreshState(); }}
                 onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
                 onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
                 darkMode={darkMode}
@@ -746,6 +794,7 @@ export default function App() {
               }
             }}
             vehicle={vehicles.find(v => v.id === selectedDigitalSheetVehicle.id) || selectedDigitalSheetVehicle}
+            vehicles={vehicles}
             fuelLogs={fuelLogs}
             maintenanceLogs={maintenanceLogs}
             machineIssues={machineIssues}

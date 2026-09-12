@@ -43,6 +43,9 @@ service cloud.firestore {
     match /system/{document=**} {
       allow read, write: if true;
     }
+    match /user_devices/{document=**} {
+      allow read, write: if true;
+    }
     match /{document=**} {
       allow read, write: if true;
     }

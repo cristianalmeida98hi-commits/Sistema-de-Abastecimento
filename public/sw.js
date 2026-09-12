@@ -1,4 +1,4 @@
-const CACHE_NAME = 'andradeagro-shell-v4';
+const CACHE_NAME = 'andradeagro-shell-v5';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -155,7 +155,13 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification(notificationTitle, notificationOptions)
+    self.registration.showNotification(notificationTitle, notificationOptions).catch((err) => {
+      console.warn('[SW] Rich notification failed, trying basic notification:', err);
+      return self.registration.showNotification(notificationTitle, {
+        body: notificationBody,
+        icon: '/icon-192.png'
+      });
+    })
   );
 });
 

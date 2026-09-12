@@ -106,6 +106,11 @@ async function startServer() {
   loadDatabase();
 
   // Web Push / FCM VAPID Configuration Setup
+  const DEFAULT_STATIC_VAPID_KEYS = {
+    publicKey: 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s',
+    privateKey: 'jIzx37tfbmK5NxYiLQYbcze3XSBg9Il6kBLeDW6zQxA'
+  };
+
   let vapidKeys = serverDb['andradeagro_vapid_keys'];
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
     vapidKeys = {
@@ -113,10 +118,10 @@ async function startServer() {
       privateKey: process.env.VAPID_PRIVATE_KEY
     };
   } else if (!vapidKeys || !vapidKeys.publicKey || !vapidKeys.privateKey) {
-    vapidKeys = webpush.generateVAPIDKeys();
+    vapidKeys = DEFAULT_STATIC_VAPID_KEYS;
     serverDb['andradeagro_vapid_keys'] = vapidKeys;
     saveDatabase();
-    console.log('[Push Notification] Generated persistent VAPID keys.');
+    console.log('[Push Notification] Initialized persistent default VAPID keys.');
   }
 
   const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:suporte@andradeagro.com.br';
@@ -165,13 +170,15 @@ async function startServer() {
       title = '⚠️ Troca de óleo pendente';
       url = `/?tab=maintenance&equipmentId=${encodeURIComponent(equipmentId || '')}`;
     } else if (eventType === 'TEST') {
-      title = '🔔 Teste de Notificação Push';
+      title = 'Teste de Notificação';
       url = '/?tab=settings';
     }
 
-    const notificationBody = eventType === 'OIL_CHANGE_DUE'
-      ? (description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`)
-      : `${equipmentName}\n${description}`.trim();
+    const notificationBody = eventType === 'TEST'
+      ? (description || 'Se você recebeu esta mensagem, o push do AndradeAgro está funcionando.')
+      : eventType === 'OIL_CHANGE_DUE'
+        ? (description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`)
+        : `${equipmentName}\n${description}`.trim();
 
     const payload = JSON.stringify({
       title,
@@ -202,15 +209,21 @@ async function startServer() {
     let sentCount = 0;
     let failedCount = 0;
     const invalidEndpoints: string[] = [];
+    const dispatchErrors: string[] = [];
 
     await Promise.all(
       targetDevices.map(async (device) => {
         try {
           await webpush.sendNotification(device.subscription, payload);
           sentCount++;
+          console.log(`[Push Notification] Successfully sent push to device of ${device.userName} (${device.userRole})`);
         } catch (err: any) {
           failedCount++;
-          console.warn(`[Push Notification] Error sending push to device:`, err?.statusCode || err?.message);
+          const errStatus = err?.statusCode || 'ERR';
+          const errMsg = err?.body || err?.message || 'Falha no envio push';
+          const detail = `Status ${errStatus}: ${errMsg}`;
+          dispatchErrors.push(detail);
+          console.warn(`[Push Notification] Error sending push to device (${device.userName}):`, detail);
           if (err?.statusCode === 404 || err?.statusCode === 410) {
             invalidEndpoints.push(device.subscription.endpoint);
           }
@@ -230,15 +243,19 @@ async function startServer() {
       console.log(`[Push Notification] Deactivated ${invalidEndpoints.length} expired device subscriptions.`);
     }
 
+    const isSuccess = sentCount > 0;
     return {
-      success: true,
+      success: isSuccess,
       duplicate: false,
       sentCount,
       failedCount,
       recipientsCount: targetDevices.length,
+      errors: dispatchErrors.length > 0 ? dispatchErrors : undefined,
       message: targetDevices.length === 0 
         ? 'Nenhum dispositivo ativo registrado para usuários autorizados (ADMIN/MANUTENÇÃO).'
-        : `Enviado para ${sentCount} de ${targetDevices.length} dispositivos.`
+        : isSuccess
+          ? `Notificação entregue com sucesso para ${sentCount} de ${targetDevices.length} dispositivo(s).`
+          : `Falha ao entregar push para ${failedCount} dispositivo(s): ${dispatchErrors.join('; ')}`
     };
   }
 
@@ -365,12 +382,60 @@ async function startServer() {
         eventType: 'TEST',
         eventId: `test-${Date.now()}`,
         equipmentName: 'AndradeAgro',
-        description: 'Notificações push em tempo real ativas e funcionando perfeitamente!',
+        description: 'Se você recebeu esta mensagem, o push do AndradeAgro está funcionando.',
         targetUserId: userId
       });
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to send test push' });
+      console.error('[Push Notification] Error in test endpoint:', err);
+      res.status(500).json({ 
+        success: false, 
+        error: 'Failed to send test push: ' + (err?.message || err),
+        sentCount: 0 
+      });
+    }
+  });
+
+  app.get('/api/notifications/devices', (req, res) => {
+    try {
+      const devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+      const sanitized = devices.map(d => ({
+        id: d.id,
+        userId: d.userId,
+        userName: d.userName,
+        userRole: d.userRole,
+        active: d.active !== false,
+        deviceInfo: d.deviceInfo || {},
+        updatedAt: d.updatedAt,
+        createdAt: d.createdAt,
+        endpointPreview: d.endpoint ? `${d.endpoint.slice(0, 35)}...` : 'N/A'
+      }));
+      res.json({ devices: sanitized, total: sanitized.length });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to list devices' });
+    }
+  });
+
+  app.get('/api/notifications/status', (req, res) => {
+    try {
+      const devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+      const activeAuthorized = devices.filter(d => 
+        d.active !== false && (d.userRole === 'ADMIN' || d.userRole === 'MANUTENCAO')
+      );
+      res.json({
+        vapidConfigured: true,
+        vapidPublicKey: vapidKeys.publicKey,
+        totalDevices: devices.length,
+        activeAuthorizedCount: activeAuthorized.length,
+        authorizedDevices: activeAuthorized.map(d => ({
+          userName: d.userName,
+          userRole: d.userRole,
+          platform: d.deviceInfo?.platform || 'desconhecido',
+          updatedAt: d.updatedAt
+        }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to get status' });
     }
   });
 

@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Bell, BellOff, CheckCircle2, AlertTriangle, ShieldCheck, 
-  Smartphone, Monitor, Send, RefreshCw 
+  Smartphone, Monitor, Send, RefreshCw, SmartphoneCharging, Info
 } from 'lucide-react';
 import { User } from '../types';
 import { 
   isPushSupported, getNotificationPermission, isStoredPushActive, 
   isSubscriptionActive, enablePushNotifications, disablePushNotifications, 
-  sendTestPushNotification 
+  sendTestPushNotification, fetchServerNotificationStatus 
 } from '../utils/pushNotifications';
 
 interface PushNotificationSettingsCardProps {
@@ -23,6 +23,11 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('default');
   const [isActive, setIsActive] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
+  const [syncing, setSyncing] = useState<boolean>(false);
+  const [serverStatus, setServerStatus] = useState<{
+    activeAuthorizedCount: number;
+    authorizedDevices: Array<{ userName: string; userRole: string; platform: string; updatedAt: string }>;
+  } | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const checkStatus = async () => {
@@ -40,6 +45,14 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
     const storedActive = isStoredPushActive(currentUser.id);
     const subActive = await isSubscriptionActive();
     setIsActive(storedActive && subActive && perm === 'granted');
+
+    const sStatus = await fetchServerNotificationStatus();
+    if (sStatus) {
+      setServerStatus({
+        activeAuthorizedCount: sStatus.activeAuthorizedCount,
+        authorizedDevices: sStatus.authorizedDevices
+      });
+    }
   };
 
   useEffect(() => {
@@ -75,7 +88,22 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
       }
     }
     setLoading(false);
-    checkStatus();
+    await checkStatus();
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setFeedback(null);
+    const res = await enablePushNotifications(currentUser);
+    if (res.success) {
+      setIsActive(true);
+      setPermission('granted');
+      setFeedback({ type: 'success', text: 'Dispositivo sincronizado com o servidor e Firestore!' });
+    } else {
+      setFeedback({ type: 'error', text: res.message });
+    }
+    setSyncing(false);
+    await checkStatus();
   };
 
   const handleTest = async () => {
@@ -88,12 +116,17 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
       setFeedback({ type: 'error', text: res.message });
     }
     setLoading(false);
+    await checkStatus();
   };
 
   // Only ADMIN and MANUTENCAO should see this card per FASE 5 & FASE 11
   if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANUTENCAO') {
     return null;
   }
+
+  const isCurrentDeviceRegistered = serverStatus?.authorizedDevices?.some(
+    d => d.userName === currentUser.name
+  );
 
   return (
     <div 
@@ -115,7 +148,7 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
               Notificações Push em Tempo Real
             </h3>
             <p className="text-[11px] text-emerald-400/90 font-medium">
-              Firebase Cloud Messaging (FCM) & Web Push
+              Web Push & FCM (Android, iOS PWA e Desktop)
             </p>
           </div>
         </div>
@@ -123,22 +156,22 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
         {/* Real Status Badge */}
         <div>
           {isActive ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              Ativadas
+              Ativadas neste dispositivo
             </span>
           ) : permission === 'denied' ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-500/20 text-red-300 border border-red-500/40">
-              <AlertTriangle className="w-3 h-3 text-red-400" />
-              Bloqueadas pelo Navegador
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/40">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+              Bloqueadas no Navegador
             </span>
           ) : !supported ? (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
               Não Suportado
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-700/40 text-slate-300 border border-slate-600/40">
-              Permissão não concedida
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-700/40 text-slate-300 border border-slate-600/40">
+              Inativas neste dispositivo
             </span>
           )}
         </div>
@@ -146,38 +179,66 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
 
       {/* Description & Details */}
       <p className="text-xs text-slate-300 leading-relaxed">
-        Receba notificações instantâneas no seu celular (<span className="text-emerald-300 font-semibold">Android e PWA instalado</span>) e computador sempre que novos eventos críticos forem registrados na operação da AndradeAgro.
+        Receba notificações sonoras e visuais diretamente no celular (<strong className="text-emerald-300">Android Chrome ou PWA instalado</strong>) mesmo com o aplicativo fechado ou em segundo plano.
       </p>
+
+      {/* Diagnostic status strip */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
+        <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-800/30 flex items-center gap-2">
+          <Smartphone className="w-4 h-4 text-[#FACC15] shrink-0" />
+          <div>
+            <div className="text-[10px] text-emerald-400 font-semibold uppercase">Permissão Navegador</div>
+            <div className="font-bold text-slate-100 capitalize">
+              {permission === 'granted' ? 'Concedida' : permission === 'denied' ? 'Bloqueada' : 'Não Solicitada'}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-800/30 flex items-center gap-2">
+          <SmartphoneCharging className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div>
+            <div className="text-[10px] text-emerald-400 font-semibold uppercase">Dispositivos no Servidor</div>
+            <div className="font-bold text-slate-100">
+              {serverStatus ? `${serverStatus.activeAuthorizedCount} ativo(s)` : 'Consultando...'}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-800/30 flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+          <div>
+            <div className="text-[10px] text-emerald-400 font-semibold uppercase">Destinatários</div>
+            <div className="font-bold text-slate-100">Admin & Manutenção</div>
+          </div>
+        </div>
+      </div>
 
       {/* Authorized Events Info */}
       <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-800/40 text-xs space-y-2">
         <p className="font-bold text-[11px] uppercase tracking-wider text-[#FACC15] flex items-center gap-1.5">
           <ShieldCheck className="w-3.5 h-3.5" />
-          Eventos com Notificação Automática:
+          Eventos que enviam Notificação Push ao Celular:
         </p>
         <ul className="space-y-1.5 text-[11px] text-slate-200">
           <li className="flex items-start gap-2">
             <span className="text-amber-400 font-bold">⚠️</span>
-            <span><strong>Novo problema registrado:</strong> Máquinas e tratores com falhas ou anomalias relatadas.</span>
+            <span><strong>Novo problema relatado:</strong> Alerta imediato com máquina, descrição e operador.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-blue-400 font-bold">🔧</span>
-            <span><strong>Nova manutenção registrada:</strong> Serviços e intervenções técnicas executadas na frota.</span>
+            <span><strong>Nova manutenção registrada:</strong> Registro técnico de revisão ou reparo concluído.</span>
           </li>
           <li className="flex items-start gap-2">
             <span className="text-amber-300 font-bold">🛢️</span>
-            <span><strong>Alerta de troca de óleo:</strong> Aviso preventivo quando o equipamento atinge a condição de troca pendente.</span>
+            <span><strong>Alerta de troca de óleo:</strong> Notificação automática de troca de óleo vencida por horímetro ou quilometragem.</span>
           </li>
         </ul>
-        <p className="text-[10px] text-emerald-400/80 pt-1 border-t border-emerald-900/50">
-          * Apenas perfis <strong>ADMIN</strong> e <strong>MANUTENÇÃO</strong> recebem estas notificações.
-        </p>
       </div>
 
       {/* Feedback Alert */}
       {feedback && (
         <div 
-          className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+          className={`p-3.5 rounded-2xl text-xs font-semibold flex items-start gap-2.5 whitespace-pre-line ${
             feedback.type === 'success' 
               ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-200' 
               : feedback.type === 'error'
@@ -186,9 +247,9 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
           }`}
         >
           {feedback.type === 'success' ? (
-            <CheckCircle2 className="w-4 h-4 text-[#FACC15] shrink-0" />
+            <CheckCircle2 className="w-4 h-4 text-[#FACC15] shrink-0 mt-0.5" />
           ) : (
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           )}
           <span>{feedback.text}</span>
         </div>
@@ -196,40 +257,65 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
 
       {/* Actions */}
       <div className="pt-2 flex flex-wrap items-center justify-between gap-2.5">
-        <button
-          id="toggle-push-notifications-btn"
-          type="button"
-          onClick={handleToggle}
-          disabled={loading || !supported}
-          className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all active:scale-95 disabled:opacity-50 min-h-[44px] ${
-            isActive 
-              ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40' 
-              : 'bg-[#064E3B] hover:bg-emerald-800 text-white border border-emerald-600/60'
-          }`}
-        >
-          {loading ? (
-            <RefreshCw className="w-4 h-4 animate-spin text-[#FACC15]" />
-          ) : isActive ? (
-            <BellOff className="w-4 h-4" />
-          ) : (
-            <Bell className="w-4 h-4 text-[#FACC15]" />
+        <div className="flex items-center gap-2">
+          <button
+            id="toggle-push-notifications-btn"
+            type="button"
+            onClick={handleToggle}
+            disabled={loading || syncing || !supported}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all active:scale-95 disabled:opacity-50 min-h-[44px] ${
+              isActive 
+                ? 'bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40' 
+                : 'bg-[#064E3B] hover:bg-emerald-800 text-white border border-emerald-600/60'
+            }`}
+          >
+            {loading ? (
+              <RefreshCw className="w-4 h-4 animate-spin text-[#FACC15]" />
+            ) : isActive ? (
+              <BellOff className="w-4 h-4" />
+            ) : (
+              <Bell className="w-4 h-4 text-[#FACC15]" />
+            )}
+            <span>{isActive ? 'Desativar Notificações' : 'Ativar Notificações no Celular'}</span>
+          </button>
+
+          {isActive && (
+            <button
+              id="resync-push-device-btn"
+              type="button"
+              onClick={handleSync}
+              disabled={loading || syncing}
+              className="px-3 py-2.5 rounded-xl bg-emerald-900/50 hover:bg-emerald-800/60 text-emerald-200 border border-emerald-700/50 font-semibold text-xs flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 min-h-[44px]"
+              title="Revalidar chave VAPID e reinscrever token no servidor"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-[#FACC15]' : ''}`} />
+              <span>Sincronizar</span>
+            </button>
           )}
-          <span>{isActive ? 'Desativar Notificações' : 'Ativar Notificações'}</span>
-        </button>
+        </div>
 
         {isActive && (
           <button
             id="test-push-notification-btn"
             type="button"
             onClick={handleTest}
-            disabled={loading}
-            className="px-3.5 py-2.5 rounded-xl bg-amber-400/20 hover:bg-amber-400/30 text-[#FACC15] border border-amber-400/40 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 min-h-[44px]"
-            title="Enviar uma notificação real de teste para este dispositivo"
+            disabled={loading || syncing}
+            className="px-4 py-2.5 rounded-xl bg-[#FACC15] hover:bg-amber-400 text-gray-950 font-black text-xs flex items-center gap-2 shadow-md transition-all active:scale-95 disabled:opacity-50 min-h-[44px]"
+            title="Envia uma notificação push real de teste com título 'Teste de Notificação'"
           >
-            <Send className="w-3.5 h-3.5" />
-            <span>Testar Notificação Push</span>
+            {loading ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Send className="w-3.5 h-3.5" />
+            )}
+            <span>Enviar Teste Real ao Celular</span>
           </button>
         )}
+      </div>
+
+      <div className="text-[11px] text-slate-400 flex items-center gap-1.5 pt-1">
+        <Info className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+        <span>No iPhone (iOS 16.4+), use "Compartilhar" &rarr; "Adicionar à Tela de Início" no Safari para habilitar notificações push. No Android, basta autorizar no Chrome.</span>
       </div>
     </div>
   );

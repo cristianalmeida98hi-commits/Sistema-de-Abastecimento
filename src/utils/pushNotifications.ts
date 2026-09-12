@@ -1,5 +1,5 @@
 import { User, UserRole, PushNotificationPayload } from '../types';
-import { db } from '../lib/firebase';
+import { db, ensureFirebaseAuth } from '../lib/firebase';
 import { doc, setDoc, updateDoc } from 'firebase/firestore';
 
 /**
@@ -18,6 +18,76 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
     outputArray[i] = rawData.charCodeAt(i);
   }
   return outputArray;
+}
+
+/**
+ * Ensures a push subscription has valid endpoint and base64-encoded p256dh/auth keys
+ */
+function normalizeSubscription(sub: PushSubscription): any {
+  const subJson = sub.toJSON();
+  if (!subJson.endpoint && sub.endpoint) {
+    subJson.endpoint = sub.endpoint;
+  }
+  if (!subJson.keys) {
+    subJson.keys = {};
+  }
+  if (!subJson.keys.p256dh && sub.getKey) {
+    const p256dhBuffer = sub.getKey('p256dh');
+    if (p256dhBuffer) {
+      subJson.keys.p256dh = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(p256dhBuffer))));
+    }
+  }
+  if (!subJson.keys.auth && sub.getKey) {
+    const authBuffer = sub.getKey('auth');
+    if (authBuffer) {
+      subJson.keys.auth = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(authBuffer))));
+    }
+  }
+  return subJson;
+}
+
+/**
+ * Retrieves existing push subscription, validating key match with server VAPID key.
+ * If server key changed or subscription expired, safely renews it.
+ */
+async function getOrRenewSubscription(
+  reg: ServiceWorkerRegistration, 
+  serverPublicKey: string
+): Promise<PushSubscription> {
+  const targetKeyBytes = urlBase64ToUint8Array(serverPublicKey);
+  let sub = await reg.pushManager.getSubscription();
+
+  if (sub) {
+    let keyMismatch = false;
+    try {
+      const rawKey = sub.options.applicationServerKey;
+      if (rawKey) {
+        const subKeyBytes = new Uint8Array(rawKey);
+        if (subKeyBytes.length !== targetKeyBytes.length || !subKeyBytes.every((b, i) => b === targetKeyBytes[i])) {
+          keyMismatch = true;
+        }
+      } else {
+        keyMismatch = true;
+      }
+    } catch {
+      keyMismatch = true;
+    }
+
+    if (keyMismatch) {
+      console.log('[Push Notification] Chave VAPID mudou ou expirou. Renovando inscrição no PushManager...');
+      await sub.unsubscribe().catch(() => {});
+      sub = null;
+    }
+  }
+
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: targetKeyBytes
+    });
+  }
+
+  return sub;
 }
 
 /**
@@ -156,17 +226,9 @@ export async function enablePushNotifications(currentUser: User): Promise<{
       throw new Error('Chave VAPID pública não disponível.');
     }
 
-    // 4. Subscribe to PushManager
-    let sub = await reg.pushManager.getSubscription();
-    if (!sub) {
-      const appServerKey = urlBase64ToUint8Array(publicKey);
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: appServerKey
-      });
-    }
-
-    const subJson = sub.toJSON();
+    // 4. Subscribe or renew subscription with server VAPID key
+    const sub = await getOrRenewSubscription(reg, publicKey);
+    const subJson = normalizeSubscription(sub);
     const deviceInfo = getDeviceInfo();
     const cleanEndpoint = sub.endpoint || '';
     const hash = cleanEndpoint.slice(-16).replace(/[^a-zA-Z0-9]/g, '');
@@ -186,8 +248,9 @@ export async function enablePushNotifications(currentUser: User): Promise<{
       createdAt: new Date().toISOString()
     };
 
-    // 5. Save device record to Firestore user_devices collection
+    // 5. Save device record to Firestore user_devices collection with authenticated session
     try {
+      await ensureFirebaseAuth();
       await setDoc(doc(db, 'user_devices', deviceId), deviceRecord, { merge: true });
       console.log('[Push Notification] Device registered in Firestore user_devices.');
     } catch (fsErr) {
@@ -297,6 +360,10 @@ export async function disablePushNotifications(currentUser?: User): Promise<{
 export async function sendTestPushNotification(currentUser: User): Promise<{
   success: boolean;
   message: string;
+  sentCount?: number;
+  failedCount?: number;
+  recipientsCount?: number;
+  errors?: string[];
 }> {
   try {
     const res = await fetch('/api/notifications/test', {
@@ -309,7 +376,9 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
     if (data.success && data.sentCount > 0) {
       return {
         success: true,
-        message: 'Notificação de teste enviada com sucesso! Verifique a barra de notificações do seu dispositivo.'
+        sentCount: data.sentCount,
+        recipientsCount: data.recipientsCount,
+        message: `Notificação de teste enviada com sucesso para ${data.sentCount} dispositivo(s)! Verifique a barra de notificações do seu celular.`
       };
     } else if (data.duplicate) {
       return {
@@ -317,15 +386,20 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
         message: 'Notificação recente já enviada para este dispositivo.'
       };
     } else {
+      const errDetails = (data.errors && data.errors.length > 0) ? `\nDetalhe técnico: ${data.errors.join('; ')}` : '';
       return {
         success: false,
-        message: 'Nenhum dispositivo ativo encontrado para este usuário ou envio não entregue.'
+        sentCount: data.sentCount || 0,
+        failedCount: data.failedCount || 0,
+        recipientsCount: data.recipientsCount || 0,
+        errors: data.errors,
+        message: (data.message || 'Nenhum dispositivo ativo encontrado para este usuário ou falha ao entregar no celular.') + errDetails
       };
     }
   } catch (err: any) {
     return {
       success: false,
-      message: `Erro ao testar notificação: ${err?.message || 'Falha no servidor'}`
+      message: `Erro de conexão ao testar notificação: ${err?.message || 'Falha no servidor'}`
     };
   }
 }
@@ -512,24 +586,14 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
   if (perm === 'granted' || wasStoredActive) {
     try {
       const reg = await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
+      const vapidRes = await fetch('/api/notifications/vapid-public-key');
+      if (!vapidRes.ok) return;
+      const { publicKey } = await vapidRes.json();
+      if (!publicKey) return;
 
-      if (!sub && perm === 'granted') {
-        const vapidRes = await fetch('/api/notifications/vapid-public-key');
-        if (vapidRes.ok) {
-          const { publicKey } = await vapidRes.json();
-          if (publicKey) {
-            const appServerKey = urlBase64ToUint8Array(publicKey);
-            sub = await reg.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: appServerKey
-            });
-          }
-        }
-      }
-
+      const sub = await getOrRenewSubscription(reg, publicKey);
       if (sub) {
-        const subJson = sub.toJSON();
+        const subJson = normalizeSubscription(sub);
         const deviceInfo = getDeviceInfo();
         const cleanEndpoint = sub.endpoint || '';
         const hash = cleanEndpoint.slice(-16).replace(/[^a-zA-Z0-9]/g, '');
@@ -548,8 +612,9 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
           })
         }).catch(() => {});
 
-        // Sync with Firestore user_devices
+        // Sync with Firestore user_devices with authenticated session
         try {
+          await ensureFirebaseAuth();
           await setDoc(doc(db, 'user_devices', deviceId), {
             id: deviceId,
             userId: currentUser.id,
@@ -563,11 +628,11 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
             updatedAt: new Date().toISOString()
           }, { merge: true });
         } catch {
-          // Firestore fallback handled
+          // Firestore non-blocking
         }
 
         localStorage.setItem(`andradeagro_push_active_${currentUser.id}`, 'true');
-        console.log(`[Push Notification] Device verified and active for ${currentUser.name} (${currentUser.role}).`);
+        console.log(`[Push Notification] Device verified and synchronized for ${currentUser.name} (${currentUser.role}).`);
       }
     } catch (syncErr) {
       console.warn('[Push Notification] Non-blocking auto-sync notice:', syncErr);
@@ -579,14 +644,33 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
 }
 
 /**
- * Logout cleanup: ensure device is unlinked when an authorized user logs out
+ * Fetch server-side notification status and active device diagnostics
+ */
+export async function fetchServerNotificationStatus(): Promise<{
+  vapidConfigured: boolean;
+  vapidPublicKey?: string;
+  totalDevices: number;
+  activeAuthorizedCount: number;
+  authorizedDevices: Array<{
+    userName: string;
+    userRole: string;
+    platform: string;
+    updatedAt: string;
+  }>;
+} | null> {
+  try {
+    const res = await fetch('/api/notifications/status');
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Logout cleanup: keeps push token valid on mobile device so alerts continue to arrive
  */
 export async function cleanupPushOnLogout(currentUser: User): Promise<void> {
-  try {
-    if (currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO') {
-      await disablePushNotifications(currentUser);
-    }
-  } catch {
-    // Ignore cleanup error on logout
-  }
+  // Device subscription is intentionally retained so mobile devices continue to receive critical fleet alerts
+  console.log(`[Push Notification] User ${currentUser.name} logged out; push notification subscription preserved.`);
 }

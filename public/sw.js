@@ -1,4 +1,4 @@
-const CACHE_NAME = 'andradeagro-shell-v3';
+const CACHE_NAME = 'andradeagro-shell-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -6,7 +6,7 @@ const STATIC_ASSETS = [
   '/icon-192.png',
   '/icon-512.png',
   '/apple-touch-icon.png',
-  '/public/andrade-agro-logo.png'
+  '/andrade-agro-logo.png'
 ];
 
 self.addEventListener('install', (event) => {

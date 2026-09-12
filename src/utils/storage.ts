@@ -17,7 +17,7 @@ import {
   hashPassword, verifyPassword, canManageUsers, sanitizeUserForClient 
 } from './security';
 import { 
-  dispatchPushNotificationEvent, cleanupPushOnLogout 
+  dispatchPushNotificationEvent, cleanupPushOnLogout, clearPushEventDeduplication 
 } from './pushNotifications';
 import { 
   getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO 
@@ -1386,6 +1386,7 @@ export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<Mai
           console.warn('[addMaintenance] Could not update alert in Firestore:', e);
         }
       }
+      clearPushEventDeduplication('oil-alert-' + targetVehicle.id).catch(() => {});
 
       // Auto-resolve any pending reported issues related strictly to oil change on this vehicle
       const oilIssuesToResolve = (cache.machineIssues || []).filter(
@@ -1716,6 +1717,15 @@ export async function resolveAlert(id: string, resolvedByName?: string): Promise
     resolvedBy: resolvedByName || user?.name || 'Administrador'
   });
 
+  const targetAlert = cache.alerts.find(a => a.id === id);
+  if (targetAlert?.equipmentId && (
+    targetAlert.type === 'OIL_CHANGE_DUE' || 
+    targetAlert.title?.toLowerCase().includes('óleo') || 
+    targetAlert.title?.toLowerCase().includes('oleo')
+  )) {
+    clearPushEventDeduplication(`oil-alert-${targetAlert.equipmentId}`).catch(() => {});
+  }
+
   cache.alerts = cache.alerts.map(a => a.id === id ? { ...a, ...fields } as SmartAlert : a);
   notifyDataUpdated();
 
@@ -1868,6 +1878,7 @@ export async function recordOilChange(
   for (const a of alertsToResolve) {
     await resolveAlert(a.id, 'Troca de Óleo Registrada');
   }
+  await clearPushEventDeduplication('oil-alert-' + equipmentId).catch(() => {});
 
   // Auto-resolve any pending reported issues related strictly to oil change on this vehicle
   const oilIssuesToResolve = (cache.machineIssues || []).filter(
@@ -2082,30 +2093,46 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
           : (lastMnt > 0 ? lastMnt + interval : interval);
 
         const mntAlertId = `alt-oil-${v.id}`;
-        const existingMntAlert = cache.alerts.find(a => a.id === mntAlertId || (a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'));
+        const openAlert = cache.alerts.find(a => 
+          (a.id === mntAlertId || a.equipmentId === v.id) && 
+          a.type === 'OIL_CHANGE_DUE' && 
+          !a.resolved
+        );
 
         if (!isOilControlActive || v.category === 'IMPLEMENTO') {
-          // If oil change control is disabled for this equipment, resolve any existing alert
-          if (existingMntAlert && !existingMntAlert.resolved) {
+          // If oil change control is disabled for this equipment, resolve any open alert
+          if (openAlert) {
             const resolvedAlert: SmartAlert = cleanUndefined({
-              ...existingMntAlert,
+              ...openAlert,
               resolved: true,
+              resolvedAt: new Date().toISOString(),
               resolvedBy: 'Sistema (Controle Desativado)'
             });
-            cache.alerts = cache.alerts.map(a => a.id === existingMntAlert.id ? resolvedAlert : a);
-            setDoc(doc(db, 'alerts', existingMntAlert.id), resolvedAlert).catch(console.error);
+            cache.alerts = cache.alerts.map(a => a.id === openAlert.id ? resolvedAlert : a);
+            setDoc(doc(db, 'alerts', openAlert.id), resolvedAlert).catch(console.error);
           }
           return;
         }
 
         if (curHour > 0) {
+          const cycleId = `${v.id}-${nextMnt}`;
+          const cycleEventId = `oil-alert-${v.id}-${nextMnt}`;
+
           if (curHour >= nextMnt) {
             // Overdue / Vencida: 🔴 Troca de óleo vencida
             const delay = curHour - nextMnt;
             const title = `🔴 Troca de óleo vencida: ${v.model}`;
             const desc = `Equipamento: ${v.model}. Horímetro atual: ${curHour}h. Troca prevista: ${nextMnt}h. Atraso: ${delay}h (Intervalo: ${interval}h).`;
 
-            if (!existingMntAlert || existingMntAlert.cycleTargetHourmeter !== nextMnt || existingMntAlert.severity !== 'ALTA') {
+            // Condition 1: No open alert, or open alert belongs to an older cycle
+            if (!openAlert || openAlert.cycleTargetHourmeter !== nextMnt) {
+              if (openAlert) {
+                // Supersede older open alert
+                openAlert.resolved = true;
+                openAlert.resolvedAt = new Date().toISOString();
+                openAlert.resolvedBy = 'Sistema (Novo Ciclo)';
+              }
+
               const alertObj: SmartAlert = cleanUndefined({
                 id: mntAlertId,
                 type: 'OIL_CHANGE_DUE',
@@ -2117,30 +2144,72 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 date: new Date().toISOString().slice(0, 10),
                 resolved: false,
                 cycleTargetHourmeter: nextMnt,
-                lastOilChangeHourmeter: lastMnt
+                lastOilChangeHourmeter: lastMnt,
+                cycleId,
+                pushNotified: true,
+                pushNotifiedForCycle: nextMnt,
+                pushNotifiedAt: new Date().toISOString()
               });
-              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== mntAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'))];
+
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== mntAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE' && !a.resolved))];
               setDoc(doc(db, 'alerts', mntAlertId), alertObj).catch(console.error);
 
-              if (triggerPushOnNewAlert) {
-                const cycleEventId = `oil-alert-${v.id}-${nextMnt}`;
-                dispatchPushNotificationEvent({
-                  eventType: 'OIL_CHANGE_DUE',
-                  eventId: cycleEventId,
-                  equipmentName: v.model,
-                  equipmentId: v.id,
-                  description: `O veículo ${v.model} precisa de atenção para troca de óleo.`
-                }).catch(() => {});
-              }
-            } else if (!existingMntAlert.resolved && existingMntAlert.description !== desc) {
-              const updated = cleanUndefined({
-                ...existingMntAlert,
+              // Dispatch real push notification to authorized users
+              dispatchPushNotificationEvent({
+                eventType: 'OIL_CHANGE_DUE',
+                eventId: cycleEventId,
+                equipmentName: v.model,
+                equipmentId: v.id,
+                description: `O equipamento ${v.model} atingiu ${curHour}h e está com troca de óleo vencida (programada para ${nextMnt}h).`
+              }).catch(() => {});
+
+            } else if (openAlert.severity !== 'ALTA') {
+              // Transition from Warning (MEDIA) to Overdue (ALTA)
+              const updated: SmartAlert = cleanUndefined({
+                ...openAlert,
                 title,
                 description: desc,
-                severity: 'ALTA' as const
+                severity: 'ALTA' as const,
+                cycleTargetHourmeter: nextMnt,
+                pushNotified: true,
+                pushNotifiedForCycle: nextMnt,
+                pushNotifiedAt: new Date().toISOString()
+              });
+              cache.alerts = cache.alerts.map(a => a.id === openAlert.id ? updated : a);
+              setDoc(doc(db, 'alerts', openAlert.id), updated).catch(console.error);
+
+              dispatchPushNotificationEvent({
+                eventType: 'OIL_CHANGE_DUE',
+                eventId: cycleEventId,
+                equipmentName: v.model,
+                equipmentId: v.id,
+                description: `O equipamento ${v.model} atingiu ${curHour}h e está com troca de óleo vencida (programada para ${nextMnt}h).`
+              }).catch(() => {});
+
+            } else if (!openAlert.pushNotified || openAlert.pushNotifiedForCycle !== nextMnt) {
+              // Open alert exists but push notification was not yet dispatched for this cycle
+              openAlert.pushNotified = true;
+              openAlert.pushNotifiedForCycle = nextMnt;
+              openAlert.pushNotifiedAt = new Date().toISOString();
+              cache.alerts = cache.alerts.map(a => a.id === openAlert.id ? { ...openAlert } : a);
+              setDoc(doc(db, 'alerts', openAlert.id), openAlert).catch(console.error);
+
+              dispatchPushNotificationEvent({
+                eventType: 'OIL_CHANGE_DUE',
+                eventId: cycleEventId,
+                equipmentName: v.model,
+                equipmentId: v.id,
+                description: `O equipamento ${v.model} atingiu ${curHour}h e está com troca de óleo vencida (programada para ${nextMnt}h).`
+              }).catch(() => {});
+
+            } else if (openAlert.description !== desc) {
+              // Update description if hourmeter incremented
+              const updated = cleanUndefined({
+                ...openAlert,
+                description: desc
               }) as SmartAlert;
-              cache.alerts = cache.alerts.map(a => a.id === existingMntAlert.id ? updated : a);
-              setDoc(doc(db, 'alerts', existingMntAlert.id), updated).catch(console.error);
+              cache.alerts = cache.alerts.map(a => a.id === openAlert.id ? updated : a);
+              setDoc(doc(db, 'alerts', openAlert.id), updated).catch(console.error);
             }
           } else if (curHour >= (nextMnt - warningAdvance)) {
             // Near due / Próxima da manutenção: 🟡 Troca de óleo próxima
@@ -2148,7 +2217,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
             const title = `🟡 Troca de óleo próxima: ${v.model}`;
             const desc = `Equipamento: ${v.model}. Próxima troca: ${nextMnt}h. Horímetro atual: ${curHour}h. Faltam: ${diff}h (Intervalo: ${interval}h).`;
 
-            if (!existingMntAlert || existingMntAlert.cycleTargetHourmeter !== nextMnt || existingMntAlert.severity !== 'MEDIA') {
+            if (!openAlert || openAlert.cycleTargetHourmeter !== nextMnt || openAlert.severity !== 'MEDIA') {
               const alertObj: SmartAlert = cleanUndefined({
                 id: mntAlertId,
                 type: 'OIL_CHANGE_DUE',
@@ -2160,13 +2229,21 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 date: new Date().toISOString().slice(0, 10),
                 resolved: false,
                 cycleTargetHourmeter: nextMnt,
-                lastOilChangeHourmeter: lastMnt
+                lastOilChangeHourmeter: lastMnt,
+                cycleId
               });
-              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== mntAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE'))];
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== mntAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE' && !a.resolved))];
               setDoc(doc(db, 'alerts', mntAlertId), alertObj).catch(console.error);
+            } else if (openAlert.description !== desc) {
+              const updated = cleanUndefined({
+                ...openAlert,
+                description: desc
+              }) as SmartAlert;
+              cache.alerts = cache.alerts.map(a => a.id === openAlert.id ? updated : a);
+              setDoc(doc(db, 'alerts', openAlert.id), updated).catch(console.error);
             }
           } else {
-            // Machine maintenance has been completed or is well within safe bounds: resolve all open oil alerts for this equipment
+            // Machine maintenance is within safe bounds: resolve any open oil alerts for this equipment
             const openAlerts = cache.alerts.filter(a => 
               (a.id === mntAlertId || a.equipmentId === v.id) && 
               (a.type === 'OIL_CHANGE_DUE' || a.id === mntAlertId || (a.title && (a.title.toLowerCase().includes('óleo') || a.title.toLowerCase().includes('oleo')))) &&
@@ -2196,35 +2273,44 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
           : (lastKm > 0 ? lastKm + intervalKm : intervalKm);
 
         const kmAlertId = `alt-oil-${v.id}`;
-        const existingKmAlert = cache.alerts.find(a => a.id === kmAlertId || (a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')));
+        const openKmAlert = cache.alerts.find(a => 
+          (a.id === kmAlertId || a.equipmentId === v.id) && 
+          a.type === 'OIL_CHANGE_DUE' && 
+          !a.resolved
+        );
 
         if (!isOilControlActive) {
-          const openAlerts = cache.alerts.filter(a => 
-            (a.id === kmAlertId || a.equipmentId === v.id) && 
-            (a.type === 'OIL_CHANGE_DUE' || a.id === kmAlertId || (a.title && (a.title.toLowerCase().includes('óleo') || a.title.toLowerCase().includes('oleo')))) &&
-            !a.resolved
-          );
-          for (const openAlt of openAlerts) {
+          if (openKmAlert) {
             const resolvedAlert: SmartAlert = cleanUndefined({
-              ...openAlt,
+              ...openKmAlert,
               resolved: true,
               resolvedAt: new Date().toISOString(),
               resolvedBy: 'Sistema (Controle Desativado)'
             });
-            cache.alerts = cache.alerts.map(a => a.id === openAlt.id ? resolvedAlert : a);
-            setDoc(doc(db, 'alerts', openAlt.id), resolvedAlert).catch(console.error);
+            cache.alerts = cache.alerts.map(a => a.id === openKmAlert.id ? resolvedAlert : a);
+            setDoc(doc(db, 'alerts', openKmAlert.id), resolvedAlert).catch(console.error);
           }
           return;
         }
 
         if (curKm > 0) {
+          const cycleId = `${v.id}-${nextKm}`;
+          const cycleEventId = `oil-alert-${v.id}-${nextKm}`;
+
           if (curKm >= nextKm) {
-            // Overdue: 🔴 Troca de óleo / Revisão vencida
+            // Overdue: 🔴 Troca de óleo vencida
             const delayKm = curKm - nextKm;
             const title = `🔴 Troca de óleo vencida: ${v.model} (${v.licensePlate || 'Placa'})`;
             const desc = `Veículo: ${v.model} (${v.licensePlate}). Odômetro atual: ${curKm.toLocaleString('pt-BR')} km. Troca prevista: ${nextKm.toLocaleString('pt-BR')} km. Atraso: ${delayKm.toLocaleString('pt-BR')} km (Intervalo: ${intervalKm.toLocaleString('pt-BR')} km).`;
 
-            if (!existingKmAlert || existingKmAlert.severity !== 'ALTA') {
+            // Condition 1: No open alert, or open alert belongs to an older cycle
+            if (!openKmAlert || openKmAlert.cycleTargetKm !== nextKm) {
+              if (openKmAlert) {
+                openKmAlert.resolved = true;
+                openKmAlert.resolvedAt = new Date().toISOString();
+                openKmAlert.resolvedBy = 'Sistema (Novo Ciclo)';
+              }
+
               const alertObj: SmartAlert = cleanUndefined({
                 id: kmAlertId,
                 type: 'OIL_CHANGE_DUE',
@@ -2234,30 +2320,72 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 equipmentId: v.id,
                 equipmentName: v.model,
                 date: new Date().toISOString().slice(0, 10),
-                resolved: false
+                resolved: false,
+                cycleTargetKm: nextKm,
+                lastOilChangeKm: lastKm,
+                cycleId,
+                pushNotified: true,
+                pushNotifiedForCycle: nextKm,
+                pushNotifiedAt: new Date().toISOString()
               });
-              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId && !(a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')))];
+
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE' && !a.resolved))];
               setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
 
-              if (triggerPushOnNewAlert) {
-                const cycleEventId = `oil-alert-${v.id}-${nextKm}`;
-                dispatchPushNotificationEvent({
-                  eventType: 'OIL_CHANGE_DUE',
-                  eventId: cycleEventId,
-                  equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
-                  equipmentId: v.id,
-                  description: `O veículo ${v.model} precisa de atenção para troca de óleo.`
-                }).catch(() => {});
-              }
-            } else if (!existingKmAlert.resolved && existingKmAlert.description !== desc) {
-              const updated = cleanUndefined({
-                ...existingKmAlert,
+              // Dispatch real push notification to authorized users
+              dispatchPushNotificationEvent({
+                eventType: 'OIL_CHANGE_DUE',
+                eventId: cycleEventId,
+                equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
+                equipmentId: v.id,
+                description: `O veículo ${v.model} atingiu ${curKm.toLocaleString('pt-BR')} km e está com troca de óleo vencida (programada para ${nextKm.toLocaleString('pt-BR')} km).`
+              }).catch(() => {});
+
+            } else if (openKmAlert.severity !== 'ALTA') {
+              // Transition from Warning (MEDIA) to Overdue (ALTA)
+              const updated: SmartAlert = cleanUndefined({
+                ...openKmAlert,
                 title,
                 description: desc,
-                severity: 'ALTA' as const
+                severity: 'ALTA' as const,
+                cycleTargetKm: nextKm,
+                pushNotified: true,
+                pushNotifiedForCycle: nextKm,
+                pushNotifiedAt: new Date().toISOString()
+              });
+              cache.alerts = cache.alerts.map(a => a.id === openKmAlert.id ? updated : a);
+              setDoc(doc(db, 'alerts', openKmAlert.id), updated).catch(console.error);
+
+              dispatchPushNotificationEvent({
+                eventType: 'OIL_CHANGE_DUE',
+                eventId: cycleEventId,
+                equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
+                equipmentId: v.id,
+                description: `O veículo ${v.model} atingiu ${curKm.toLocaleString('pt-BR')} km e está com troca de óleo vencida (programada para ${nextKm.toLocaleString('pt-BR')} km).`
+              }).catch(() => {});
+
+            } else if (!openKmAlert.pushNotified || openKmAlert.pushNotifiedForCycle !== nextKm) {
+              openKmAlert.pushNotified = true;
+              openKmAlert.pushNotifiedForCycle = nextKm;
+              openKmAlert.pushNotifiedAt = new Date().toISOString();
+              cache.alerts = cache.alerts.map(a => a.id === openKmAlert.id ? { ...openKmAlert } : a);
+              setDoc(doc(db, 'alerts', openKmAlert.id), openKmAlert).catch(console.error);
+
+              dispatchPushNotificationEvent({
+                eventType: 'OIL_CHANGE_DUE',
+                eventId: cycleEventId,
+                equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
+                equipmentId: v.id,
+                description: `O veículo ${v.model} atingiu ${curKm.toLocaleString('pt-BR')} km e está com troca de óleo vencida (programada para ${nextKm.toLocaleString('pt-BR')} km).`
+              }).catch(() => {});
+
+            } else if (openKmAlert.description !== desc) {
+              const updated = cleanUndefined({
+                ...openKmAlert,
+                description: desc
               }) as SmartAlert;
-              cache.alerts = cache.alerts.map(a => a.id === existingKmAlert.id ? updated : a);
-              setDoc(doc(db, 'alerts', existingKmAlert.id), updated).catch(console.error);
+              cache.alerts = cache.alerts.map(a => a.id === openKmAlert.id ? updated : a);
+              setDoc(doc(db, 'alerts', openKmAlert.id), updated).catch(console.error);
             }
           } else if (curKm >= (nextKm - warningAdvanceKm)) {
             // Warning: 🟡 Troca de óleo próxima
@@ -2265,7 +2393,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
             const title = `🟡 Troca de óleo próxima: ${v.model} (${v.licensePlate || 'Placa'})`;
             const desc = `Veículo: ${v.model} (${v.licensePlate}). Próxima troca: ${nextKm.toLocaleString('pt-BR')} km. Odômetro atual: ${curKm.toLocaleString('pt-BR')} km. Faltam: ${diffKm.toLocaleString('pt-BR')} km (Intervalo: ${intervalKm.toLocaleString('pt-BR')} km).`;
 
-            if (!existingKmAlert || existingKmAlert.severity !== 'MEDIA') {
+            if (!openKmAlert || openKmAlert.cycleTargetKm !== nextKm || openKmAlert.severity !== 'MEDIA') {
               const alertObj: SmartAlert = cleanUndefined({
                 id: kmAlertId,
                 type: 'OIL_CHANGE_DUE',
@@ -2275,10 +2403,20 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 equipmentId: v.id,
                 equipmentName: v.model,
                 date: new Date().toISOString().slice(0, 10),
-                resolved: false
+                resolved: false,
+                cycleTargetKm: nextKm,
+                lastOilChangeKm: lastKm,
+                cycleId
               });
-              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId && !(a.equipmentId === v.id && (a.type === 'OIL_CHANGE_DUE' || a.type === 'PREVENTIVE_MAINTENANCE')))];
+              cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE' && !a.resolved))];
               setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
+            } else if (openKmAlert.description !== desc) {
+              const updated = cleanUndefined({
+                ...openKmAlert,
+                description: desc
+              }) as SmartAlert;
+              cache.alerts = cache.alerts.map(a => a.id === openKmAlert.id ? updated : a);
+              setDoc(doc(db, 'alerts', openKmAlert.id), updated).catch(console.error);
             }
           } else {
             // In day: resolve all open oil alerts for this vehicle

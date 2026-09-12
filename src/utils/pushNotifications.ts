@@ -334,23 +334,141 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
 const clientDispatchedEventIds = new Set<string>();
 
 /**
+ * Clear client-side and server-side deduplication for a specific equipment or cycle prefix
+ * Call this when a maintenance/oil change is resolved to ensure the next cycle can trigger cleanly!
+ */
+export async function clearPushEventDeduplication(prefix?: string): Promise<void> {
+  if (!prefix) {
+    clientDispatchedEventIds.clear();
+  } else {
+    for (const key of Array.from(clientDispatchedEventIds)) {
+      if (key.startsWith(prefix)) {
+        clientDispatchedEventIds.delete(key);
+      }
+    }
+  }
+
+  try {
+    await fetch('/api/notifications/reset-event-dedup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefix })
+    });
+  } catch {
+    // Non-blocking network catch
+  }
+}
+
+/**
+ * Offline queue management for push events during network instability
+ */
+const PENDING_QUEUE_KEY = 'andradeagro_pending_push_queue';
+
+function getPendingPushQueue(): PushNotificationPayload[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(PENDING_QUEUE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePendingPushQueue(queue: PushNotificationPayload[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(PENDING_QUEUE_KEY, JSON.stringify(queue.slice(-50)));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function queuePendingPushEvent(payload: PushNotificationPayload): void {
+  const queue = getPendingPushQueue();
+  if (!queue.some(p => p.eventId === payload.eventId)) {
+    queue.push(payload);
+    savePendingPushQueue(queue);
+    console.log(`[Push Notification Queue] Queued event for offline retry: ${payload.eventId}`);
+  }
+}
+
+/**
+ * Flush pending push events when internet connection is restored
+ */
+export async function flushPendingPushEvents(): Promise<void> {
+  if (typeof window === 'undefined' || !navigator.onLine) return;
+
+  const queue = getPendingPushQueue();
+  if (queue.length === 0) return;
+
+  console.log(`[Push Notification Queue] Flusing ${queue.length} pending push events...`);
+  const remaining: PushNotificationPayload[] = [];
+
+  for (const item of queue) {
+    try {
+      const res = await fetch('/api/notifications/dispatch-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: item.eventType,
+          eventId: item.eventId,
+          equipmentName: item.equipmentName,
+          description: item.description,
+          equipmentId: item.equipmentId
+        })
+      });
+      if (!res.ok) {
+        remaining.push(item);
+      } else {
+        clientDispatchedEventIds.add(item.eventId);
+        console.log(`[Push Notification Queue] Successfully flushed event: ${item.eventId}`);
+      }
+    } catch {
+      remaining.push(item);
+    }
+  }
+
+  savePendingPushQueue(remaining);
+}
+
+// Automatically bind online listener once on client
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    console.log('[Network] Connection restored. Flushing pending push events...');
+    flushPendingPushEvents();
+  });
+}
+
+/**
  * Dispatch an event to push notification subscribers (New Problem, New Maintenance or Oil Change Due)
  * Protected with deduplication at both client and server layers.
+ * Queued automatically if offline or connection drops.
  */
-export async function dispatchPushNotificationEvent(payload: PushNotificationPayload): Promise<void> {
+export async function dispatchPushNotificationEvent(payload: PushNotificationPayload): Promise<{
+  success: boolean;
+  duplicate?: boolean;
+  sentCount?: number;
+  recipientsCount?: number;
+  message?: string;
+}> {
   // Only trigger for authorized system events
   if (payload.eventType !== 'NEW_ISSUE' && payload.eventType !== 'NEW_MAINTENANCE' && payload.eventType !== 'OIL_CHANGE_DUE') {
-    return;
+    return { success: false, message: 'Tipo de evento não suportado.' };
   }
 
   // Client-side session deduplication
   if (clientDispatchedEventIds.has(payload.eventId)) {
-    return;
+    return { success: true, duplicate: true, sentCount: 0, recipientsCount: 0, message: 'Evento já despachado nesta sessão.' };
   }
-  clientDispatchedEventIds.add(payload.eventId);
+
+  // If offline, queue event immediately for retry on reconnect
+  if (typeof window !== 'undefined' && !navigator.onLine) {
+    queuePendingPushEvent(payload);
+    return { success: true, duplicate: false, sentCount: 0, recipientsCount: 0, message: 'Sem conexão. Evento enfileirado para envio automático assim que a rede retornar.' };
+  }
 
   try {
-    await fetch('/api/notifications/dispatch-event', {
+    const res = await fetch('/api/notifications/dispatch-event', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -361,10 +479,103 @@ export async function dispatchPushNotificationEvent(payload: PushNotificationPay
         equipmentId: payload.equipmentId
       })
     });
-  } catch (err) {
-    // Non-blocking background push
-    console.warn('[Push Notification] Error triggering push notification event:', err);
+
+    if (!res.ok) {
+      queuePendingPushEvent(payload);
+      return { success: false, message: `Falha na requisição: ${res.status}` };
+    }
+
+    const data = await res.json();
+    clientDispatchedEventIds.add(payload.eventId);
+    return data;
+  } catch (err: any) {
+    // Queue for retry
+    queuePendingPushEvent(payload);
+    console.warn('[Push Notification] Error triggering push notification event, queued for retry:', err?.message || err);
+    return { success: false, message: 'Oscilação de rede. Evento enfileirado com segurança para envio posterior.' };
   }
+}
+
+/**
+ * Automatically synchronize and restore push registration for authorized users (ADMIN / MANUTENCAO)
+ * Prevents token loss on reload, browser restart, or re-login.
+ */
+export async function autoSyncPushDevice(currentUser?: User | null): Promise<void> {
+  if (!currentUser) return;
+  if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANUTENCAO') return;
+  if (!isPushSupported()) return;
+
+  const perm = getNotificationPermission();
+  const wasStoredActive = isStoredPushActive(currentUser.id);
+
+  // If user previously activated or permission is already granted, ensure active registration
+  if (perm === 'granted' || wasStoredActive) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+
+      if (!sub && perm === 'granted') {
+        const vapidRes = await fetch('/api/notifications/vapid-public-key');
+        if (vapidRes.ok) {
+          const { publicKey } = await vapidRes.json();
+          if (publicKey) {
+            const appServerKey = urlBase64ToUint8Array(publicKey);
+            sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: appServerKey
+            });
+          }
+        }
+      }
+
+      if (sub) {
+        const subJson = sub.toJSON();
+        const deviceInfo = getDeviceInfo();
+        const cleanEndpoint = sub.endpoint || '';
+        const hash = cleanEndpoint.slice(-16).replace(/[^a-zA-Z0-9]/g, '');
+        const deviceId = `dev-${currentUser.id}-${hash || Date.now()}`;
+
+        // Sync with backend server
+        await fetch('/api/notifications/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userRole: currentUser.role,
+            subscription: subJson,
+            deviceInfo
+          })
+        }).catch(() => {});
+
+        // Sync with Firestore user_devices
+        try {
+          await setDoc(doc(db, 'user_devices', deviceId), {
+            id: deviceId,
+            userId: currentUser.id,
+            userName: currentUser.name,
+            userRole: currentUser.role,
+            endpoint: cleanEndpoint,
+            token: cleanEndpoint,
+            subscription: subJson,
+            deviceInfo,
+            active: true,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        } catch {
+          // Firestore fallback handled
+        }
+
+        localStorage.setItem(`andradeagro_push_active_${currentUser.id}`, 'true');
+        console.log(`[Push Notification] Device verified and active for ${currentUser.name} (${currentUser.role}).`);
+      }
+    } catch (syncErr) {
+      console.warn('[Push Notification] Non-blocking auto-sync notice:', syncErr);
+    }
+  }
+
+  // Also check if there are pending events to flush
+  flushPendingPushEvents().catch(() => {});
 }
 
 /**

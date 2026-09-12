@@ -14,6 +14,7 @@ import {
   getStorageLoadingState, getFirestoreLoadError, StorageLoadingState, retryFirestoreConnection
 } from './utils/storage';
 import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLog, SystemSettings, MachineIssue, PreventiveMaintenanceItem } from './types';
+import { autoSyncPushDevice } from './utils/pushNotifications';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { CheckCircle2, Tractor, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
@@ -180,6 +181,15 @@ export default function App() {
     window.addEventListener('andradeagro_data_updated', refreshState);
     return () => window.removeEventListener('andradeagro_data_updated', refreshState);
   }, [refreshState]);
+
+  // Keep authorized push notification subscriptions active and synced with server & Firestore
+  useEffect(() => {
+    if (currentUser?.id && (currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO')) {
+      autoSyncPushDevice(currentUser).catch(err => {
+        console.warn('[Push Sync] Non-blocking auto sync:', err);
+      });
+    }
+  }, [currentUser?.id, currentUser?.role]);
 
   // Intelligent idle prefetching of next views (optimized: mobile leaves memory and bandwidth dedicated to active view)
   useEffect(() => {

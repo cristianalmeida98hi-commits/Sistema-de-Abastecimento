@@ -235,7 +235,10 @@ async function startServer() {
       duplicate: false,
       sentCount,
       failedCount,
-      recipientsCount: targetDevices.length
+      recipientsCount: targetDevices.length,
+      message: targetDevices.length === 0 
+        ? 'Nenhum dispositivo ativo registrado para usuários autorizados (ADMIN/MANUTENÇÃO).'
+        : `Enviado para ${sentCount} de ${targetDevices.length} dispositivos.`
     };
   }
 
@@ -247,6 +250,27 @@ async function startServer() {
 
   app.get('/api/notifications/devices', (req, res) => {
     res.json({ devices: serverDb['andradeagro_user_devices_v1'] || [] });
+  });
+
+  app.post('/api/notifications/reset-event-dedup', (req, res) => {
+    try {
+      const { prefix, eventId } = req.body;
+      let processedList: string[] = serverDb['andradeagro_processed_push_events'] || [];
+      const beforeCount = processedList.length;
+      if (eventId) {
+        processedList = processedList.filter((id: string) => id !== eventId);
+      } else if (prefix) {
+        processedList = processedList.filter((id: string) => !id.startsWith(prefix));
+      } else {
+        processedList = [];
+      }
+      serverDb['andradeagro_processed_push_events'] = processedList;
+      saveDatabase();
+      console.log(`[Push Notification] Reset event dedup (prefix: ${prefix || 'ALL'}, removed: ${beforeCount - processedList.length}).`);
+      res.json({ success: true, removedCount: beforeCount - processedList.length, remainingCount: processedList.length });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to reset event deduplication' });
+    }
   });
 
   app.post('/api/notifications/subscribe', (req, res) => {

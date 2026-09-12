@@ -355,6 +355,12 @@ export interface SmartAlert {
   resolvedBy?: string;
   cycleTargetHourmeter?: number;
   lastOilChangeHourmeter?: number;
+  cycleTargetKm?: number;
+  lastOilChangeKm?: number;
+  cycleId?: string;
+  pushNotified?: boolean;
+  pushNotifiedForCycle?: number;
+  pushNotifiedAt?: string;
 }
 
 export interface AuditLog {

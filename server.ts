@@ -13,6 +13,17 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // CORS middleware for local development, PWA, mobile devices, and preview iframes
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
   app.use(express.json({ limit: '10mb' }));
 
   // Central Database Persistence Setup
@@ -140,8 +151,9 @@ async function startServer() {
     description: string;
     equipmentId?: string;
     targetUserId?: string;
+    customTitle?: string;
   }) {
-    const { eventType, eventId, equipmentName, description, equipmentId, targetUserId } = event;
+    const { eventType, eventId, equipmentName, description, equipmentId, targetUserId, customTitle } = event;
 
     // Deduplication check
     let processedList: string[] = serverDb['andradeagro_processed_push_events'] || [];
@@ -157,25 +169,25 @@ async function startServer() {
     serverDb['andradeagro_processed_push_events'] = processedList;
     saveDatabase();
 
-    let title = '⚠️ Notificação AndradeAgro';
+    let title = customTitle || '⚠️ Notificação AndradeAgro';
     let url = '/';
 
     if (eventType === 'NEW_ISSUE') {
-      title = '⚠️ Novo problema registrado';
+      title = customTitle || '⚠️ Novo problema registrado';
       url = `/?tab=alerts&issueId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
     } else if (eventType === 'NEW_MAINTENANCE') {
-      title = '🔧 Nova manutenção registrada';
+      title = customTitle || '🔧 Nova manutenção registrada';
       url = `/?tab=maintenance&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
     } else if (eventType === 'OIL_CHANGE_DUE') {
-      title = '⚠️ Troca de óleo pendente';
+      title = customTitle || '⚠️ Troca de óleo pendente';
       url = `/?tab=maintenance&equipmentId=${encodeURIComponent(equipmentId || '')}`;
     } else if (eventType === 'TEST') {
-      title = 'Teste de Notificação';
+      title = customTitle || 'Teste AndradeAgro';
       url = '/?tab=settings';
     }
 
     const notificationBody = eventType === 'TEST'
-      ? (description || 'Se você recebeu esta mensagem, o push do AndradeAgro está funcionando.')
+      ? (description || 'Notificações Push funcionando.')
       : eventType === 'OIL_CHANGE_DUE'
         ? (description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`)
         : `${equipmentName}\n${description}`.trim();
@@ -262,7 +274,11 @@ async function startServer() {
 
   // PUSH NOTIFICATIONS API
   app.get('/api/notifications/vapid-public-key', (req, res) => {
-    res.json({ publicKey: vapidKeys.publicKey });
+    const key = vapidKeys?.publicKey || DEFAULT_STATIC_VAPID_KEYS.publicKey;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.json({ publicKey: key });
   });
 
   app.get('/api/notifications/devices', (req, res) => {
@@ -377,12 +393,13 @@ async function startServer() {
 
   app.post('/api/notifications/test', async (req, res) => {
     try {
-      const { userId } = req.body;
+      const { userId, title, description } = req.body;
       const result = await dispatchPushToAuthorizedUsers({
         eventType: 'TEST',
         eventId: `test-${Date.now()}`,
         equipmentName: 'AndradeAgro',
-        description: 'Se você recebeu esta mensagem, o push do AndradeAgro está funcionando.',
+        description: description || 'Notificações Push funcionando.',
+        customTitle: title || 'Teste AndradeAgro',
         targetUserId: userId
       });
       res.json(result);

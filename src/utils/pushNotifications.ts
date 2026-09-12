@@ -3,6 +3,54 @@ import { db, ensureFirebaseAuth } from '../lib/firebase';
 import { doc, setDoc, updateDoc } from 'firebase/firestore';
 
 /**
+ * Chave pública VAPID oficial do sistema AndradeAgro (RFC 8292).
+ * Chave pública padrão para validação e assinatura Web Push no navegador do dispositivo.
+ * O par privado correspondente reside com segurança exclusiva no servidor backend.
+ */
+export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
+
+/**
+ * Obtém a chave pública VAPID de forma resiliente:
+ * 1. Consulta o endpoint /api/notifications/vapid-public-key do servidor;
+ * 2. Se houver falha de rede/CORS temporária, verifica import.meta.env.VITE_VAPID_PUBLIC_KEY;
+ * 3. Utiliza a chave pública oficial estática pareada com o backend AndradeAgro.
+ */
+export async function getVapidPublicKey(): Promise<string> {
+  // 1. Tentar obter do servidor
+  try {
+    const res = await fetch('/api/notifications/vapid-public-key', {
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store'
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.publicKey && typeof data.publicKey === 'string' && data.publicKey.trim().length > 10) {
+        return data.publicKey.trim();
+      }
+    } else {
+      console.warn(`[Push Notification] /api/notifications/vapid-public-key respondeu status ${res.status}`);
+    }
+  } catch (err: any) {
+    console.warn('[Push Notification] Não foi possível contatar o endpoint VAPID diretamente:', err?.message || err);
+  }
+
+  // 2. Verificar variável de ambiente do Vite se presente
+  try {
+    const envKey = (import.meta as any).env?.VITE_VAPID_PUBLIC_KEY;
+    if (envKey && typeof envKey === 'string' && envKey.trim().length > 10) {
+      return envKey.trim();
+    }
+  } catch {}
+
+  // 3. Chave pública oficial do sistema AndradeAgro
+  if (OFFICIAL_VAPID_PUBLIC_KEY) {
+    return OFFICIAL_VAPID_PUBLIC_KEY;
+  }
+
+  throw new Error('Falha ao obter chave pública de notificação do servidor.');
+}
+
+/**
  * Utility to convert base64 VAPID public key into Uint8Array for PushManager
  */
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -216,12 +264,8 @@ export async function enablePushNotifications(currentUser: User): Promise<{
     }
     await navigator.serviceWorker.ready;
 
-    // 3. Fetch server's VAPID public key
-    const vapidRes = await fetch('/api/notifications/vapid-public-key');
-    if (!vapidRes.ok) {
-      throw new Error('Falha ao obter chave pública de notificação do servidor.');
-    }
-    const { publicKey } = await vapidRes.json();
+    // 3. Fetch server's VAPID public key with fallback resilience
+    const publicKey = await getVapidPublicKey();
     if (!publicKey) {
       throw new Error('Chave VAPID pública não disponível.');
     }
@@ -369,7 +413,11 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
     const res = await fetch('/api/notifications/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: currentUser.id })
+      body: JSON.stringify({ 
+        userId: currentUser.id,
+        title: 'Teste AndradeAgro',
+        description: 'Notificações Push funcionando.'
+      })
     });
 
     const data = await res.json();
@@ -586,9 +634,7 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
   if (perm === 'granted' || wasStoredActive) {
     try {
       const reg = await navigator.serviceWorker.ready;
-      const vapidRes = await fetch('/api/notifications/vapid-public-key');
-      if (!vapidRes.ok) return;
-      const { publicKey } = await vapidRes.json();
+      const publicKey = await getVapidPublicKey().catch(() => null);
       if (!publicKey) return;
 
       const sub = await getOrRenewSubscription(reg, publicKey);

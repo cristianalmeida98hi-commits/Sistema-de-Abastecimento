@@ -294,21 +294,21 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
           )}
         </div>
 
-        {isActive && (
+        {(isActive || permission === 'granted') && (
           <button
             id="test-push-notification-btn"
             type="button"
             onClick={handleTest}
             disabled={loading || syncing}
             className="px-4 py-2.5 rounded-xl bg-[#FACC15] hover:bg-amber-400 text-gray-950 font-black text-xs flex items-center gap-2 shadow-md transition-all active:scale-95 disabled:opacity-50 min-h-[44px]"
-            title="Envia uma notificação push real de teste com título 'Teste AndradeAgro' e mensagem 'Notificações Push funcionando.'"
+            title="Envia uma notificação push real de teste para este dispositivo"
           >
             {loading ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <Send className="w-3.5 h-3.5" />
             )}
-            <span>Enviar Teste Real ao Celular</span>
+            <span>Testar Notificação</span>
           </button>
         )}
       </div>

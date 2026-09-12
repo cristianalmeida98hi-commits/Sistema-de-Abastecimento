@@ -10,25 +10,144 @@ import { doc, setDoc, updateDoc } from 'firebase/firestore';
 export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
 
 /**
+ * Interface para respostas seguras de API com diagnóstico técnico completo.
+ */
+export interface SafeApiResponse<T = any> {
+  ok: boolean;
+  status: number;
+  statusText?: string;
+  contentType?: string;
+  data?: T;
+  rawText?: string;
+  error?: string;
+  url: string;
+  method: string;
+}
+
+/**
+ * Resolve a URL final para requisições de API.
+ * Suporta a variável de ambiente VITE_API_URL para deploys com backend desacoplado.
+ */
+export function resolveApiUrl(path: string): string {
+  try {
+    const customBase = (import.meta as any).env?.VITE_API_URL;
+    if (customBase && typeof customBase === 'string' && customBase.trim().length > 0) {
+      const cleanBase = customBase.trim().replace(/\/+$/, '');
+      const cleanPath = path.startsWith('/') ? path : `/${path}`;
+      return `${cleanBase}${cleanPath}`;
+    }
+  } catch {}
+  return path;
+}
+
+/**
+ * Cliente HTTP seguro que NUNCA assume cegamente que a resposta é JSON.
+ * - Valida status HTTP;
+ * - Verifica cabeçalho Content-Type;
+ * - Se for JSON, interpreta com tratamento de erro;
+ * - Se for HTML ou texto puro (ex: página de erro 404 do Vercel "The page could not be found" ou SPA fallback),
+ *   captura o conteúdo como texto e gera um erro técnico detalhado para diagnóstico sem quebrar a aplicação.
+ */
+export async function safeApiFetch<T = any>(
+  endpoint: string,
+  options?: RequestInit
+): Promise<SafeApiResponse<T>> {
+  const url = resolveApiUrl(endpoint);
+  const method = options?.method || 'GET';
+
+  console.log(`[AndradeAgro API] Requisição: ${method} ${url}`);
+
+  try {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        'Accept': 'application/json',
+        ...(options?.headers || {})
+      }
+    });
+
+    const status = res.status;
+    const statusText = res.statusText;
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+    console.log(`[AndradeAgro API] Resposta: ${method} ${url} -> Status: ${status} (${statusText}), Content-Type: ${contentType}`);
+
+    // Caso a resposta possua Content-Type application/json
+    if (contentType.includes('application/json')) {
+      try {
+        const data = await res.json();
+        if (res.ok) {
+          return { ok: true, status, statusText, contentType, data, url, method };
+        } else {
+          const errMsg = data?.error || data?.message || `Erro do servidor (Status ${status}: ${statusText})`;
+          return { ok: false, status, statusText, contentType, data, error: errMsg, url, method };
+        }
+      } catch (jsonErr: any) {
+        const rawText = await res.text().catch(() => '');
+        return {
+          ok: false,
+          status,
+          statusText,
+          contentType,
+          rawText,
+          error: `Resposta com cabeçalho JSON mas conteúdo malformatado: ${rawText.slice(0, 120)}`,
+          url,
+          method
+        };
+      }
+    }
+
+    // Caso a resposta NÃO seja JSON (ex: HTML de erro 404 da hospedagem, SPA fallback ou texto)
+    const rawText = await res.text().catch(() => '');
+    const cleanSnippet = rawText.trim().replace(/\s+/g, ' ').slice(0, 200);
+
+    let diagnosticMsg: string;
+    if (rawText.includes('The page could not be found') || rawText.includes('404: NOT_FOUND')) {
+      diagnosticMsg = `Endpoint não encontrado no provedor de hospedagem (Status ${status}): A URL "${url}" retornou a página 404 HTML da infraestrutura.`;
+    } else if (rawText.includes('<!DOCTYPE html>') || rawText.includes('<html')) {
+      diagnosticMsg = `O servidor respondeu com uma página HTML em vez de JSON (Status ${status} em ${url}). O endpoint pode não estar implantado ou ter sido interceptado pelo SPA.`;
+    } else {
+      diagnosticMsg = `Resposta não-JSON recebida (Status ${status}, Content-Type: ${contentType || 'não informado'}): ${cleanSnippet || '(vazio)'}`;
+    }
+
+    console.warn(`[AndradeAgro API] Conteúdo recebido não é JSON em ${url}:`, { status, contentType, rawSnippet: cleanSnippet });
+
+    return {
+      ok: false,
+      status,
+      statusText,
+      contentType,
+      rawText,
+      error: diagnosticMsg,
+      url,
+      method
+    };
+  } catch (netErr: any) {
+    console.error(`[AndradeAgro API] Falha de rede em ${method} ${url}:`, netErr);
+    return {
+      ok: false,
+      status: 0,
+      error: `Falha de conexão com o servidor (${url}): ${netErr?.message || 'Sem resposta do servidor'}`,
+      url,
+      method
+    };
+  }
+}
+
+/**
  * Obtém a chave pública VAPID de forma resiliente:
- * 1. Consulta o endpoint /api/notifications/vapid-public-key do servidor;
+ * 1. Consulta o endpoint /api/notifications/vapid-public-key do servidor via safeApiFetch;
  * 2. Se houver falha de rede/CORS temporária, verifica import.meta.env.VITE_VAPID_PUBLIC_KEY;
  * 3. Utiliza a chave pública oficial estática pareada com o backend AndradeAgro.
  */
 export async function getVapidPublicKey(): Promise<string> {
   // 1. Tentar obter do servidor
   try {
-    const res = await fetch('/api/notifications/vapid-public-key', {
-      headers: { 'Accept': 'application/json' },
+    const result = await safeApiFetch<{ publicKey?: string }>('/api/notifications/vapid-public-key', {
       cache: 'no-store'
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.publicKey && typeof data.publicKey === 'string' && data.publicKey.trim().length > 10) {
-        return data.publicKey.trim();
-      }
-    } else {
-      console.warn(`[Push Notification] /api/notifications/vapid-public-key respondeu status ${res.status}`);
+    if (result.ok && result.data && result.data.publicKey && typeof result.data.publicKey === 'string' && result.data.publicKey.trim().length > 10) {
+      return result.data.publicKey.trim();
     }
   } catch (err: any) {
     console.warn('[Push Notification] Não foi possível contatar o endpoint VAPID diretamente:', err?.message || err);
@@ -302,7 +421,7 @@ export async function enablePushNotifications(currentUser: User): Promise<{
     }
 
     // 6. Register device on backend server
-    const serverRes = await fetch('/api/notifications/subscribe', {
+    const serverRes = await safeApiFetch('/api/notifications/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -315,7 +434,7 @@ export async function enablePushNotifications(currentUser: User): Promise<{
     });
 
     if (!serverRes.ok) {
-      console.warn('[Push Notification] Backend subscription returned status:', serverRes.status);
+      console.warn('[Push Notification] Backend subscription returned notice:', serverRes.error);
     }
 
     // 7. Store local state
@@ -354,14 +473,14 @@ export async function disablePushNotifications(currentUser?: User): Promise<{
           await sub.unsubscribe();
 
           // Inform backend
-          await fetch('/api/notifications/unsubscribe', {
+          await safeApiFetch('/api/notifications/unsubscribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               endpoint,
               userId: currentUser?.id
             })
-          }).catch(() => {});
+          });
 
           // Inform Firestore
           if (currentUser?.id) {
@@ -410,17 +529,43 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
   errors?: string[];
 }> {
   try {
-    const res = await fetch('/api/notifications/test', {
+    // 1. Inspecionar inscrição local ativa no ServiceWorker deste dispositivo para garantir envio imediato
+    let currentSubscription: any = null;
+    try {
+      if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          currentSubscription = normalizeSubscription(sub);
+        }
+      }
+    } catch (subErr) {
+      console.warn('[Push Notification] Aviso ao inspecionar inscrição local antes do teste:', subErr);
+    }
+
+    // 2. Executar requisição segura à API
+    const result = await safeApiFetch('/api/notifications/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         userId: currentUser.id,
+        userName: currentUser.name,
+        userRole: currentUser.role,
         title: 'Teste AndradeAgro',
-        description: 'Notificações Push funcionando.'
+        description: 'Notificações Push funcionando.',
+        subscription: currentSubscription
       })
     });
 
-    const data = await res.json();
+    if (!result.ok || !result.data) {
+      return {
+        success: false,
+        sentCount: 0,
+        message: result.error || `Erro de conexão ao testar notificação (Status ${result.status}).`
+      };
+    }
+
+    const data = result.data;
     if (data.success && data.sentCount > 0) {
       return {
         success: true,
@@ -471,7 +616,7 @@ export async function clearPushEventDeduplication(prefix?: string): Promise<void
   }
 
   try {
-    await fetch('/api/notifications/reset-event-dedup', {
+    await safeApiFetch('/api/notifications/reset-event-dedup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prefix })
@@ -528,7 +673,7 @@ export async function flushPendingPushEvents(): Promise<void> {
 
   for (const item of queue) {
     try {
-      const res = await fetch('/api/notifications/dispatch-event', {
+      const result = await safeApiFetch('/api/notifications/dispatch-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -539,7 +684,7 @@ export async function flushPendingPushEvents(): Promise<void> {
           equipmentId: item.equipmentId
         })
       });
-      if (!res.ok) {
+      if (!result.ok) {
         remaining.push(item);
       } else {
         clientDispatchedEventIds.add(item.eventId);
@@ -590,7 +735,7 @@ export async function dispatchPushNotificationEvent(payload: PushNotificationPay
   }
 
   try {
-    const res = await fetch('/api/notifications/dispatch-event', {
+    const result = await safeApiFetch('/api/notifications/dispatch-event', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -602,14 +747,13 @@ export async function dispatchPushNotificationEvent(payload: PushNotificationPay
       })
     });
 
-    if (!res.ok) {
+    if (!result.ok || !result.data) {
       queuePendingPushEvent(payload);
-      return { success: false, message: `Falha na requisição: ${res.status}` };
+      return { success: false, message: result.error || `Falha na requisição: ${result.status}` };
     }
 
-    const data = await res.json();
     clientDispatchedEventIds.add(payload.eventId);
-    return data;
+    return result.data;
   } catch (err: any) {
     // Queue for retry
     queuePendingPushEvent(payload);
@@ -646,7 +790,7 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
         const deviceId = `dev-${currentUser.id}-${hash || Date.now()}`;
 
         // Sync with backend server
-        await fetch('/api/notifications/subscribe', {
+        await safeApiFetch('/api/notifications/subscribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -656,7 +800,7 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
             subscription: subJson,
             deviceInfo
           })
-        }).catch(() => {});
+        });
 
         // Sync with Firestore user_devices with authenticated session
         try {
@@ -705,9 +849,9 @@ export async function fetchServerNotificationStatus(): Promise<{
   }>;
 } | null> {
   try {
-    const res = await fetch('/api/notifications/status');
-    if (!res.ok) return null;
-    return await res.json();
+    const result = await safeApiFetch('/api/notifications/status');
+    if (!result.ok || !result.data) return null;
+    return result.data;
   } catch {
     return null;
   }

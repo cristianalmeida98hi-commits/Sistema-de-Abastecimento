@@ -847,8 +847,33 @@
     "tankInitialStockLiters": 15000,
     "tankStockBaseUpdatedAt": "2026-09-10T21:58:46.589Z"
   },
-  "andradeagro_user_devices_v1": [],
-  "andradeagro_processed_push_events": [],
+  "andradeagro_user_devices_v1": [
+    {
+      "id": "dev-usr-admin-1-1789240589275",
+      "userId": "usr-admin-1",
+      "userName": "Gestor Teste",
+      "userRole": "ADMIN",
+      "endpoint": "https://fcm.googleapis.com/fcm/send/test-sub-123",
+      "subscription": {
+        "endpoint": "https://fcm.googleapis.com/fcm/send/test-sub-123",
+        "keys": {
+          "p256dh": "testp256dh",
+          "auth": "testauth"
+        }
+      },
+      "deviceInfo": {
+        "browser": "Chrome",
+        "os": "Android",
+        "deviceType": "mobile"
+      },
+      "active": true,
+      "updatedAt": "2026-09-12T19:16:29.275Z",
+      "createdAt": "2026-09-12T19:16:29.275Z"
+    }
+  ],
+  "andradeagro_processed_push_events": [
+    "test-1789240586511"
+  ],
   "andradeagro_vapid_keys": {
     "publicKey": "BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s",
     "privateKey": "jIzx37tfbmK5NxYiLQYbcze3XSBg9Il6kBLeDW6zQxA"

@@ -152,8 +152,22 @@ async function startServer() {
     equipmentId?: string;
     targetUserId?: string;
     customTitle?: string;
+    directSubscription?: any;
+    directUserName?: string;
+    directUserRole?: string;
   }) {
-    const { eventType, eventId, equipmentName, description, equipmentId, targetUserId, customTitle } = event;
+    const { 
+      eventType, 
+      eventId, 
+      equipmentName, 
+      description, 
+      equipmentId, 
+      targetUserId, 
+      customTitle,
+      directSubscription,
+      directUserName,
+      directUserRole
+    } = event;
 
     // Deduplication check
     let processedList: string[] = serverDb['andradeagro_processed_push_events'] || [];
@@ -207,7 +221,29 @@ async function startServer() {
       }
     });
 
-    const devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+    let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+
+    // If direct test subscription was passed, register or update it immediately
+    if (directSubscription && directSubscription.endpoint) {
+      const existing = devices.find(d => d.subscription && d.subscription.endpoint === directSubscription.endpoint);
+      if (!existing) {
+        const newDev = {
+          id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
+          userId: targetUserId || 'direct-test-user',
+          userName: directUserName || 'Usuário Atual',
+          userRole: directUserRole || 'ADMIN',
+          endpoint: directSubscription.endpoint,
+          subscription: directSubscription,
+          deviceInfo: {},
+          active: true,
+          updatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString()
+        };
+        devices.unshift(newDev);
+        serverDb['andradeagro_user_devices_v1'] = devices;
+        saveDatabase();
+      }
+    }
     // Strict Role Enforcement: Only ADMIN and MANUTENCAO can receive notifications. FUNCIONARIO is excluded!
     const targetDevices = devices.filter(d => {
       if (d.active === false) return false;
@@ -393,14 +429,17 @@ async function startServer() {
 
   app.post('/api/notifications/test', async (req, res) => {
     try {
-      const { userId, title, description } = req.body;
+      const { userId, userName, userRole, title, description, subscription } = req.body;
       const result = await dispatchPushToAuthorizedUsers({
         eventType: 'TEST',
         eventId: `test-${Date.now()}`,
         equipmentName: 'AndradeAgro',
         description: description || 'Notificações Push funcionando.',
         customTitle: title || 'Teste AndradeAgro',
-        targetUserId: userId
+        targetUserId: userId,
+        directSubscription: subscription,
+        directUserName: userName,
+        directUserRole: userRole
       });
       res.json(result);
     } catch (err: any) {
@@ -788,6 +827,16 @@ async function startServer() {
     } else {
       res.status(404).json({ error: 'Issue not found' });
     }
+  });
+
+  // Strict catch-all for unhandled /api/* routes - ALWAYS return JSON 404, never HTML!
+  app.all('/api/*', (req, res) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.status(404).json({
+      success: false,
+      error: `Endpoint de API não encontrado: ${req.method} ${req.path}`,
+      message: 'A rota de API solicitada não existe no servidor.'
+    });
   });
 
   // Vite middleware for development

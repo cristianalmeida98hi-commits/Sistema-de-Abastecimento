@@ -681,7 +681,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               <h4 className="text-red-100 font-extrabold text-sm">Alertas Críticos & Manutenção Preventiva</h4>
             </div>
             <p className="text-red-200 text-xs font-bold mt-3">
-              {vehicles.filter(v => v.status === 'MANUTENCAO').length} Veículos em Manutenção Ativa
+              {vehicles.filter(v => v.status === 'EM_MANUTENCAO' || (v.status as any) === 'MANUTENCAO').length} Veículos em Manutenção Ativa
             </p>
             <p className="text-red-300 text-[11px] mt-1 font-medium leading-relaxed">
               Controle flexível por horímetro ou quilometragem para tratores, caminhões e máquinas agrícolas com planos individualizados.

@@ -22,7 +22,6 @@ export default async function handler(req: any, res: any) {
       equipmentName: 'AndradeAgro',
       description: description || 'Notificações Push funcionando.',
       customTitle: title || 'Teste AndradeAgro',
-      targetUserId: userId,
       directSubscription: subscription,
       directUserName: userName,
       directUserRole: userRole

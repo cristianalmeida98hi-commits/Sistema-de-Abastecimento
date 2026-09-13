@@ -216,11 +216,11 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
         // Oil change program (KM for vehicles, Hours for machines)
         oilChangeControlActive: oilChangeControlActive,
         oilChangeIntervalHours: !isRoadVehicle ? intervalHours : undefined,
-        oilChangeWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
+        oilChangeWarningAdvanceHours: !isRoadVehicle ? (Number(oilChangeWarningAdvanceHours) || 0) : undefined,
         lastOilChangeHourmeter: !isRoadVehicle ? refOilMeter : undefined,
         nextOilChangeHourmeter: !isRoadVehicle ? nextOilMeterHours : undefined,
         maintenanceIntervalHours: !isRoadVehicle ? intervalHours : undefined,
-        maintenanceWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
+        maintenanceWarningAdvanceHours: !isRoadVehicle ? (Number(oilChangeWarningAdvanceHours) || 0) : undefined,
         lastMaintenanceHourmeter: !isRoadVehicle ? refOilMeter : undefined,
         nextMaintenanceHourmeter: !isRoadVehicle ? nextOilMeterHours : undefined,
         // KM fields for vehicles
@@ -344,11 +344,11 @@ export const FleetManagementViewComponent: React.FC<FleetManagementViewProps> = 
         // Oil change updates
         oilChangeControlActive: oilChangeControlActive,
         oilChangeIntervalHours: !isRoadVehicle ? intervalHours : undefined,
-        oilChangeWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
+        oilChangeWarningAdvanceHours: !isRoadVehicle ? (Number(oilChangeWarningAdvanceHours) || 0) : undefined,
         lastOilChangeHourmeter: !isRoadVehicle ? refMeterHours : undefined,
         nextOilChangeHourmeter: !isRoadVehicle ? nextOilMeterHours : undefined,
         maintenanceIntervalHours: !isRoadVehicle ? intervalHours : undefined,
-        maintenanceWarningAdvanceHours: !isRoadVehicle ? oilChangeWarningAdvanceHours : undefined,
+        maintenanceWarningAdvanceHours: !isRoadVehicle ? (Number(oilChangeWarningAdvanceHours) || 0) : undefined,
         lastMaintenanceHourmeter: !isRoadVehicle ? refMeterHours : undefined,
         nextMaintenanceHourmeter: !isRoadVehicle ? nextOilMeterHours : undefined,
         // KM fields for vehicles

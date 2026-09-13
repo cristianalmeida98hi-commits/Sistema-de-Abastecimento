@@ -183,14 +183,14 @@ export default function App() {
     return () => window.removeEventListener('andradeagro_data_updated', refreshState);
   }, [refreshState]);
 
-  // Keep authorized push notification subscriptions active and synced with server & Firestore
+  // Keep push notification subscriptions active and synced for any user who granted permission
   useEffect(() => {
-    if (currentUser?.id && (currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO')) {
+    if (currentUser?.id) {
       autoSyncPushDevice(currentUser).catch(err => {
         console.warn('[Push Sync] Non-blocking auto sync:', err);
       });
     }
-  }, [currentUser?.id, currentUser?.role]);
+  }, [currentUser?.id]);
 
   // Intelligent idle prefetching of next views (optimized: mobile leaves memory and bandwidth dedicated to active view)
   useEffect(() => {

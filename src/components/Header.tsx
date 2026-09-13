@@ -104,82 +104,80 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
               <span className="hidden sm:inline">Novo Abastecimento</span>
             </button>
 
-            {/* Notifications Bell (ADMINs and MANUTENCAO) */}
-            {currentUser.role !== 'FUNCIONARIO' && (
-              <div className="relative">
-                <button
-                  onClick={() => setShowAlertsDropdown(!showAlertsDropdown)}
-                  className="w-10 h-10 sm:w-9 sm:h-9 min-h-[44px] sm:min-h-0 rounded-full border flex items-center justify-center relative transition-colors bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60"
-                  title="Alertas e Notificações"
-                >
-                  <Bell className="w-4.5 h-4.5" />
-                  {unresolvedAlerts.length > 0 && (
-                    <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 border-2 border-[#04281f] rounded-full"></span>
-                  )}
-                </button>
-
-                {/* Alerts Dropdown Popover */}
-                {showAlertsDropdown && (
-                  <div className="absolute right-0 mt-3 w-80 sm:w-96 rounded-3xl shadow-2xl border p-4 z-50 animate-in fade-in slide-in-from-top-2 bg-[#042d23] border-emerald-800 text-emerald-100">
-                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-emerald-900/50">
-                      <div className="flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 text-amber-500" />
-                        <span className="font-bold text-xs">Alertas Críticos ({unresolvedAlerts.length})</span>
-                      </div>
-                      <button 
-                        onClick={() => { setShowAlertsDropdown(false); onNavigate('alerts'); }}
-                        className="text-[11px] text-[#C5A059] font-bold hover:underline"
-                      >
-                        Ver Todos
-                      </button>
-                    </div>
-
-                    {unresolvedAlerts.length === 0 ? (
-                      <div className="py-6 text-center text-xs text-slate-400">
-                        <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-1.5 opacity-80" />
-                        Nenhum alerta pendente.
-                      </div>
-                    ) : (
-                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                        {unresolvedAlerts.slice(0, 4).map(alert => {
-                          const targetVehicle = alert.equipmentId && vehicles ? vehicles.find(v => v.id === alert.equipmentId) : undefined;
-                          return (
-                            <div 
-                              key={alert.id}
-                              onClick={() => {
-                                setShowAlertsDropdown(false);
-                                if (targetVehicle && onOpenDigitalSheet) {
-                                  onOpenDigitalSheet(targetVehicle);
-                                } else {
-                                  onNavigate('alerts');
-                                }
-                              }}
-                              className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
-                                alert.severity === 'ALTA' 
-                                  ? 'bg-red-50 border-red-100 text-red-900 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-200' 
-                                  : 'bg-emerald-50 border-emerald-100 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-200'
-                              }`}
-                              title={targetVehicle ? `Abrir ficha técnica de ${targetVehicle.model}` : 'Ver alertas'}
-                            >
-                              <div className="font-semibold flex items-center justify-between mb-0.5">
-                                <span>{alert.title}</span>
-                                <span className="text-[10px] opacity-75">{alert.date}</span>
-                              </div>
-                              <p className="text-[11px] opacity-90 line-clamp-2">{alert.description}</p>
-                              {targetVehicle && (
-                                <span className="text-[10px] font-bold text-amber-500 mt-1 block">
-                                  ➜ Abrir Ficha: {targetVehicle.model} ({targetVehicle.patrimonyCode || targetVehicle.licensePlate || 'Frota'})
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
+            {/* Notifications Bell */}
+            <div className="relative">
+              <button
+                onClick={() => setShowAlertsDropdown(!showAlertsDropdown)}
+                className="w-10 h-10 sm:w-9 sm:h-9 min-h-[44px] sm:min-h-0 rounded-full border flex items-center justify-center relative transition-colors bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60"
+                title="Alertas e Notificações"
+              >
+                <Bell className="w-4.5 h-4.5" />
+                {unresolvedAlerts.length > 0 && (
+                  <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 border-2 border-[#04281f] rounded-full"></span>
                 )}
-              </div>
-            )}
+              </button>
+
+              {/* Alerts Dropdown Popover */}
+              {showAlertsDropdown && (
+                <div className="absolute right-0 mt-3 w-80 sm:w-96 rounded-3xl shadow-2xl border p-4 z-50 animate-in fade-in slide-in-from-top-2 bg-[#042d23] border-emerald-800 text-emerald-100">
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-emerald-900/50">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-500" />
+                      <span className="font-bold text-xs">Alertas Críticos ({unresolvedAlerts.length})</span>
+                    </div>
+                    <button 
+                      onClick={() => { setShowAlertsDropdown(false); onNavigate('alerts'); }}
+                      className="text-[11px] text-[#C5A059] font-bold hover:underline"
+                    >
+                      Ver Todos
+                    </button>
+                  </div>
+
+                  {unresolvedAlerts.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-slate-400">
+                      <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-1.5 opacity-80" />
+                      Nenhum alerta pendente.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                      {unresolvedAlerts.slice(0, 4).map(alert => {
+                        const targetVehicle = alert.equipmentId && vehicles ? vehicles.find(v => v.id === alert.equipmentId) : undefined;
+                        return (
+                          <div 
+                            key={alert.id}
+                            onClick={() => {
+                              setShowAlertsDropdown(false);
+                              if (targetVehicle && onOpenDigitalSheet) {
+                                onOpenDigitalSheet(targetVehicle);
+                              } else {
+                                onNavigate('alerts');
+                              }
+                            }}
+                            className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all ${
+                              alert.severity === 'ALTA' 
+                                ? 'bg-red-50 border-red-100 text-red-900 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-200' 
+                                : 'bg-emerald-50 border-emerald-100 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-200'
+                            }`}
+                            title={targetVehicle ? `Abrir ficha técnica de ${targetVehicle.model}` : 'Ver alertas'}
+                          >
+                            <div className="font-semibold flex items-center justify-between mb-0.5">
+                              <span>{alert.title}</span>
+                              <span className="text-[10px] opacity-75">{alert.date}</span>
+                            </div>
+                            <p className="text-[11px] opacity-90 line-clamp-2">{alert.description}</p>
+                            {targetVehicle && (
+                              <span className="text-[10px] font-bold text-amber-500 mt-1 block">
+                                ➜ Abrir Ficha: {targetVehicle.model} ({targetVehicle.patrimonyCode || targetVehicle.licensePlate || 'Frota'})
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* User Profile Info Badge */}
             <div className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border bg-emerald-900/40 border-emerald-800">

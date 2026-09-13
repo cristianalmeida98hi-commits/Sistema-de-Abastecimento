@@ -713,8 +713,8 @@ export const SettingsAndAboutView: React.FC<SettingsAndAboutViewProps> = ({
         </div>
       </div>
 
-      {/* PUSH NOTIFICATIONS REAL-TIME (ADMIN & MANUTENCAO) */}
-      {(currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO') && (
+      {/* PUSH NOTIFICATIONS REAL-TIME */}
+      {currentUser && (
         <div className="pt-2">
           <PushNotificationSettingsCard currentUser={currentUser} darkMode={darkMode} />
         </div>

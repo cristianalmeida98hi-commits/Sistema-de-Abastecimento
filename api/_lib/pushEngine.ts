@@ -248,16 +248,16 @@ export function getDevicesList(): any[] {
 
 export function getEngineStatus(): any {
   loadStore();
-  const activeAuthorized = inMemoryStore.devices.filter(
-    d => d.active !== false && (d.userRole === 'ADMIN' || d.userRole === 'MANUTENCAO')
+  const activeValid = inMemoryStore.devices.filter(
+    d => d.active !== false && d.subscription && d.subscription.endpoint
   );
 
   return {
     vapidConfigured: true,
     vapidPublicKey: VAPID_PUBLIC_KEY,
     totalDevices: inMemoryStore.devices.length,
-    activeAuthorizedCount: activeAuthorized.length,
-    authorizedDevices: activeAuthorized.map(d => ({
+    activeAuthorizedCount: activeValid.length,
+    authorizedDevices: activeValid.map(d => ({
       userName: d.userName,
       userRole: d.userRole,
       platform: d.deviceInfo?.platform || 'desconhecido',
@@ -389,18 +389,21 @@ export async function dispatchPushToAuthorizedUsers(event: {
       registerDevice({
         userId: targetUserId || 'direct-test-user',
         userName: directUserName || 'Usuário Atual',
-        userRole: directUserRole || 'ADMIN',
+        userRole: directUserRole || 'USUARIO',
         subscription: directSubscription
       });
     }
   }
 
-  // Find target devices: only ADMIN and MANUTENCAO
+  // Find target devices: ANY active device with valid subscription & permission
+  // Profile / Role is NOT used as a filter!
   let targets = inMemoryStore.devices.filter(d => {
     if (d.active === false) return false;
     if (!d.subscription || !d.subscription.endpoint) return false;
-    if (targetUserId) return d.userId === targetUserId;
-    return d.userRole === 'ADMIN' || d.userRole === 'MANUTENCAO';
+    // For test dispatches, test ALL valid registered devices.
+    // For specific user dispatches (when targetUserId provided on non-test events), filter accordingly.
+    if (eventType !== 'TEST' && targetUserId) return d.userId === targetUserId;
+    return true;
   });
 
   // If a direct subscription was passed for a test, ensure it is included even if userId differed
@@ -411,7 +414,7 @@ export async function dispatchPushToAuthorizedUsers(event: {
         id: `dev-direct-${Date.now()}`,
         userId: targetUserId || 'direct-test-user',
         userName: directUserName || 'Usuário Atual',
-        userRole: directUserRole || 'ADMIN',
+        userRole: directUserRole || 'USUARIO',
         endpoint: directSubscription.endpoint,
         subscription: directSubscription,
         active: true,
@@ -431,7 +434,7 @@ export async function dispatchPushToAuthorizedUsers(event: {
       sentCount: 0,
       failedCount: 0,
       recipientsCount: 0,
-      message: 'Nenhum dispositivo ativo registrado para usuários autorizados (ADMIN/MANUTENÇÃO).'
+      message: 'Nenhum dispositivo registrado com permissão ativa para receber notificações push.'
     };
   }
 
@@ -489,7 +492,7 @@ export async function dispatchPushToAuthorizedUsers(event: {
     recipientsCount: targets.length,
     errors: errors.length > 0 ? errors : undefined,
     message: isSuccess
-      ? `Notificação enviada com sucesso para ${sentCount} dispositivo(s).`
-      : `Falha ao entregar push para ${failedCount} dispositivo(s): ${errors.join('; ')}`
+      ? `Notificação entregue com sucesso para ${sentCount} de ${targets.length} dispositivo(s).` + (failedCount > 0 ? ` (${failedCount} falha(s))` : '')
+      : `Falha ao entregar push para ${failedCount} de ${targets.length} dispositivo(s): ${errors.join('; ')}`
   };
 }

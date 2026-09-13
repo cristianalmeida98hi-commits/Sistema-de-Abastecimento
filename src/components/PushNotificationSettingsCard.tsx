@@ -180,8 +180,7 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
     }
   };
 
-  // Only ADMIN and MANUTENCAO should see this card per FASE 5 & FASE 11
-  if (!currentUser || (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANUTENCAO')) {
+  if (!currentUser) {
     return null;
   }
 
@@ -269,7 +268,7 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
           <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
           <div>
             <div className="text-[10px] text-emerald-400 font-semibold uppercase">Destinatários</div>
-            <div className="font-bold text-slate-100">Admin & Manutenção</div>
+            <div className="font-bold text-slate-100">Dispositivos Permitidos</div>
           </div>
         </div>
       </div>

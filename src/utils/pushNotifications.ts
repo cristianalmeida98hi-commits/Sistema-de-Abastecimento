@@ -380,15 +380,6 @@ export async function enablePushNotifications(currentUser: User): Promise<{
   message: string;
   status: 'granted' | 'denied' | 'unsupported' | 'error';
 }> {
-  // Permission gate: Only ADMIN and MANUTENCAO are authorized
-  if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANUTENCAO') {
-    return {
-      success: false,
-      message: 'Apenas usuários com perfil de Administrador ou Manutenção podem receber notificações push.',
-      status: 'denied'
-    };
-  }
-
   if (!isPushSupported()) {
     return {
       success: false,
@@ -649,15 +640,20 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
     const data = result.data || {};
     const count = Number(data.sentCount) || 0;
     const recipients = Number(data.recipientsCount) || count;
+    const failed = Number(data.failedCount) || (recipients > count ? recipients - count : 0);
 
-    if (data.success && (count > 0 || data.duplicate)) {
+    // CRITICAL: Nunca mostrar sucesso se nenhum envio real ocorreu (count === 0)
+    if (data.success && count > 0) {
+      const summaryMsg = failed === 0
+        ? `Notificação de teste entregue com sucesso para todos os ${count} dispositivo(s) válido(s) registrado(s)!`
+        : `Notificação entregue com sucesso para ${count} de ${recipients} dispositivo(s) encontrado(s) (${failed} falha(s)).`;
+
       return {
         success: true,
-        sentCount: count || 1,
-        recipientsCount: recipients || 1,
-        message: data.duplicate
-          ? 'Notificação recente já enviada para este dispositivo.'
-          : `Notificação de teste enviada com sucesso para ${count || 1} dispositivo(s)! Verifique a barra de notificações do seu celular.`
+        sentCount: count,
+        failedCount: failed,
+        recipientsCount: recipients,
+        message: summaryMsg
       };
     } else {
       let errDetails = '';
@@ -665,9 +661,14 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
         const errorList = data.errors.map((e: any) =>
           typeof e === 'string' ? e : typeof e?.message === 'string' ? e.message : JSON.stringify(e)
         );
-        errDetails = `\nDetalhe técnico: ${errorList.join('; ')}`;
+        errDetails = `\nDetalhes: ${errorList.join('; ')}`;
       }
-      const rawMsg = data.message || 'Nenhum dispositivo ativo encontrado para este usuário ou falha ao entregar no celular.';
+
+      const defaultFailMsg = recipients === 0
+        ? 'Nenhum dispositivo com permissão concedida e registro Push ativo foi encontrado.'
+        : `Tentativa de envio realizada para ${recipients} dispositivo(s), porém nenhum recebeu com sucesso (${failed || recipients} falha(s)).`;
+
+      const rawMsg = data.message || defaultFailMsg;
       const safeMsg = typeof rawMsg === 'string'
         ? rawMsg
         : typeof rawMsg?.message === 'string'
@@ -676,8 +677,8 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
 
       return {
         success: false,
-        sentCount: count,
-        failedCount: Number(data.failedCount) || 0,
+        sentCount: 0,
+        failedCount: failed || recipients,
         recipientsCount: recipients,
         errors: Array.isArray(data.errors) ? data.errors : undefined,
         message: safeMsg + errDetails
@@ -858,12 +859,11 @@ export async function dispatchPushNotificationEvent(payload: PushNotificationPay
 }
 
 /**
- * Automatically synchronize and restore push registration for authorized users (ADMIN / MANUTENCAO)
+ * Automatically synchronize and restore push registration for any user with granted permission
  * Prevents token loss on reload, browser restart, or re-login.
  */
 export async function autoSyncPushDevice(currentUser?: User | null): Promise<void> {
   if (!currentUser) return;
-  if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANUTENCAO') return;
   if (!isPushSupported()) return;
 
   const perm = getNotificationPermission();

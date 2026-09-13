@@ -229,7 +229,7 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
       .map(f => ({
         date: formatDateBR(f.dateTime).slice(0, 5),
         litros: f.liters,
-        horimetro: f.hourmeterAtFueling || f.odometerAtFueling || 0,
+        horimetro: f.hourmeterAtFueling || (f as any).odometerAtFueling || 0,
         custo: f.totalValue
       }));
   }, [machineFuelLogs]);
@@ -1233,7 +1233,7 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                       <div className="flex items-center justify-between border-b pb-2 border-amber-500/30">
                         <h4 className="font-black text-sm text-amber-900 dark:text-amber-200 flex items-center gap-2">
                           <Droplet className="w-4 h-4 text-amber-500 fill-amber-500" />
-                          <span>Registrar Troca de Óleo - {vehicle.name}</span>
+                          <span>Registrar Troca de Óleo - {vehicle.model}</span>
                         </h4>
                         <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300">
                           Ciclo: {cycleInterval.toLocaleString('pt-BR')} {isKm ? 'KM' : 'Horas'}
@@ -1423,7 +1423,7 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                     <div className="flex items-center justify-between border-b pb-2 border-emerald-500/30">
                       <h4 className="font-black text-sm text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
                         <Wrench className="w-4 h-4 text-emerald-500" />
-                        <span>Configuração do Plano de Troca de Óleo {isKm ? '(Quilometragem)' : '(Horímetro)'} - {vehicle.name}</span>
+                        <span>Configuração do Plano de Troca de Óleo {isKm ? '(Quilometragem)' : '(Horímetro)'} - {vehicle.model}</span>
                       </h4>
                     </div>
 
@@ -2223,7 +2223,7 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                     <div className="h-48 w-full pt-1">
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart 
-                          data={fuelChartData.length > 0 ? fuelChartData : maintenanceChartData} 
+                          data={(fuelChartData.length > 0 ? fuelChartData : maintenanceChartData) as any} 
                           margin={{ top: 5, right: 10, left: -20, bottom: 0 }}
                         >
                           <defs>

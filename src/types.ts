@@ -65,7 +65,7 @@ export interface OperationalCapacity {
   notes?: string; // Observações opcionais (ex: 'Barra 36m', 'Granulado', 'Coroada')
 }
 
-export type MaintenanceControlType = 'HORAS' | 'QUILOMETRAGEM' | 'DATA' | 'HORAS_E_DATA' | 'PERSONALIZADO';
+export type MaintenanceControlType = 'HORAS' | 'QUILOMETRAGEM' | 'DATA' | 'HORAS_E_DATA' | 'PERSONALIZADO' | 'HORIMETRO';
 
 export interface ScheduledServiceItem {
   id: string;

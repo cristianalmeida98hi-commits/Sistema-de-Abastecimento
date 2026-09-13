@@ -231,7 +231,7 @@ async function startServer() {
           id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
           userId: targetUserId || 'direct-test-user',
           userName: directUserName || 'Usuário Atual',
-          userRole: directUserRole || 'ADMIN',
+          userRole: directUserRole || 'USUARIO',
           endpoint: directSubscription.endpoint,
           subscription: directSubscription,
           deviceInfo: {},
@@ -244,12 +244,12 @@ async function startServer() {
         saveDatabase();
       }
     }
-    // Strict Role Enforcement: Only ADMIN and MANUTENCAO can receive notifications. FUNCIONARIO is excluded!
+    // No role filter: any device with permission granted and active valid subscription receives push
     let targetDevices = devices.filter(d => {
       if (d.active === false) return false;
       if (!d.subscription || !d.subscription.endpoint) return false;
-      if (targetUserId) return d.userId === targetUserId;
-      return d.userRole === 'ADMIN' || d.userRole === 'MANUTENCAO';
+      if (eventType !== 'TEST' && targetUserId) return d.userId === targetUserId;
+      return true;
     });
 
     if (directSubscription && directSubscription.endpoint) {
@@ -259,7 +259,7 @@ async function startServer() {
           id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
           userId: targetUserId || 'direct-test-user',
           userName: directUserName || 'Usuário Atual',
-          userRole: directUserRole || 'ADMIN',
+          userRole: directUserRole || 'USUARIO',
           endpoint: directSubscription.endpoint,
           subscription: directSubscription,
           deviceInfo: {},
@@ -271,7 +271,7 @@ async function startServer() {
       }
     }
 
-    console.log(`[Push Notification] Dispatching ${eventType} (${eventId}) to ${targetDevices.length} authorized devices.`);
+    console.log(`[Push Notification] Dispatching ${eventType} (${eventId}) to ${targetDevices.length} registered devices.`);
 
     let sentCount = 0;
     let failedCount = 0;
@@ -328,10 +328,10 @@ async function startServer() {
       recipientsCount: targetDevices.length,
       errors: dispatchErrors.length > 0 ? dispatchErrors : undefined,
       message: targetDevices.length === 0 
-        ? 'Nenhum dispositivo ativo registrado para usuários autorizados (ADMIN/MANUTENÇÃO).'
+        ? 'Nenhum dispositivo registrado com permissão ativa para receber notificações push.'
         : isSuccess
-          ? `Notificação entregue com sucesso para ${sentCount} de ${targetDevices.length} dispositivo(s).`
-          : `Falha ao entregar push para ${failedCount} dispositivo(s): ${dispatchErrors.join('; ')}`
+          ? `Notificação entregue com sucesso para ${sentCount} de ${targetDevices.length} dispositivo(s).` + (failedCount > 0 ? ` (${failedCount} falha(s))` : '')
+          : `Falha ao entregar push para ${failedCount} de ${targetDevices.length} dispositivo(s): ${dispatchErrors.join('; ')}`
     };
   }
 
@@ -464,7 +464,6 @@ async function startServer() {
         equipmentName: 'AndradeAgro',
         description: description || 'Notificações Push funcionando.',
         customTitle: title || 'Teste AndradeAgro',
-        targetUserId: userId,
         directSubscription: subscription,
         directUserName: userName,
         directUserRole: userRole
@@ -503,15 +502,15 @@ async function startServer() {
   app.get('/api/notifications/status', (req, res) => {
     try {
       const devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
-      const activeAuthorized = devices.filter(d => 
-        d.active !== false && (d.userRole === 'ADMIN' || d.userRole === 'MANUTENCAO')
+      const activeDevices = devices.filter(d => 
+        d.active !== false && d.subscription && d.subscription.endpoint
       );
       res.json({
         vapidConfigured: true,
         vapidPublicKey: vapidKeys.publicKey,
         totalDevices: devices.length,
-        activeAuthorizedCount: activeAuthorized.length,
-        authorizedDevices: activeAuthorized.map(d => ({
+        activeAuthorizedCount: activeDevices.length,
+        authorizedDevices: activeDevices.map(d => ({
           userName: d.userName,
           userRole: d.userRole,
           platform: d.deviceInfo?.platform || 'desconhecido',

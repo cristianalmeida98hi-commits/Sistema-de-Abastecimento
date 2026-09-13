@@ -31,27 +31,32 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const checkStatus = async () => {
-    const isSup = isPushSupported();
-    setSupported(isSup);
-    if (!isSup) {
-      setPermission('unsupported');
-      setIsActive(false);
-      return;
-    }
+    try {
+      const isSup = isPushSupported();
+      setSupported(isSup);
+      if (!isSup) {
+        setPermission('unsupported');
+        setIsActive(false);
+        return;
+      }
 
-    const perm = getNotificationPermission();
-    setPermission(perm);
+      const perm = getNotificationPermission();
+      setPermission(perm);
 
-    const storedActive = isStoredPushActive(currentUser.id);
-    const subActive = await isSubscriptionActive();
-    setIsActive(storedActive && subActive && perm === 'granted');
+      const userId = currentUser?.id || '';
+      const storedActive = userId ? isStoredPushActive(userId) : false;
+      const subActive = await isSubscriptionActive().catch(() => false);
+      setIsActive(Boolean(storedActive && subActive && perm === 'granted'));
 
-    const sStatus = await fetchServerNotificationStatus();
-    if (sStatus) {
-      setServerStatus({
-        activeAuthorizedCount: sStatus.activeAuthorizedCount,
-        authorizedDevices: sStatus.authorizedDevices
-      });
+      const sStatus = await fetchServerNotificationStatus().catch(() => null);
+      if (sStatus) {
+        setServerStatus({
+          activeAuthorizedCount: Number(sStatus.activeAuthorizedCount) || 0,
+          authorizedDevices: Array.isArray(sStatus.authorizedDevices) ? sStatus.authorizedDevices : []
+        });
+      }
+    } catch (err) {
+      console.warn('[Push Notification Card] Aviso ao verificar status push:', err);
     }
   };
 
@@ -59,73 +64,127 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
     checkStatus();
 
     const handleStatusChange = () => {
-      checkStatus();
+      checkStatus().catch(() => {});
     };
 
     window.addEventListener('andradeagro_push_status_changed', handleStatusChange);
     return () => {
       window.removeEventListener('andradeagro_push_status_changed', handleStatusChange);
     };
-  }, [currentUser.id]);
+  }, [currentUser?.id]);
 
-  const handleToggle = async () => {
+  const handleToggle = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setLoading(true);
     setFeedback(null);
 
-    if (isActive) {
-      const res = await disablePushNotifications(currentUser);
-      setIsActive(false);
-      setFeedback({ type: 'info', text: res.message });
-    } else {
-      const res = await enablePushNotifications(currentUser);
-      if (res.success) {
-        setIsActive(true);
-        setPermission('granted');
-        setFeedback({ type: 'success', text: res.message });
+    try {
+      if (isActive) {
+        const res = await disablePushNotifications(currentUser);
+        setIsActive(false);
+        const safeText = typeof res?.message === 'string' ? res.message : 'Notificações push desativadas.';
+        setFeedback({ type: 'info', text: safeText });
       } else {
-        setPermission(res.status);
-        setFeedback({ type: 'error', text: res.message });
+        const res = await enablePushNotifications(currentUser);
+        if (res?.success) {
+          setIsActive(true);
+          setPermission('granted');
+          const safeText = typeof res?.message === 'string' ? res.message : 'Notificações push ativadas com sucesso!';
+          setFeedback({ type: 'success', text: safeText });
+        } else {
+          const permVal = res?.status === 'granted' || res?.status === 'denied' || res?.status === 'default'
+            ? res.status
+            : 'denied';
+          setPermission(permVal);
+          const safeText = typeof res?.message === 'string' ? res.message : 'Não foi possível ativar as notificações.';
+          setFeedback({ type: 'error', text: safeText });
+        }
       }
+    } catch (err: any) {
+      console.error('[Push Notification Card] Erro ao alternar status push:', err);
+      const errMsg = typeof err?.message === 'string' ? err.message : String(err || 'Erro inesperado');
+      setFeedback({ type: 'error', text: `Falha na operação: ${errMsg}` });
+    } finally {
+      setLoading(false);
+      try {
+        await checkStatus();
+      } catch {}
     }
-    setLoading(false);
-    await checkStatus();
   };
 
-  const handleSync = async () => {
+  const handleSync = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setSyncing(true);
     setFeedback(null);
-    const res = await enablePushNotifications(currentUser);
-    if (res.success) {
-      setIsActive(true);
-      setPermission('granted');
-      setFeedback({ type: 'success', text: 'Dispositivo sincronizado com o servidor e Firestore!' });
-    } else {
-      setFeedback({ type: 'error', text: res.message });
+
+    try {
+      const res = await enablePushNotifications(currentUser);
+      if (res?.success) {
+        setIsActive(true);
+        setPermission('granted');
+        setFeedback({ type: 'success', text: 'Dispositivo sincronizado com o servidor e Firestore!' });
+      } else {
+        const safeText = typeof res?.message === 'string' ? res.message : 'Falha ao sincronizar dispositivo.';
+        setFeedback({ type: 'error', text: safeText });
+      }
+    } catch (err: any) {
+      console.error('[Push Notification Card] Erro ao sincronizar:', err);
+      const errMsg = typeof err?.message === 'string' ? err.message : String(err || 'Erro inesperado');
+      setFeedback({ type: 'error', text: `Falha ao sincronizar: ${errMsg}` });
+    } finally {
+      setSyncing(false);
+      try {
+        await checkStatus();
+      } catch {}
     }
-    setSyncing(false);
-    await checkStatus();
   };
 
-  const handleTest = async () => {
+  const handleTest = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setLoading(true);
     setFeedback(null);
-    const res = await sendTestPushNotification(currentUser);
-    if (res.success) {
-      setFeedback({ type: 'success', text: res.message });
-    } else {
-      setFeedback({ type: 'error', text: res.message });
+
+    try {
+      const res = await sendTestPushNotification(currentUser);
+      const safeText = typeof res?.message === 'string' && res.message.trim().length > 0
+        ? res.message
+        : res?.success
+          ? 'Notificação de teste enviada com sucesso!'
+          : 'Não foi possível enviar a notificação de teste.';
+
+      if (res?.success) {
+        setFeedback({ type: 'success', text: safeText });
+      } else {
+        setFeedback({ type: 'error', text: safeText });
+      }
+    } catch (err: any) {
+      console.error('[Push Notification Card] Erro ao testar notificação:', err);
+      const errMsg = typeof err?.message === 'string' ? err.message : String(err || 'Erro inesperado');
+      setFeedback({ type: 'error', text: `Falha ao testar notificação: ${errMsg}` });
+    } finally {
+      setLoading(false);
+      try {
+        await checkStatus();
+      } catch {}
     }
-    setLoading(false);
-    await checkStatus();
   };
 
   // Only ADMIN and MANUTENCAO should see this card per FASE 5 & FASE 11
-  if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANUTENCAO') {
+  if (!currentUser || (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANUTENCAO')) {
     return null;
   }
 
-  const isCurrentDeviceRegistered = serverStatus?.authorizedDevices?.some(
-    d => d.userName === currentUser.name
+  const isCurrentDeviceRegistered = Boolean(
+    serverStatus?.authorizedDevices?.some(d => d && d.userName === currentUser?.name)
   );
 
   return (
@@ -251,7 +310,7 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
           ) : (
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           )}
-          <span>{feedback.text}</span>
+          <span>{String(feedback.text || '')}</span>
         </div>
       )}
 
@@ -308,7 +367,7 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
             ) : (
               <Send className="w-3.5 h-3.5" />
             )}
-            <span>Testar Notificação</span>
+            <span>{loading ? 'Enviando...' : 'Testar Notificação'}</span>
           </button>
         )}
       </div>

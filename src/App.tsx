@@ -17,6 +17,7 @@ import { User, Vehicle, GasStation, FuelLog, MaintenanceLog, SmartAlert, AuditLo
 import { autoSyncPushDevice } from './utils/pushNotifications';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { CheckCircle2, Tractor, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
 
 // Code-split dynamic views to drastically reduce initial bundle size and accelerate time-to-first-paint
@@ -590,8 +591,9 @@ export default function App() {
 
         {/* Content View Container */}
         <main ref={mainContentRef} className="flex-1 p-3 sm:p-6 lg:p-8 pb-safe overflow-y-auto max-w-[1600px] w-full mx-auto">
-          <React.Suspense fallback={<ViewLoadingFallback />}>
-            {activeTab === 'operator-fueling' && (
+          <ErrorBoundary key={activeTab}>
+            <React.Suspense fallback={<ViewLoadingFallback />}>
+              {activeTab === 'operator-fueling' && (
               <OperatorFuelingView
                 currentUser={currentUser}
                 vehicles={vehicles}
@@ -762,6 +764,7 @@ export default function App() {
               />
             )}
           </React.Suspense>
+          </ErrorBoundary>
         </main>
       </div>
 

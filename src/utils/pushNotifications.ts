@@ -79,7 +79,15 @@ export async function safeApiFetch<T = any>(
         if (res.ok) {
           return { ok: true, status, statusText, contentType, data, url, method };
         } else {
-          const errMsg = data?.error || data?.message || `Erro do servidor (Status ${status}: ${statusText})`;
+          const rawErr = data?.error || data?.message;
+          let errMsg: string;
+          if (typeof rawErr === 'string' && rawErr.trim().length > 0) {
+            errMsg = rawErr;
+          } else if (rawErr && typeof rawErr === 'object') {
+            errMsg = typeof rawErr.message === 'string' ? rawErr.message : JSON.stringify(rawErr);
+          } else {
+            errMsg = `Erro do servidor (Status ${status}: ${statusText || 'Falha na requisição'})`;
+          }
           return { ok: false, status, statusText, contentType, data, error: errMsg, url, method };
         }
       } catch (jsonErr: any) {
@@ -190,27 +198,63 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 /**
  * Ensures a push subscription has valid endpoint and base64-encoded p256dh/auth keys
  */
-function normalizeSubscription(sub: PushSubscription): any {
-  const subJson = sub.toJSON();
-  if (!subJson.endpoint && sub.endpoint) {
-    subJson.endpoint = sub.endpoint;
-  }
-  if (!subJson.keys) {
-    subJson.keys = {};
-  }
-  if (!subJson.keys.p256dh && sub.getKey) {
-    const p256dhBuffer = sub.getKey('p256dh');
-    if (p256dhBuffer) {
-      subJson.keys.p256dh = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(p256dhBuffer))));
+function normalizeSubscription(sub: any): any {
+  if (!sub) return null;
+  try {
+    let subJson: any = {};
+    if (typeof sub.toJSON === 'function') {
+      subJson = sub.toJSON() || {};
+    } else {
+      subJson = { ...sub };
     }
-  }
-  if (!subJson.keys.auth && sub.getKey) {
-    const authBuffer = sub.getKey('auth');
-    if (authBuffer) {
-      subJson.keys.auth = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(authBuffer))));
+
+    if (!subJson.endpoint && sub.endpoint) {
+      subJson.endpoint = sub.endpoint;
     }
+    if (!subJson.keys) {
+      subJson.keys = {};
+    }
+
+    if (!subJson.keys.p256dh && typeof sub.getKey === 'function') {
+      try {
+        const p256dhBuffer = sub.getKey('p256dh');
+        if (p256dhBuffer) {
+          const bytes = new Uint8Array(p256dhBuffer);
+          let binary = '';
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          subJson.keys.p256dh = btoa(binary);
+        }
+      } catch (e) {
+        console.warn('[Push Notification] Aviso ao extrair p256dh:', e);
+      }
+    }
+
+    if (!subJson.keys.auth && typeof sub.getKey === 'function') {
+      try {
+        const authBuffer = sub.getKey('auth');
+        if (authBuffer) {
+          const bytes = new Uint8Array(authBuffer);
+          let binary = '';
+          for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          subJson.keys.auth = btoa(binary);
+        }
+      } catch (e) {
+        console.warn('[Push Notification] Aviso ao extrair auth:', e);
+      }
+    }
+
+    return subJson;
+  } catch (err) {
+    console.warn('[Push Notification] Erro ao normalizar inscrição push:', err);
+    return {
+      endpoint: sub?.endpoint || '',
+      keys: sub?.keys || {}
+    };
   }
-  return subJson;
 }
 
 /**
@@ -528,15 +572,32 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
   recipientsCount?: number;
   errors?: string[];
 }> {
+  if (!currentUser || !currentUser.id) {
+    return {
+      success: false,
+      message: 'Usuário não autenticado no momento do teste.'
+    };
+  }
+
   try {
-    // 1. Inspecionar inscrição local ativa no ServiceWorker deste dispositivo para garantir envio imediato
+    // 1. Inspecionar inscrição local ativa no ServiceWorker deste dispositivo de forma segura e não-bloqueante
     let currentSubscription: any = null;
     try {
       if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        if (sub) {
-          currentSubscription = normalizeSubscription(sub);
+        // Obter registro sem bloquear indefinidamente
+        const reg = await Promise.race([
+          navigator.serviceWorker.getRegistration(),
+          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 1200))
+        ]);
+
+        if (reg?.pushManager) {
+          const sub = await Promise.race([
+            reg.pushManager.getSubscription(),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200))
+          ]);
+          if (sub) {
+            currentSubscription = normalizeSubscription(sub);
+          }
         }
       }
     } catch (subErr) {
@@ -549,8 +610,8 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         userId: currentUser.id,
-        userName: currentUser.name,
-        userRole: currentUser.role,
+        userName: currentUser.name || 'Usuário',
+        userRole: currentUser.role || 'ADMIN',
         title: 'Teste AndradeAgro',
         description: 'Notificações Push funcionando.',
         subscription: currentSubscription
@@ -558,41 +619,58 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
     });
 
     if (!result.ok || !result.data) {
+      const safeErrorMsg = typeof result.error === 'string' && result.error.trim().length > 0
+        ? result.error
+        : `Erro de conexão ao testar notificação (Status ${result.status}).`;
       return {
         success: false,
         sentCount: 0,
-        message: result.error || `Erro de conexão ao testar notificação (Status ${result.status}).`
+        message: safeErrorMsg
       };
     }
 
-    const data = result.data;
-    if (data.success && data.sentCount > 0) {
+    const data = result.data || {};
+    const count = Number(data.sentCount) || 0;
+    const recipients = Number(data.recipientsCount) || count;
+
+    if (data.success && (count > 0 || data.duplicate)) {
       return {
         success: true,
-        sentCount: data.sentCount,
-        recipientsCount: data.recipientsCount,
-        message: `Notificação de teste enviada com sucesso para ${data.sentCount} dispositivo(s)! Verifique a barra de notificações do seu celular.`
-      };
-    } else if (data.duplicate) {
-      return {
-        success: true,
-        message: 'Notificação recente já enviada para este dispositivo.'
+        sentCount: count || 1,
+        recipientsCount: recipients || 1,
+        message: data.duplicate
+          ? 'Notificação recente já enviada para este dispositivo.'
+          : `Notificação de teste enviada com sucesso para ${count || 1} dispositivo(s)! Verifique a barra de notificações do seu celular.`
       };
     } else {
-      const errDetails = (data.errors && data.errors.length > 0) ? `\nDetalhe técnico: ${data.errors.join('; ')}` : '';
+      let errDetails = '';
+      if (Array.isArray(data.errors) && data.errors.length > 0) {
+        const errorList = data.errors.map((e: any) =>
+          typeof e === 'string' ? e : typeof e?.message === 'string' ? e.message : JSON.stringify(e)
+        );
+        errDetails = `\nDetalhe técnico: ${errorList.join('; ')}`;
+      }
+      const rawMsg = data.message || 'Nenhum dispositivo ativo encontrado para este usuário ou falha ao entregar no celular.';
+      const safeMsg = typeof rawMsg === 'string'
+        ? rawMsg
+        : typeof rawMsg?.message === 'string'
+          ? rawMsg.message
+          : JSON.stringify(rawMsg);
+
       return {
         success: false,
-        sentCount: data.sentCount || 0,
-        failedCount: data.failedCount || 0,
-        recipientsCount: data.recipientsCount || 0,
-        errors: data.errors,
-        message: (data.message || 'Nenhum dispositivo ativo encontrado para este usuário ou falha ao entregar no celular.') + errDetails
+        sentCount: count,
+        failedCount: Number(data.failedCount) || 0,
+        recipientsCount: recipients,
+        errors: Array.isArray(data.errors) ? data.errors : undefined,
+        message: safeMsg + errDetails
       };
     }
   } catch (err: any) {
+    const errMsg = typeof err?.message === 'string' ? err.message : String(err || 'Falha no servidor');
     return {
       success: false,
-      message: `Erro de conexão ao testar notificação: ${err?.message || 'Falha no servidor'}`
+      message: `Erro de conexão ao testar notificação: ${errMsg}`
     };
   }
 }

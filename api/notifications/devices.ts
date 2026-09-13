@@ -7,6 +7,6 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 405, { success: false, error: 'Method Not Allowed' });
   }
 
-  const devices = getDevicesList();
+  const devices = await getDevicesList();
   return sendJson(res, 200, { devices, total: devices.length });
 }

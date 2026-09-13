@@ -1,7 +1,10 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import webpush from 'web-push';
+import webpushLib from 'web-push';
+import { initializeApp, getApps } from 'firebase/app';
+import { getFirestore, collection, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { createServer as createViteServer } from 'vite';
 import { 
   INITIAL_USERS, INITIAL_VEHICLES, INITIAL_GAS_STATIONS, 
@@ -122,6 +125,8 @@ async function startServer() {
     privateKey: 'jIzx37tfbmK5NxYiLQYbcze3XSBg9Il6kBLeDW6zQxA'
   };
 
+  const wp = (webpushLib as any).default || webpushLib;
+
   let vapidKeys = serverDb['andradeagro_vapid_keys'];
   if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
     vapidKeys = {
@@ -137,10 +142,126 @@ async function startServer() {
 
   const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:suporte@andradeagro.com.br';
   try {
-    webpush.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
+    wp.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
     console.log('[Push Notification] Web Push VAPID setup successfully configured.');
   } catch (err) {
     console.error('[Push Notification] Error configuring VAPID:', err);
+  }
+
+  // Firebase Firestore server-side sync setup
+  const firebaseServerConfig = {
+    apiKey: "AIzaSyCKLaXPZ3xq5M2CCRVBkwRHS-7dQoBelEY",
+    authDomain: "andrade-agro.firebaseapp.com",
+    projectId: "andrade-agro",
+    storageBucket: "andrade-agro.firebasestorage.app",
+    messagingSenderId: "271695349839",
+    appId: "1:271695349839:web:4428ed928e6423b9adc23a"
+  };
+
+  let serverFirebaseApp: any = null;
+  let serverFirestore: any = null;
+
+  function getServerFirestoreInstance() {
+    if (!serverFirestore) {
+      serverFirebaseApp = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseServerConfig);
+      serverFirestore = getFirestore(serverFirebaseApp);
+    }
+    return { app: serverFirebaseApp, db: serverFirestore };
+  }
+
+  function isValidPushSubscription(sub: any): boolean {
+    if (!sub || typeof sub !== 'object') return false;
+    if (typeof sub.endpoint !== 'string' || !sub.endpoint.startsWith('http')) return false;
+    const p256dh = sub.keys?.p256dh;
+    const auth = sub.keys?.auth;
+    if (typeof p256dh !== 'string' || p256dh.trim().length < 40) return false;
+    if (typeof auth !== 'string' || auth.trim().length < 10) return false;
+    try {
+      const pBuf = Buffer.from(p256dh.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+      const aBuf = Buffer.from(auth.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+      return pBuf.length === 65 && aBuf.length === 16;
+    } catch {
+      return false;
+    }
+  }
+
+  async function fetchRegisteredDevices(): Promise<any[]> {
+    const localDevices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+    const deviceMap = new Map<string, any>();
+
+    // 1. Add local valid devices
+    for (const d of localDevices) {
+      if (d.endpoint && d.active !== false && isValidPushSubscription(d.subscription)) {
+        deviceMap.set(d.endpoint, d);
+      }
+    }
+
+    // 2. Fetch real devices from Firestore
+    try {
+      const { app, db } = getServerFirestoreInstance();
+      const auth = getAuth(app);
+      if (!auth.currentUser) {
+        await signInAnonymously(auth).catch(() => null);
+      }
+      const snap = await getDocs(collection(db, 'user_devices'));
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data && data.active !== false && data.subscription) {
+          const endpoint = data.endpoint || data.subscription?.endpoint;
+          if (endpoint && isValidPushSubscription(data.subscription)) {
+            deviceMap.set(endpoint, {
+              id: docSnap.id,
+              userId: data.userId || '',
+              userName: data.userName || 'Usuário',
+              userRole: data.userRole || 'FUNCIONARIO',
+              endpoint,
+              subscription: data.subscription,
+              deviceInfo: data.deviceInfo || {},
+              active: true,
+              updatedAt: data.updatedAt || new Date().toISOString(),
+              createdAt: data.createdAt || new Date().toISOString()
+            });
+          }
+        }
+      });
+    } catch (err: any) {
+      console.warn('[Push Notification] Warning fetching devices from Firestore:', err?.message || err);
+    }
+
+    return Array.from(deviceMap.values());
+  }
+
+  async function deactivateEndpoint(endpoint: string) {
+    // 1. Update local database
+    let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+    serverDb['andradeagro_user_devices_v1'] = devices.map(d => {
+      if (d.subscription && d.subscription.endpoint === endpoint) {
+        return { ...d, active: false, updatedAt: new Date().toISOString() };
+      }
+      return d;
+    });
+    saveDatabase();
+
+    // 2. Update Firestore
+    try {
+      const { app, db } = getServerFirestoreInstance();
+      const auth = getAuth(app);
+      if (!auth.currentUser) {
+        await signInAnonymously(auth).catch(() => null);
+      }
+      const snap = await getDocs(collection(db, 'user_devices'));
+      snap.forEach(async (docSnap) => {
+        const data = docSnap.data();
+        if (data.endpoint === endpoint || data.subscription?.endpoint === endpoint) {
+          await updateDoc(doc(db, 'user_devices', docSnap.id), {
+            active: false,
+            updatedAt: new Date().toISOString()
+          }).catch(() => null);
+        }
+      });
+    } catch (err: any) {
+      console.warn('[Push Notification] Warning deactivating in Firestore:', err?.message || err);
+    }
   }
 
   // Helper function to dispatch push notifications to authorized devices (ADMIN and MANUTENCAO only)
@@ -221,13 +342,16 @@ async function startServer() {
       }
     });
 
-    let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+    console.log(`[Push Notification] [1. Início] Preparando envio de ${eventType} (ID: ${eventId})`);
 
-    // If direct test subscription was passed, register or update it immediately
-    if (directSubscription && directSubscription.endpoint) {
-      const existing = devices.find(d => d.subscription && d.subscription.endpoint === directSubscription.endpoint);
+    // Fetch all active devices (Firestore + Local DB)
+    const allDevices = await fetchRegisteredDevices();
+
+    // If direct test subscription was passed and valid, register/ensure it
+    if (directSubscription && isValidPushSubscription(directSubscription)) {
+      const existing = allDevices.find(d => d.subscription && d.subscription.endpoint === directSubscription.endpoint);
       if (!existing) {
-        const newDev = {
+        allDevices.unshift({
           id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
           userId: targetUserId || 'direct-test-user',
           userName: directUserName || 'Usuário Atual',
@@ -238,40 +362,36 @@ async function startServer() {
           active: true,
           updatedAt: new Date().toISOString(),
           createdAt: new Date().toISOString()
-        };
-        devices.unshift(newDev);
-        serverDb['andradeagro_user_devices_v1'] = devices;
-        saveDatabase();
+        });
       }
     }
-    // No role filter: any device with permission granted and active valid subscription receives push
-    let targetDevices = devices.filter(d => {
+
+    // Step 2 & 3: Filter and validate target devices
+    const targetDevices = allDevices.filter(d => {
       if (d.active === false) return false;
       if (!d.subscription || !d.subscription.endpoint) return false;
+      if (!isValidPushSubscription(d.subscription)) {
+        console.warn(`[Push Notification] [3. Validação] Dispositivo ${d.userName} (${d.endpoint.slice(0, 30)}...) possui token/chave inválida. Desativando.`);
+        deactivateEndpoint(d.endpoint).catch(() => null);
+        return false;
+      }
       if (eventType !== 'TEST' && targetUserId) return d.userId === targetUserId;
       return true;
     });
 
-    if (directSubscription && directSubscription.endpoint) {
-      const hasDirect = targetDevices.some(d => d.subscription && d.subscription.endpoint === directSubscription.endpoint);
-      if (!hasDirect) {
-        const directDev = {
-          id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
-          userId: targetUserId || 'direct-test-user',
-          userName: directUserName || 'Usuário Atual',
-          userRole: directUserRole || 'USUARIO',
-          endpoint: directSubscription.endpoint,
-          subscription: directSubscription,
-          deviceInfo: {},
-          active: true,
-          updatedAt: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        };
-        targetDevices = [directDev, ...targetDevices];
-      }
-    }
+    console.log(`[Push Notification] [2. Dispositivos] Encontrados ${targetDevices.length} dispositivo(s) válido(s) e ativo(s) para receber push.`);
 
-    console.log(`[Push Notification] Dispatching ${eventType} (${eventId}) to ${targetDevices.length} registered devices.`);
+    if (targetDevices.length === 0) {
+      return {
+        success: false,
+        duplicate: false,
+        sentCount: 0,
+        failedCount: 0,
+        recipientsCount: 0,
+        stage: 'busca_dispositivos',
+        message: 'Nenhum dispositivo registrado com permissão ativa e chaves válidas para receber notificações push.'
+      };
+    }
 
     let sentCount = 0;
     let failedCount = 0;
@@ -287,19 +407,20 @@ async function startServer() {
       TTL: 86400
     };
 
+    // Step 4: Push delivery to each target
     await Promise.all(
       targetDevices.map(async (device) => {
         try {
-          await webpush.sendNotification(device.subscription, payload, serverVapidOptions);
+          const pushRes = await wp.sendNotification(device.subscription, payload, serverVapidOptions);
           sentCount++;
-          console.log(`[Push Notification] Successfully sent push to device of ${device.userName} (${device.userRole})`);
+          console.log(`[Push Notification] [4. Sucesso] Entregue para ${device.userName} (${device.endpoint.slice(0, 30)}...) - Status ${pushRes?.statusCode || 201}`);
         } catch (err: any) {
           failedCount++;
           const errStatus = err?.statusCode || 'ERR';
           const errMsg = err?.body || err?.message || 'Falha no envio push';
           const detail = `Status ${errStatus}: ${errMsg}`;
           dispatchErrors.push(detail);
-          console.warn(`[Push Notification] Error sending push to device (${device.userName}):`, detail);
+          console.warn(`[Push Notification] [4. Falha] Erro ao enviar para ${device.userName}:`, detail);
           if (err?.statusCode === 404 || err?.statusCode === 410) {
             invalidEndpoints.push(device.subscription.endpoint);
           }
@@ -309,14 +430,10 @@ async function startServer() {
 
     // Clean up expired tokens
     if (invalidEndpoints.length > 0) {
-      serverDb['andradeagro_user_devices_v1'] = devices.map(d => {
-        if (d.subscription && invalidEndpoints.includes(d.subscription.endpoint)) {
-          return { ...d, active: false, updatedAt: new Date().toISOString() };
-        }
-        return d;
-      });
-      saveDatabase();
-      console.log(`[Push Notification] Deactivated ${invalidEndpoints.length} expired device subscriptions.`);
+      for (const endpoint of invalidEndpoints) {
+        await deactivateEndpoint(endpoint).catch(() => null);
+      }
+      console.log(`[Push Notification] [5. Limpeza] Desativadas ${invalidEndpoints.length} inscrições expiradas.`);
     }
 
     const isSuccess = sentCount > 0;
@@ -326,15 +443,13 @@ async function startServer() {
       sentCount,
       failedCount,
       recipientsCount: targetDevices.length,
+      stage: isSuccess ? 'sucesso' : 'servico_push',
       errors: dispatchErrors.length > 0 ? dispatchErrors : undefined,
-      message: targetDevices.length === 0 
-        ? 'Nenhum dispositivo registrado com permissão ativa para receber notificações push.'
-        : isSuccess
-          ? `Notificação entregue com sucesso para ${sentCount} de ${targetDevices.length} dispositivo(s).` + (failedCount > 0 ? ` (${failedCount} falha(s))` : '')
-          : `Falha ao entregar push para ${failedCount} de ${targetDevices.length} dispositivo(s): ${dispatchErrors.join('; ')}`
+      message: isSuccess
+        ? `Notificação entregue com sucesso para ${sentCount} de ${targetDevices.length} dispositivo(s).` + (failedCount > 0 ? ` (${failedCount} falha(s))` : '')
+        : `Falha ao entregar push para ${failedCount} dispositivo(s): ${dispatchErrors.join('; ')}`
     };
   }
-
 
   // PUSH NOTIFICATIONS API
   app.get('/api/notifications/vapid-public-key', (req, res) => {
@@ -343,10 +458,6 @@ async function startServer() {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json({ publicKey: key });
-  });
-
-  app.get('/api/notifications/devices', (req, res) => {
-    res.json({ devices: serverDb['andradeagro_user_devices_v1'] || [] });
   });
 
   app.post('/api/notifications/reset-event-dedup', (req, res) => {
@@ -370,11 +481,15 @@ async function startServer() {
     }
   });
 
-  app.post('/api/notifications/subscribe', (req, res) => {
+  app.post('/api/notifications/subscribe', async (req, res) => {
     try {
       const { userId, userName, userRole, subscription, deviceInfo } = req.body;
       if (!userId || !subscription || !subscription.endpoint) {
         return res.status(400).json({ error: 'Invalid subscription payload' });
+      }
+
+      if (!isValidPushSubscription(subscription)) {
+        return res.status(400).json({ error: 'Chaves de inscrição push inválidas (p256dh/auth malformatadas).' });
       }
 
       let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
@@ -403,8 +518,20 @@ async function startServer() {
 
       serverDb['andradeagro_user_devices_v1'] = devices;
       saveDatabase();
-      console.log(`[Push Notification] Registered device subscription for ${userName} (${userRole}).`);
 
+      // Sync with Firestore
+      try {
+        const { app, db } = getServerFirestoreInstance();
+        const auth = getAuth(app);
+        if (!auth.currentUser) {
+          await signInAnonymously(auth).catch(() => null);
+        }
+        await setDoc(doc(db, 'user_devices', deviceRecord.id), deviceRecord, { merge: true });
+      } catch (fsErr) {
+        console.warn('[Push Notification] Warning saving subscription to Firestore:', fsErr);
+      }
+
+      console.log(`[Push Notification] Registered device subscription for ${userName} (${userRole}).`);
       res.json({ success: true, device: deviceRecord });
     } catch (err: any) {
       console.error('[Push Notification] Error saving subscription:', err);
@@ -412,21 +539,19 @@ async function startServer() {
     }
   });
 
-  app.post('/api/notifications/unsubscribe', (req, res) => {
+  app.post('/api/notifications/unsubscribe', async (req, res) => {
     try {
       const { endpoint, userId } = req.body;
-      let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
-
-      devices = devices.map((d: any) => {
-        if ((endpoint && d.subscription && d.subscription.endpoint === endpoint) || 
-            (userId && !endpoint && d.userId === userId)) {
-          return { ...d, active: false, updatedAt: new Date().toISOString() };
+      if (endpoint) {
+        await deactivateEndpoint(endpoint);
+      } else if (userId) {
+        let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+        for (const d of devices) {
+          if (d.userId === userId && d.endpoint) {
+            await deactivateEndpoint(d.endpoint);
+          }
         }
-        return d;
-      });
-
-      serverDb['andradeagro_user_devices_v1'] = devices;
-      saveDatabase();
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to unsubscribe device' });
@@ -451,7 +576,11 @@ async function startServer() {
       res.json(result);
     } catch (err: any) {
       console.error('[Push Notification] Error dispatching event:', err);
-      res.status(500).json({ error: 'Failed to dispatch notification' });
+      res.json({ 
+        success: false, 
+        error: 'Failed to dispatch notification: ' + (err?.message || err),
+        sentCount: 0 
+      });
     }
   });
 
@@ -471,17 +600,19 @@ async function startServer() {
       res.json(result);
     } catch (err: any) {
       console.error('[Push Notification] Error in test endpoint:', err);
-      res.status(500).json({ 
+      res.json({ 
         success: false, 
-        error: 'Failed to send test push: ' + (err?.message || err),
-        sentCount: 0 
+        error: 'Falha ao processar teste de push: ' + (err?.message || err),
+        sentCount: 0,
+        failedCount: 1,
+        recipientsCount: 0
       });
     }
   });
 
-  app.get('/api/notifications/devices', (req, res) => {
+  app.get('/api/notifications/devices', async (req, res) => {
     try {
-      const devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+      const devices = await fetchRegisteredDevices();
       const sanitized = devices.map(d => ({
         id: d.id,
         userId: d.userId,
@@ -499,9 +630,9 @@ async function startServer() {
     }
   });
 
-  app.get('/api/notifications/status', (req, res) => {
+  app.get('/api/notifications/status', async (req, res) => {
     try {
-      const devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+      const devices = await fetchRegisteredDevices();
       const activeDevices = devices.filter(d => 
         d.active !== false && d.subscription && d.subscription.endpoint
       );

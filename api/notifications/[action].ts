@@ -22,12 +22,13 @@ export default async function handler(req: any, res: any) {
     }
 
     if (action === 'devices' && req.method === 'GET') {
-      const devices = getDevicesList();
+      const devices = await getDevicesList();
       return sendJson(res, 200, { devices, total: devices.length });
     }
 
     if (action === 'status' && req.method === 'GET') {
-      return sendJson(res, 200, getEngineStatus());
+      const status = await getEngineStatus();
+      return sendJson(res, 200, status);
     }
 
     if (action === 'subscribe' && req.method === 'POST') {
@@ -36,13 +37,13 @@ export default async function handler(req: any, res: any) {
       if (!userId || !subscription || !subscription.endpoint) {
         return sendJson(res, 400, { success: false, error: 'Payload de inscrição incompleto' });
       }
-      const device = registerDevice({ userId, userName, userRole, subscription, deviceInfo });
+      const device = await registerDevice({ userId, userName, userRole, subscription, deviceInfo });
       return sendJson(res, 200, { success: true, device });
     }
 
     if (action === 'unsubscribe' && req.method === 'POST') {
       const body = await parseRequestBody(req);
-      unregisterDevice({ endpoint: body.endpoint, userId: body.userId });
+      await unregisterDevice({ endpoint: body.endpoint, userId: body.userId });
       return sendJson(res, 200, { success: true });
     }
 

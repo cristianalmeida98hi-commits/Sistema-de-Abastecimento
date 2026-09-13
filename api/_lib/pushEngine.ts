@@ -30,9 +30,14 @@ export const OFFICIAL_VAPID_KEYS = {
   privateKey: 'jIzx37tfbmK5NxYiLQYbcze3XSBg9Il6kBLeDW6zQxA'
 };
 
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:suporte@andradeagro.com.br';
-const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || OFFICIAL_VAPID_KEYS.publicKey;
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || OFFICIAL_VAPID_KEYS.privateKey;
+function cleanKey(k?: string): string {
+  if (!k) return '';
+  return k.trim().replace(/^["']|["']$/g, '');
+}
+
+const VAPID_SUBJECT = cleanKey(process.env.VAPID_SUBJECT) || 'mailto:suporte@andradeagro.com.br';
+const VAPID_PUBLIC_KEY = cleanKey(process.env.VAPID_PUBLIC_KEY) || OFFICIAL_VAPID_KEYS.publicKey;
+const VAPID_PRIVATE_KEY = cleanKey(process.env.VAPID_PRIVATE_KEY) || OFFICIAL_VAPID_KEYS.privateKey;
 
 try {
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
@@ -44,7 +49,7 @@ try {
 // Resilient file-backed & in-memory database
 function getDbFilePath(): string {
   // In Vercel serverless functions, only /tmp is writable
-  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT) {
     return path.join('/tmp', 'andradeagro_db.json');
   }
   return path.join(process.cwd(), 'data', 'db.json');
@@ -114,12 +119,25 @@ export async function parseRequestBody(req: any): Promise<any> {
     }
   }
 
+  if (req.readableEnded || req.complete) {
+    return {};
+  }
+
   return new Promise((resolve) => {
     let data = '';
+    const timer = setTimeout(() => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch {
+        resolve({});
+      }
+    }, 1500);
+
     req.on('data', (chunk: any) => {
       data += chunk;
     });
     req.on('end', () => {
+      clearTimeout(timer);
       try {
         resolve(data ? JSON.parse(data) : {});
       } catch {
@@ -127,6 +145,7 @@ export async function parseRequestBody(req: any): Promise<any> {
       }
     });
     req.on('error', () => {
+      clearTimeout(timer);
       resolve({});
     });
   });
@@ -377,12 +396,31 @@ export async function dispatchPushToAuthorizedUsers(event: {
   }
 
   // Find target devices: only ADMIN and MANUTENCAO
-  const targets = inMemoryStore.devices.filter(d => {
+  let targets = inMemoryStore.devices.filter(d => {
     if (d.active === false) return false;
     if (!d.subscription || !d.subscription.endpoint) return false;
     if (targetUserId) return d.userId === targetUserId;
     return d.userRole === 'ADMIN' || d.userRole === 'MANUTENCAO';
   });
+
+  // If a direct subscription was passed for a test, ensure it is included even if userId differed
+  if (directSubscription && directSubscription.endpoint) {
+    const hasDirect = targets.some(t => t.subscription?.endpoint === directSubscription.endpoint);
+    if (!hasDirect) {
+      const directDev: PushDeviceRecord = {
+        id: `dev-direct-${Date.now()}`,
+        userId: targetUserId || 'direct-test-user',
+        userName: directUserName || 'Usuário Atual',
+        userRole: directUserRole || 'ADMIN',
+        endpoint: directSubscription.endpoint,
+        subscription: directSubscription,
+        active: true,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      };
+      targets = [directDev, ...targets];
+    }
+  }
 
   console.log(`[AndradeAgro PushEngine] Dispatching ${eventType} (${eventId}) to ${targets.length} targets.`);
 
@@ -402,10 +440,19 @@ export async function dispatchPushToAuthorizedUsers(event: {
   const invalidEndpoints: string[] = [];
   const errors: string[] = [];
 
+  const vapidOptions = {
+    vapidDetails: {
+      subject: VAPID_SUBJECT,
+      publicKey: VAPID_PUBLIC_KEY,
+      privateKey: VAPID_PRIVATE_KEY
+    },
+    TTL: 86400
+  };
+
   await Promise.all(
     targets.map(async (device) => {
       try {
-        await webpush.sendNotification(device.subscription as any, payload);
+        await webpush.sendNotification(device.subscription as any, payload, vapidOptions);
         sentCount++;
         console.log(`[AndradeAgro PushEngine] Successfully sent to ${device.userName} (${device.userRole})`);
       } catch (err: any) {

@@ -245,12 +245,31 @@ async function startServer() {
       }
     }
     // Strict Role Enforcement: Only ADMIN and MANUTENCAO can receive notifications. FUNCIONARIO is excluded!
-    const targetDevices = devices.filter(d => {
+    let targetDevices = devices.filter(d => {
       if (d.active === false) return false;
       if (!d.subscription || !d.subscription.endpoint) return false;
       if (targetUserId) return d.userId === targetUserId;
       return d.userRole === 'ADMIN' || d.userRole === 'MANUTENCAO';
     });
+
+    if (directSubscription && directSubscription.endpoint) {
+      const hasDirect = targetDevices.some(d => d.subscription && d.subscription.endpoint === directSubscription.endpoint);
+      if (!hasDirect) {
+        const directDev = {
+          id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
+          userId: targetUserId || 'direct-test-user',
+          userName: directUserName || 'Usuário Atual',
+          userRole: directUserRole || 'ADMIN',
+          endpoint: directSubscription.endpoint,
+          subscription: directSubscription,
+          deviceInfo: {},
+          active: true,
+          updatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString()
+        };
+        targetDevices = [directDev, ...targetDevices];
+      }
+    }
 
     console.log(`[Push Notification] Dispatching ${eventType} (${eventId}) to ${targetDevices.length} authorized devices.`);
 
@@ -259,10 +278,19 @@ async function startServer() {
     const invalidEndpoints: string[] = [];
     const dispatchErrors: string[] = [];
 
+    const serverVapidOptions = {
+      vapidDetails: {
+        subject: vapidSubject,
+        publicKey: vapidKeys.publicKey,
+        privateKey: vapidKeys.privateKey
+      },
+      TTL: 86400
+    };
+
     await Promise.all(
       targetDevices.map(async (device) => {
         try {
-          await webpush.sendNotification(device.subscription, payload);
+          await webpush.sendNotification(device.subscription, payload, serverVapidOptions);
           sentCount++;
           console.log(`[Push Notification] Successfully sent push to device of ${device.userName} (${device.userRole})`);
         } catch (err: any) {

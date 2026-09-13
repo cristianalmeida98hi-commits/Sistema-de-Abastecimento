@@ -849,6 +849,42 @@
   },
   "andradeagro_user_devices_v1": [
     {
+      "id": "dev-admin-1789314306303",
+      "userId": "admin",
+      "userName": "Admin",
+      "userRole": "ADMIN",
+      "endpoint": "https://fcm.googleapis.com/fcm/send/test-token-12345",
+      "subscription": {
+        "endpoint": "https://fcm.googleapis.com/fcm/send/test-token-12345",
+        "keys": {
+          "p256dh": "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM",
+          "auth": "tBHItJI5svbpez7KI4CCXg"
+        }
+      },
+      "deviceInfo": {},
+      "active": false,
+      "updatedAt": "2026-09-13T15:45:06.488Z",
+      "createdAt": "2026-09-13T15:45:06.303Z"
+    },
+    {
+      "id": "dev-test-admin-1-1789314254503",
+      "userId": "test-admin-1",
+      "userName": "Carlos Andrade",
+      "userRole": "ADMIN",
+      "endpoint": "https://fcm.googleapis.com/fcm/send/test-device-endpoint-andrade",
+      "subscription": {
+        "endpoint": "https://fcm.googleapis.com/fcm/send/test-device-endpoint-andrade",
+        "keys": {
+          "p256dh": "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM",
+          "auth": "tBHItJI5svbpez7KI4CCXg"
+        }
+      },
+      "deviceInfo": {},
+      "active": false,
+      "updatedAt": "2026-09-13T15:44:19.519Z",
+      "createdAt": "2026-09-13T15:44:14.503Z"
+    },
+    {
       "id": "dev-usr-admin-1-1789240589275",
       "userId": "usr-admin-1",
       "userName": "Gestor Teste",
@@ -873,7 +909,13 @@
   ],
   "andradeagro_processed_push_events": [
     "test-1789240586511",
-    "test-1789313814129"
+    "test-1789313814129",
+    "test-1789314250927",
+    "test-1789314254517",
+    "test-1789314259299",
+    "test-1789314280557",
+    "test-1789314302302",
+    "test-1789314306303"
   ],
   "andradeagro_vapid_keys": {
     "publicKey": "BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s",

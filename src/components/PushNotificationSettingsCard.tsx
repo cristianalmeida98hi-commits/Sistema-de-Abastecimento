@@ -95,9 +95,11 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
           const safeText = typeof res?.message === 'string' ? res.message : 'Notificações push ativadas com sucesso!';
           setFeedback({ type: 'success', text: safeText });
         } else {
-          const permVal = res?.status === 'granted' || res?.status === 'denied' || res?.status === 'default'
-            ? res.status
-            : 'denied';
+          const statusStr = String(res?.status || '');
+          const permVal: NotificationPermission | 'unsupported' = 
+            (statusStr === 'granted' || statusStr === 'denied' || statusStr === 'default')
+              ? (statusStr as NotificationPermission)
+              : 'denied';
           setPermission(permVal);
           const safeText = typeof res?.message === 'string' ? res.message : 'Não foi possível ativar as notificações.';
           setFeedback({ type: 'error', text: safeText });

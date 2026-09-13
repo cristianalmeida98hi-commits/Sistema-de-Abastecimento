@@ -604,6 +604,23 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
       console.warn('[Push Notification] Aviso ao inspecionar inscrição local antes do teste:', subErr);
     }
 
+    // Se permissão já estiver concedida mas a inscrição ainda não existir no navegador, inscreve agora
+    if (!currentSubscription && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        console.log('[Push Notification] Permissão concedida. Auto-inscrevendo dispositivo antes de enviar o teste...');
+        const enrollRes = await enablePushNotifications(currentUser);
+        if (enrollRes?.success && 'serviceWorker' in navigator) {
+          const reg = await navigator.serviceWorker.getRegistration();
+          const sub = await reg?.pushManager?.getSubscription();
+          if (sub) {
+            currentSubscription = normalizeSubscription(sub);
+          }
+        }
+      } catch (autoErr) {
+        console.warn('[Push Notification] Aviso na auto-inscrição antes do teste:', autoErr);
+      }
+    }
+
     // 2. Executar requisição segura à API
     const result = await safeApiFetch('/api/notifications/test', {
       method: 'POST',

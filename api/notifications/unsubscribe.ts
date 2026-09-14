@@ -10,7 +10,7 @@ export default async function handler(req: any, res: any) {
   try {
     const body = await parseRequestBody(req);
     const { endpoint, userId } = body;
-    unregisterDevice({ endpoint, userId });
+    await unregisterDevice({ endpoint, userId });
     return sendJson(res, 200, { success: true });
   } catch (err: any) {
     console.error('[API /api/notifications/unsubscribe] Error:', err);

@@ -15,7 +15,7 @@ export default async function handler(req: any, res: any) {
       return sendJson(res, 400, { success: false, error: 'Payload de inscrição incompleto' });
     }
 
-    const device = registerDevice({
+    const device = await registerDevice({
       userId,
       userName,
       userRole,

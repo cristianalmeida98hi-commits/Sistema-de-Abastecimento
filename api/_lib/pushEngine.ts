@@ -37,32 +37,44 @@ export const OFFICIAL_VAPID_KEYS = {
 
 function cleanKey(k?: string): string {
   if (!k) return '';
-  return k.trim().replace(/^["']|["']$/g, '');
+  return k.trim().replace(/^["']|["']$/g, '').replace(/\\n/g, '').replace(/\r?\n/g, '').trim();
 }
 
 const VAPID_SUBJECT = cleanKey(process.env.VAPID_SUBJECT) || 'mailto:suporte@andradeagro.com.br';
-const VAPID_PUBLIC_KEY = cleanKey(process.env.VAPID_PUBLIC_KEY) || OFFICIAL_VAPID_KEYS.publicKey;
-const VAPID_PRIVATE_KEY = cleanKey(process.env.VAPID_PRIVATE_KEY) || OFFICIAL_VAPID_KEYS.privateKey;
+const VAPID_PUBLIC_KEY = 
+  cleanKey(process.env.VAPID_PUBLIC_KEY) || 
+  cleanKey(process.env.VITE_VAPID_PUBLIC_KEY) || 
+  OFFICIAL_VAPID_KEYS.publicKey;
+const VAPID_PRIVATE_KEY = 
+  cleanKey(process.env.VAPID_PRIVATE_KEY) || 
+  cleanKey(process.env.PRIVATE_VAPID_KEY) || 
+  OFFICIAL_VAPID_KEYS.privateKey;
+
+let vapidConfiguredSuccessfully = false;
+let vapidConfigError: string | null = null;
 
 try {
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-  console.log('[AndradeAgro PushEngine] VAPID configured successfully.');
+  vapidConfiguredSuccessfully = true;
+  console.log('[AndradeAgro PushEngine] VAPID configurado com sucesso no servidor.');
 } catch (e: any) {
-  console.error('[AndradeAgro PushEngine] Error configuring VAPID:', e?.message || e);
+  vapidConfigError = e?.message || String(e);
+  console.error('[AndradeAgro PushEngine] Erro ao configurar VAPID:', vapidConfigError);
 }
 
 // Firebase setup
 const firebaseConfig = {
-  apiKey: "AIzaSyCKLaXPZ3xq5M2CCRVBkwRHS-7dQoBelEY",
-  authDomain: "andrade-agro.firebaseapp.com",
-  projectId: "andrade-agro",
-  storageBucket: "andrade-agro.firebasestorage.app",
-  messagingSenderId: "271695349839",
-  appId: "1:271695349839:web:4428ed928e6423b9adc23a"
+  apiKey: process.env.FIREBASE_API_KEY || "AIzaSyCKLaXPZ3xq5M2CCRVBkwRHS-7dQoBelEY",
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN || "andrade-agro.firebaseapp.com",
+  projectId: process.env.FIREBASE_PROJECT_ID || "andrade-agro",
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || "andrade-agro.firebasestorage.app",
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || "271695349839",
+  appId: process.env.FIREBASE_APP_ID || "1:271695349839:web:4428ed928e6423b9adc23a"
 };
 
 let firebaseAppInstance: any = null;
 let firestoreInstance: any = null;
+let pendingEngineAuthPromise: Promise<any> | null = null;
 
 function getFirebase() {
   if (!firestoreInstance) {
@@ -70,6 +82,37 @@ function getFirebase() {
     firestoreInstance = getFirestore(firebaseAppInstance);
   }
   return { app: firebaseAppInstance, db: firestoreInstance };
+}
+
+export async function ensureEngineFirebaseAuth(): Promise<boolean> {
+  try {
+    const { app } = getFirebase();
+    const auth = getAuth(app);
+    if (auth.currentUser) {
+      return true;
+    }
+    if (pendingEngineAuthPromise) {
+      await pendingEngineAuthPromise;
+      return Boolean(auth.currentUser);
+    }
+    pendingEngineAuthPromise = signInAnonymously(auth)
+      .then((cred) => {
+        console.log(`[AndradeAgro PushEngine] Firebase Auth anônimo ativo: UID=${cred.user.uid}`);
+        return cred.user;
+      })
+      .catch((err) => {
+        console.warn(`[AndradeAgro PushEngine] Falha ao autenticar anonimamente no Firebase:`, err?.message || err);
+        return null;
+      })
+      .finally(() => {
+        pendingEngineAuthPromise = null;
+      });
+    await pendingEngineAuthPromise;
+    return Boolean(auth.currentUser);
+  } catch (err: any) {
+    console.warn(`[AndradeAgro PushEngine] Exceção em ensureEngineFirebaseAuth:`, err?.message || err);
+    return false;
+  }
 }
 
 export function isValidPushSubscription(sub: any): boolean {
@@ -160,12 +203,10 @@ export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
 
   // 2. Firestore devices
   try {
-    const { app, db } = getFirebase();
-    const auth = getAuth(app);
-    if (!auth.currentUser) {
-      await signInAnonymously(auth).catch(() => null);
-    }
+    await ensureEngineFirebaseAuth();
+    const { db } = getFirebase();
     const snap = await getDocs(collection(db, 'user_devices'));
+    console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Firestore: ${snap.size} documentos recuperados em 'user_devices'.`);
     snap.forEach((docSnap) => {
       const data = docSnap.data();
       if (data && data.active !== false && data.subscription) {
@@ -187,10 +228,12 @@ export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
       }
     });
   } catch (err: any) {
-    console.warn('[AndradeAgro PushEngine] Warning querying Firestore devices:', err?.message || err);
+    console.warn('[AndradeAgro PushEngine] [ETAPA 3/6] Aviso ao consultar Firestore user_devices:', err?.message || err);
   }
 
-  return Array.from(deviceMap.values());
+  const result = Array.from(deviceMap.values());
+  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado de dispositivos ativos válidos: ${result.length}`);
+  return result;
 }
 
 export async function deactivateEndpointEverywhere(endpoint: string) {
@@ -443,6 +486,7 @@ export async function dispatchPushToAuthorizedUsers(event: {
   recipientsCount?: number;
   errors?: string[];
   stage?: string;
+  diagnostics?: any;
   message: string;
 }> {
   const {
@@ -458,12 +502,50 @@ export async function dispatchPushToAuthorizedUsers(event: {
     directUserRole
   } = event;
 
-  console.log(`[AndradeAgro PushEngine] [1. Início] Preparando envio ${eventType} (${eventId})`);
+  // ETAPA 1: Request chegou à Function?
+  console.log(`[AndradeAgro PushEngine] [ETAPA 1/6] Requisição de disparo recebida: EventType=${eventType}, EventId=${eventId}, Alvo=${targetUserId || 'TODOS'}, Operador=${directUserName || 'N/A'}`);
+
+  // ETAPA 2: Variáveis necessárias estão disponíveis? (Sem imprimir segredos)
+  const hasVapidPublic = Boolean(VAPID_PUBLIC_KEY && VAPID_PUBLIC_KEY.length > 20);
+  const hasVapidPrivate = Boolean(VAPID_PRIVATE_KEY && VAPID_PRIVATE_KEY.length > 20);
+  const hasVapidSubject = Boolean(VAPID_SUBJECT && VAPID_SUBJECT.length > 5);
+  const hasFirebaseCreds = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
+
+  console.log('[AndradeAgro PushEngine] [ETAPA 2/6] Auditoria de variáveis de ambiente:');
+  console.log(`  - VAPID_PUBLIC_KEY: ${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}`);
+  console.log(`  - VAPID_PRIVATE_KEY: ${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'}`);
+  console.log(`  - VAPID_SUBJECT: ${hasVapidSubject ? 'PRESENTE' : 'AUSENTE'}`);
+  console.log(`  - Firebase credentials: ${hasFirebaseCreds ? 'PRESENTE' : 'AUSENTE'}`);
+
+  if (!hasVapidPrivate || !hasVapidPublic) {
+    const varError = `Configuração VAPID incompleta (VAPID_PUBLIC_KEY: ${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}, VAPID_PRIVATE_KEY: ${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'})`;
+    console.error(`[AndradeAgro PushEngine] [ETAPA 6/6] ERRO TÉCNICO: ${varError}`);
+    return {
+      success: false,
+      duplicate: false,
+      sentCount: 0,
+      failedCount: 0,
+      recipientsCount: 0,
+      stage: 'variaveis_ambiente',
+      errors: [varError],
+      diagnostics: {
+        etapa1_requestReceived: true,
+        etapa2_envVars: {
+          vapidPublicKey: hasVapidPublic ? 'PRESENTE' : 'AUSENTE',
+          vapidPrivateKey: hasVapidPrivate ? 'PRESENTE' : 'AUSENTE',
+          vapidSubject: hasVapidSubject ? 'PRESENTE' : 'AUSENTE',
+          firebaseCredentials: hasFirebaseCreds ? 'PRESENTE' : 'AUSENTE'
+        },
+        etapa6_technicalError: varError
+      },
+      message: `Erro na ETAPA 2: ${varError}`
+    };
+  }
 
   // Deduplication check
   loadStore();
   if (inMemoryStore.processedEvents.includes(eventId)) {
-    console.log(`[AndradeAgro PushEngine] Event ${eventId} already processed. Deduplicating.`);
+    console.log(`[AndradeAgro PushEngine] Evento ${eventId} já processado anteriormente. Descartando duplicata.`);
     return {
       success: false,
       duplicate: true,
@@ -517,10 +599,11 @@ export async function dispatchPushToAuthorizedUsers(event: {
     }
   });
 
-  // Step 2: Fetch all devices from Firestore and local store
+  // ETAPA 3: Firestore/dispositivos foram encontrados? Quantidade encontrada.
   const allDevices = await fetchAllActiveDevices();
+  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total bruto de dispositivos ativos no repositório: ${allDevices.length}`);
 
-  // If direct subscription was supplied with test request, ensure it's present
+  // Se uma subscrição direta do cliente foi enviada junto com o teste, assegurar presença
   if (directSubscription && isValidPushSubscription(directSubscription)) {
     const existing = allDevices.find(d => d.subscription && d.subscription.endpoint === directSubscription.endpoint);
     if (!existing) {
@@ -535,15 +618,16 @@ export async function dispatchPushToAuthorizedUsers(event: {
         updatedAt: new Date().toISOString(),
         createdAt: new Date().toISOString()
       });
+      console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Dispositivo do navegador atual incluído diretamente via payload: ${directUserName || 'Operador'}`);
     }
   }
 
-  // Step 3: Validate and filter targets
+  // Filtragem e validação dos destinatários
   const targets = allDevices.filter(d => {
     if (d.active === false) return false;
     if (!d.subscription || !d.subscription.endpoint) return false;
     if (!isValidPushSubscription(d.subscription)) {
-      console.warn(`[AndradeAgro PushEngine] [3. Validação] Token inválido para ${d.userName}. Desativando.`);
+      console.warn(`[AndradeAgro PushEngine] [ETAPA 3/6] Token inválido/expirado para ${d.userName}. Desativando.`);
       deactivateEndpointEverywhere(d.endpoint).catch(() => null);
       return false;
     }
@@ -551,9 +635,11 @@ export async function dispatchPushToAuthorizedUsers(event: {
     return true;
   });
 
-  console.log(`[AndradeAgro PushEngine] [2. Dispositivos] ${targets.length} alvos válidos identificados.`);
+  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Destinatários elegíveis e validados para envio: ${targets.length} dispositivo(s).`);
 
   if (targets.length === 0) {
+    const noDevicesMsg = 'Nenhum dispositivo registrado com permissão ativa e credenciais válidas encontrado no servidor.';
+    console.warn(`[AndradeAgro PushEngine] [ETAPA 6/6] ERRO TÉCNICO: ${noDevicesMsg}`);
     return {
       success: false,
       duplicate: false,
@@ -561,9 +647,25 @@ export async function dispatchPushToAuthorizedUsers(event: {
       failedCount: 0,
       recipientsCount: 0,
       stage: 'busca_dispositivos',
-      message: 'Nenhum dispositivo registrado com permissão ativa e chaves válidas para receber notificações push.'
+      errors: [noDevicesMsg],
+      diagnostics: {
+        etapa1_requestReceived: true,
+        etapa2_envVars: {
+          vapidPublicKey: 'PRESENTE',
+          vapidPrivateKey: 'PRESENTE',
+          vapidSubject: 'PRESENTE',
+          firebaseCredentials: hasFirebaseCreds ? 'PRESENTE' : 'AUSENTE'
+        },
+        etapa3_devicesFound: allDevices.length,
+        etapa3_validTargets: 0,
+        etapa6_technicalError: noDevicesMsg
+      },
+      message: noDevicesMsg
     };
   }
+
+  // ETAPA 4: Tentativa de envio iniciada?
+  console.log(`[AndradeAgro PushEngine] [ETAPA 4/6] Tentativa de envio iniciada para ${targets.length} dispositivo(s). Assunto: "${title}"`);
 
   let sentCount = 0;
   let failedCount = 0;
@@ -579,20 +681,20 @@ export async function dispatchPushToAuthorizedUsers(event: {
     TTL: 86400
   };
 
-  // Step 4: Dispatch push
+  // Disparo para os serviços Push (ETAPA 5)
   await Promise.all(
     targets.map(async (device) => {
       try {
         const pushRes = await webpush.sendNotification(device.subscription as any, payload, vapidOptions);
         sentCount++;
-        console.log(`[AndradeAgro PushEngine] [4. Sucesso] Entregue para ${device.userName} - Status ${pushRes?.statusCode || 201}`);
+        console.log(`[AndradeAgro PushEngine] [ETAPA 5/6] Sucesso no envio para ${device.userName} (${device.deviceInfo?.platform || 'dispositivo'}) - Código HTTP ${pushRes?.statusCode || 201}`);
       } catch (err: any) {
         failedCount++;
         const statusCode = err?.statusCode || 'ERR';
-        const msg = err?.body || err?.message || 'Falha no envio';
-        const detail = `Status ${statusCode}: ${msg}`;
+        const msg = err?.body || err?.message || 'Falha de comunicação com serviço push';
+        const detail = `${device.userName}: Status ${statusCode} - ${msg}`;
         errors.push(detail);
-        console.warn(`[AndradeAgro PushEngine] [4. Falha] Erro ao enviar para ${device.userName}:`, detail);
+        console.warn(`[AndradeAgro PushEngine] [ETAPA 5/6] Falha no envio para ${device.userName}: ${detail}`);
         if (err?.statusCode === 404 || err?.statusCode === 410) {
           invalidEndpoints.push(device.subscription.endpoint);
         }
@@ -600,14 +702,21 @@ export async function dispatchPushToAuthorizedUsers(event: {
     })
   );
 
-  // Clean expired endpoints
+  // Limpeza de subscrições expiradas reportadas pelos serviços Push
   if (invalidEndpoints.length > 0) {
     for (const ep of invalidEndpoints) {
       await deactivateEndpointEverywhere(ep).catch(() => null);
     }
   }
 
+  // ETAPA 6: Erro técnico real ou Sucesso registrado
   const isSuccess = sentCount > 0;
+  if (!isSuccess) {
+    console.error(`[AndradeAgro PushEngine] [ETAPA 6/6] ERRO TÉCNICO REAL: Nenhuma notificação entregue. Falhas: ${errors.join('; ')}`);
+  } else {
+    console.log(`[AndradeAgro PushEngine] [ETAPA 6/6] Concluído com êxito: ${sentCount} entregue(s) com sucesso.`);
+  }
+
   return {
     success: isSuccess,
     duplicate: false,
@@ -616,6 +725,21 @@ export async function dispatchPushToAuthorizedUsers(event: {
     recipientsCount: targets.length,
     stage: isSuccess ? 'sucesso' : 'servico_push',
     errors: errors.length > 0 ? errors : undefined,
+    diagnostics: {
+      etapa1_requestReceived: true,
+      etapa2_envVars: {
+        vapidPublicKey: 'PRESENTE',
+        vapidPrivateKey: 'PRESENTE',
+        vapidSubject: 'PRESENTE',
+        firebaseCredentials: hasFirebaseCreds ? 'PRESENTE' : 'AUSENTE'
+      },
+      etapa3_devicesFound: allDevices.length,
+      etapa3_validTargets: targets.length,
+      etapa4_dispatchAttempted: true,
+      etapa5_pushResponded: true,
+      etapa6_technicalStatus: isSuccess ? 'OK' : 'FALHA',
+      etapa6_errors: errors
+    },
     message: isSuccess
       ? `Notificação entregue com sucesso para ${sentCount} de ${targets.length} dispositivo(s).` + (failedCount > 0 ? ` (${failedCount} falha(s))` : '')
       : `Falha ao entregar push para ${failedCount} dispositivo(s): ${errors.join('; ')}`

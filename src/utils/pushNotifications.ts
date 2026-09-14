@@ -57,14 +57,22 @@ export async function safeApiFetch<T = any>(
 
   console.log(`[AndradeAgro API] Requisição: ${method} ${url}`);
 
+  const controller = new AbortController();
+  const timeoutMs = 6500;
+  const timeoutTimer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
   try {
     const res = await fetch(url, {
       ...options,
+      signal: options?.signal || controller.signal,
       headers: {
         'Accept': 'application/json',
         ...(options?.headers || {})
       }
     });
+    clearTimeout(timeoutTimer);
 
     const status = res.status;
     const statusText = res.statusText;
@@ -131,11 +139,16 @@ export async function safeApiFetch<T = any>(
       method
     };
   } catch (netErr: any) {
-    console.error(`[AndradeAgro API] Falha de rede em ${method} ${url}:`, netErr);
+    clearTimeout(timeoutTimer);
+    const isTimeout = netErr?.name === 'AbortError';
+    const errorDetail = isTimeout
+      ? `Tempo limite excedido (${timeoutMs / 1000}s) ao aguardar resposta de ${url}. O servidor demorou para responder.`
+      : `Falha de conexão com o servidor (${url}): ${netErr?.message || 'Sem resposta do servidor'}`;
+    console.error(`[AndradeAgro API] ${isTimeout ? 'Timeout' : 'Falha de rede'} em ${method} ${url}:`, errorDetail);
     return {
       ok: false,
-      status: 0,
-      error: `Falha de conexão com o servidor (${url}): ${netErr?.message || 'Sem resposta do servidor'}`,
+      status: isTimeout ? 408 : 0,
+      error: errorDetail,
       url,
       method
     };
@@ -932,6 +945,10 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
  * Fetch server-side notification status and active device diagnostics
  */
 export async function fetchServerNotificationStatus(): Promise<{
+  success?: boolean;
+  querySuccess?: boolean;
+  queryError?: string;
+  error?: string;
   vapidConfigured: boolean;
   vapidPublicKey?: string;
   totalDevices: number;
@@ -945,10 +962,28 @@ export async function fetchServerNotificationStatus(): Promise<{
 } | null> {
   try {
     const result = await safeApiFetch('/api/notifications/status');
-    if (!result.ok || !result.data) return null;
-    return result.data;
-  } catch {
-    return null;
+    if (!result.ok) {
+      return {
+        success: false,
+        querySuccess: false,
+        error: result.error || `Erro do servidor (Status ${result.status})`,
+        vapidConfigured: false,
+        totalDevices: 0,
+        activeAuthorizedCount: 0,
+        authorizedDevices: []
+      };
+    }
+    return result.data || null;
+  } catch (err: any) {
+    return {
+      success: false,
+      querySuccess: false,
+      error: err?.message || 'Falha de conexão com o servidor',
+      vapidConfigured: false,
+      totalDevices: 0,
+      activeAuthorizedCount: 0,
+      authorizedDevices: []
+    };
   }
 }
 

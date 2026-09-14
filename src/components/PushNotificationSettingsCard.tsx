@@ -27,16 +27,23 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
   const [serverStatus, setServerStatus] = useState<{
     activeAuthorizedCount: number;
     authorizedDevices: Array<{ userName: string; userRole: string; platform: string; updatedAt: string }>;
+    querySuccess?: boolean;
+    error?: string;
   } | null>(null);
+  const [statusLoading, setStatusLoading] = useState<boolean>(true);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const checkStatus = async () => {
+    setStatusLoading(true);
+    setStatusError(null);
     try {
       const isSup = isPushSupported();
       setSupported(isSup);
       if (!isSup) {
         setPermission('unsupported');
         setIsActive(false);
+        setStatusLoading(false);
         return;
       }
 
@@ -48,15 +55,40 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
       const subActive = await isSubscriptionActive().catch(() => false);
       setIsActive(Boolean(storedActive && subActive && perm === 'granted'));
 
-      const sStatus = await fetchServerNotificationStatus().catch(() => null);
+      const sStatus = await fetchServerNotificationStatus().catch((err) => ({
+        success: false,
+        querySuccess: false,
+        error: err?.message || 'Falha ao consultar servidor',
+        totalDevices: 0,
+        activeAuthorizedCount: 0,
+        authorizedDevices: []
+      }));
+
       if (sStatus) {
-        setServerStatus({
-          activeAuthorizedCount: Number(sStatus.activeAuthorizedCount) || 0,
-          authorizedDevices: Array.isArray(sStatus.authorizedDevices) ? sStatus.authorizedDevices : []
-        });
+        if (sStatus.querySuccess === false || sStatus.error) {
+          setStatusError(sStatus.error || 'Falha ao consultar dispositivos');
+          setServerStatus({
+            activeAuthorizedCount: 0,
+            authorizedDevices: [],
+            querySuccess: false,
+            error: sStatus.error
+          });
+        } else {
+          setStatusError(null);
+          setServerStatus({
+            activeAuthorizedCount: Number(sStatus.activeAuthorizedCount) || 0,
+            authorizedDevices: Array.isArray(sStatus.authorizedDevices) ? sStatus.authorizedDevices : [],
+            querySuccess: true
+          });
+        }
+      } else {
+        setStatusError('Servidor não retornou dados de status');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[Push Notification Card] Aviso ao verificar status push:', err);
+      setStatusError(err?.message || 'Erro ao consultar dispositivos');
+    } finally {
+      setStatusLoading(false);
     }
   };
 
@@ -259,7 +291,19 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
           <div>
             <div className="text-[10px] text-emerald-400 font-semibold uppercase">Dispositivos no Servidor</div>
             <div className="font-bold text-slate-100">
-              {serverStatus ? `${serverStatus.activeAuthorizedCount} ativo(s)` : 'Consultando...'}
+              {statusLoading ? (
+                <span className="text-amber-300 flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> Consultando...
+                </span>
+              ) : statusError ? (
+                <span className="text-red-400 text-xs font-semibold" title={statusError}>
+                  Falha na consulta
+                </span>
+              ) : serverStatus ? (
+                `${serverStatus.activeAuthorizedCount} ativo(s)`
+              ) : (
+                <span className="text-slate-400 text-xs">Indisponível</span>
+              )}
             </div>
           </div>
         </div>

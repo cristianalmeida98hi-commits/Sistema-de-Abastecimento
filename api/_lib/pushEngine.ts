@@ -1,9 +1,8 @@
 import webpushLib from 'web-push';
 import fs from 'fs';
 import path from 'path';
-import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, collection, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { initializeApp, getApps, cert, type App } from 'firebase-admin/app';
+import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 
 const webpush = (webpushLib as any).default || webpushLib;
 
@@ -101,7 +100,7 @@ try {
   console.error('[AndradeAgro PushEngine] Erro ao configurar VAPID:', vapidConfigError);
 }
 
-// Firebase setup
+// Configurações gerais do Firebase
 const firebaseConfig = {
   apiKey: process.env.FIREBASE_API_KEY || "AIzaSyCKLaXPZ3xq5M2CCRVBkwRHS-7dQoBelEY",
   authDomain: process.env.FIREBASE_AUTH_DOMAIN || "andrade-agro.firebaseapp.com",
@@ -111,49 +110,92 @@ const firebaseConfig = {
   appId: process.env.FIREBASE_APP_ID || "1:271695349839:web:4428ed928e6423b9adc23a"
 };
 
-let firebaseAppInstance: any = null;
-let firestoreInstance: any = null;
-let pendingEngineAuthPromise: Promise<any> | null = null;
+let adminDbInstance: Firestore | null = null;
+let adminInitAttempted = false;
 let lastFirestoreQueryError: string | null = null;
 let cachedAuthToken: { token: string; expiresAt: number } | null = null;
 
-function getFirebase() {
-  if (!firestoreInstance) {
-    firebaseAppInstance = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
-    firestoreInstance = getFirestore(firebaseAppInstance);
+/**
+ * Inicialização segura e resiliente do Firebase Admin SDK.
+ * Roda no ambiente Node.js / Serverless sem usar o SDK Web de cliente.
+ */
+export function getFirebaseAdminDb(): Firestore | null {
+  if (adminDbInstance) return adminDbInstance;
+  if (adminInitAttempted) return null;
+  adminInitAttempted = true;
+
+  try {
+    const existingApps = getApps();
+    if (existingApps && existingApps.length > 0 && existingApps[0]) {
+      adminDbInstance = getFirestore(existingApps[0]);
+      return adminDbInstance;
+    }
+
+    const projectId = firebaseConfig.projectId;
+
+    // 1. Verificar se existe JSON de conta de serviço completo
+    const saEnv = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_SERVICE_ACCOUNT;
+    if (saEnv && typeof saEnv === 'string' && saEnv.trim().length > 10) {
+      try {
+        const sa = JSON.parse(saEnv.trim());
+        const app = initializeApp({
+          credential: cert(sa),
+          projectId: sa.project_id || projectId
+        }, 'andradeagro-admin-sa');
+        adminDbInstance = getFirestore(app);
+        console.log('[AndradeAgro PushEngine] Firebase Admin inicializado via FIREBASE_SERVICE_ACCOUNT.');
+        return adminDbInstance;
+      } catch (saErr: any) {
+        console.warn('[AndradeAgro PushEngine] Falha ao analisar FIREBASE_SERVICE_ACCOUNT:', saErr?.message || saErr);
+      }
+    }
+
+    // 2. Verificar se existem credenciais individuais (Client Email + Private Key)
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
+    if (clientEmail && rawPrivateKey) {
+      try {
+        const privateKey = rawPrivateKey.replace(/\\n/g, '\n').trim();
+        const app = initializeApp({
+          credential: cert({
+            projectId,
+            clientEmail: clientEmail.trim(),
+            privateKey
+          }),
+          projectId
+        }, 'andradeagro-admin-keys');
+        adminDbInstance = getFirestore(app);
+        console.log('[AndradeAgro PushEngine] Firebase Admin inicializado via FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY.');
+        return adminDbInstance;
+      } catch (keyErr: any) {
+        console.warn('[AndradeAgro PushEngine] Falha ao inicializar Firebase Admin com chaves individuais:', keyErr?.message || keyErr);
+      }
+    }
+
+    // 3. Fallback de credenciais de ambiente (GCP / ADC)
+    try {
+      const app = initializeApp({
+        projectId
+      }, 'andradeagro-admin-adc');
+      adminDbInstance = getFirestore(app);
+      console.log('[AndradeAgro PushEngine] Firebase Admin inicializado via Application Default Credentials.');
+      return adminDbInstance;
+    } catch {
+      // Sem credenciais padrão disponíveis no ambiente atual
+    }
+  } catch (err: any) {
+    console.warn('[AndradeAgro PushEngine] Firebase Admin não pôde ser inicializado:', err?.message || err);
   }
-  return { app: firebaseAppInstance, db: firestoreInstance };
+
+  return null;
 }
 
 export async function ensureEngineFirebaseAuth(): Promise<boolean> {
-  try {
-    const { app } = getFirebase();
-    const auth = getAuth(app);
-    if (auth.currentUser) {
-      return true;
-    }
-    if (pendingEngineAuthPromise) {
-      await pendingEngineAuthPromise;
-      return Boolean(auth.currentUser);
-    }
-    pendingEngineAuthPromise = signInAnonymously(auth)
-      .then((cred) => {
-        console.log(`[AndradeAgro PushEngine] Firebase Auth anônimo ativo: UID=${cred.user.uid}`);
-        return cred.user;
-      })
-      .catch((err) => {
-        console.warn(`[AndradeAgro PushEngine] Falha ao autenticar anonimamente no Firebase:`, err?.message || err);
-        return null;
-      })
-      .finally(() => {
-        pendingEngineAuthPromise = null;
-      });
-    await pendingEngineAuthPromise;
-    return Boolean(auth.currentUser);
-  } catch (err: any) {
-    console.warn(`[AndradeAgro PushEngine] Exceção em ensureEngineFirebaseAuth:`, err?.message || err);
-    return false;
-  }
+  // Retorna true se Firebase Admin está pronto ou se conseguimos obter token REST
+  const adminDb = getFirebaseAdminDb();
+  if (adminDb) return true;
+  const token = await getFirebaseAuthToken();
+  return Boolean(token);
 }
 
 function parseFirestoreValue(val: any): any {
@@ -200,7 +242,7 @@ async function getFirebaseAuthToken(): Promise<string | null> {
     const apiKey = firebaseConfig.apiKey;
     const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(() => controller.abort(), 3500);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -209,7 +251,6 @@ async function getFirebaseAuthToken(): Promise<string | null> {
     });
     clearTimeout(timer);
     if (!res.ok) {
-      console.warn(`[AndradeAgro PushEngine] IdentityToolkit returned status ${res.status}`);
       return null;
     }
     const data = (await res.json()) as any;
@@ -219,30 +260,27 @@ async function getFirebaseAuthToken(): Promise<string | null> {
         token: data.idToken,
         expiresAt: now + expiresIn * 1000
       };
-      console.log(`[AndradeAgro PushEngine] Token Firebase Auth REST obtido com sucesso (UID=${data.localId})`);
       return data.idToken;
     }
   } catch (err: any) {
-    console.warn(`[AndradeAgro PushEngine] Falha ao obter token Auth REST:`, err?.message || err);
+    // Timeout ou falha de rede ao buscar token de autenticação anônima
   }
   return null;
 }
 
+/**
+ * Consulta de dispositivos via Firestore REST com timeout estrito
+ */
 async function fetchFirestoreDevicesRest(): Promise<{ devices: PushDeviceRecord[]; error?: string }> {
   try {
-    console.log(`[AndradeAgro PushEngine] INÍCIO DA CONSULTA`);
-    console.log(`[AndradeAgro PushEngine] Firebase inicializado: SIM`);
-    console.log(`[AndradeAgro PushEngine] Projeto Firebase identificado: ${firebaseConfig.projectId}`);
-    console.log(`[AndradeAgro PushEngine] Consulta Firestore iniciada: coleção 'user_devices'`);
-
     const token = await getFirebaseAuthToken();
     if (!token) {
-      return { devices: [], error: 'Não foi possível autenticar a sessão do Firebase para ler os dispositivos.' };
+      return { devices: [], error: 'Não foi possível autenticar a sessão do Firebase REST para ler os dispositivos.' };
     }
 
     const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/user_devices?pageSize=100`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 9000);
+    const timer = setTimeout(() => controller.abort(), 3500);
 
     const res = await fetch(firestoreUrl, {
       headers: { 'Authorization': `Bearer ${token}` },
@@ -252,13 +290,13 @@ async function fetchFirestoreDevicesRest(): Promise<{ devices: PushDeviceRecord[
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.warn(`[AndradeAgro PushEngine] Erro HTTP na consulta REST do Firestore (status ${res.status}): ${errText.slice(0, 150)}`);
-      return { devices: [], error: `Erro HTTP ${res.status} ao consultar Firestore: ${errText.slice(0, 100)}` };
+      const errMsg = `HTTP ${res.status}: ${errText.slice(0, 100)}`;
+      console.warn(`[AndradeAgro PushEngine] Consulta REST do Firestore retornou ${errMsg}`);
+      return { devices: [], error: errMsg };
     }
 
     const data = (await res.json()) as any;
     const docs = data.documents || [];
-    console.log(`[AndradeAgro PushEngine] Quantidade de documentos encontrados no Firestore: ${docs.length}`);
 
     const records: PushDeviceRecord[] = [];
     for (const rawDoc of docs) {
@@ -282,11 +320,9 @@ async function fetchFirestoreDevicesRest(): Promise<{ devices: PushDeviceRecord[
       }
     }
 
-    console.log(`[AndradeAgro PushEngine] Quantidade de dispositivos válidos: ${records.length}`);
     return { devices: records };
   } catch (err: any) {
-    const msg = err?.name === 'AbortError' ? 'Tempo limite esgotado ao consultar Firestore (timeout)' : err?.message || String(err);
-    console.warn(`[AndradeAgro PushEngine] Falha na consulta REST do Firestore:`, msg);
+    const msg = err?.name === 'AbortError' ? 'Tempo limite esgotado ao consultar Firestore REST (timeout)' : err?.message || String(err);
     return { devices: [], error: msg };
   }
 }
@@ -366,40 +402,39 @@ function saveStore() {
 
 loadStore();
 
+/**
+ * Consulta de todos os dispositivos ativos com resiliência:
+ * 1. Dispositivos locais em memória/disco
+ * 2. Firebase Admin SDK (se credenciado) com timeout de 3.5s
+ * 3. Firestore REST API com timeout de 3.5s
+ * NUNCA utiliza Firebase Web SDK no servidor, evitando bloqueio do runtime.
+ */
 export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
   loadStore();
   const deviceMap = new Map<string, PushDeviceRecord>();
 
-  // 1. Local devices
+  // 1. Dispositivos locais
   for (const d of inMemoryStore.devices) {
     if (d.endpoint && d.active !== false && isValidPushSubscription(d.subscription)) {
       deviceMap.set(d.endpoint, d);
     }
   }
 
-  // 2. Consulta via Firestore REST ultrarrápida (não trava serverless)
+  // 2. Consulta via Firebase Admin SDK
   lastFirestoreQueryError = null;
-  const restResult = await fetchFirestoreDevicesRest();
-  if (restResult.devices.length > 0) {
-    for (const d of restResult.devices) {
-      deviceMap.set(d.endpoint, d);
-    }
-    const result = Array.from(deviceMap.values());
-    console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado de dispositivos ativos válidos: ${result.length}`);
-    return result;
-  }
-
-  // Se REST falhou ou retornou 0 mas houve erro
-  if (restResult.error) {
-    lastFirestoreQueryError = restResult.error;
-    // Tenta fallback com a SDK caso a requisição REST direta tenha falhado
+  const adminDb = getFirebaseAdminDb();
+  if (adminDb) {
     try {
-      await ensureEngineFirebaseAuth();
-      const { db } = getFirebase();
-      const snap = await getDocs(collection(db, 'user_devices'));
-      console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Firestore SDK fallback: ${snap.size} documentos recuperados em 'user_devices'.`);
+      console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Consultando Firestore via Firebase Admin SDK...`);
+      const adminPromise = adminDb.collection('user_devices').get();
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout Firebase Admin (3500ms)')), 3500)
+      );
+      const snap = await Promise.race([adminPromise, timeoutPromise]);
+      console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Firebase Admin retornou ${snap.size} documento(s) em 'user_devices'.`);
+      
       snap.forEach((docSnap) => {
-        const data = docSnap.data();
+        const data = docSnap.data() as any;
         if (data && data.active !== false && data.subscription) {
           const endpoint = data.endpoint || data.subscription?.endpoint;
           if (endpoint && isValidPushSubscription(data.subscription)) {
@@ -418,15 +453,34 @@ export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
           }
         }
       });
-      lastFirestoreQueryError = null; // Resolvido via fallback
-    } catch (sdkErr: any) {
-      console.warn('[AndradeAgro PushEngine] [ETAPA 3/6] Erro também no fallback da SDK Firestore:', sdkErr?.message || sdkErr);
-      lastFirestoreQueryError = sdkErr?.message || restResult.error;
+
+      const result = Array.from(deviceMap.values());
+      console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado via Admin: ${result.length} dispositivo(s).`);
+      return result;
+    } catch (adminErr: any) {
+      console.warn(`[AndradeAgro PushEngine] [ETAPA 3/6] Aviso na consulta do Firebase Admin:`, adminErr?.message || adminErr);
+      lastFirestoreQueryError = adminErr?.message || 'Falha ao consultar Firebase Admin';
     }
   }
 
+  // 3. Consulta via Firestore REST
+  const restResult = await fetchFirestoreDevicesRest();
+  if (restResult.devices && restResult.devices.length > 0) {
+    for (const d of restResult.devices) {
+      deviceMap.set(d.endpoint, d);
+    }
+    const result = Array.from(deviceMap.values());
+    console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado via REST: ${result.length} dispositivo(s).`);
+    return result;
+  }
+
+  if (restResult.error) {
+    lastFirestoreQueryError = restResult.error;
+    console.warn(`[AndradeAgro PushEngine] [ETAPA 3/6] Aviso na consulta REST do Firestore: ${restResult.error}`);
+  }
+
   const result = Array.from(deviceMap.values());
-  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado de dispositivos ativos válidos: ${result.length}`);
+  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado de dispositivos ativos no repositório: ${result.length}`);
   return result;
 }
 
@@ -441,25 +495,19 @@ export async function deactivateEndpointEverywhere(endpoint: string) {
   });
   saveStore();
 
-  // 2. Firestore
+  // 2. Firebase Admin se disponível
   try {
-    const { app, db } = getFirebase();
-    const auth = getAuth(app);
-    if (!auth.currentUser) {
-      await signInAnonymously(auth).catch(() => null);
+    const adminDb = getFirebaseAdminDb();
+    if (adminDb) {
+      const snap = await adminDb.collection('user_devices').where('endpoint', '==', endpoint).get();
+      const batch = adminDb.batch();
+      snap.forEach((docSnap) => {
+        batch.update(docSnap.ref, { active: false, updatedAt: new Date().toISOString() });
+      });
+      await batch.commit().catch(() => null);
     }
-    const snap = await getDocs(collection(db, 'user_devices'));
-    snap.forEach(async (docSnap) => {
-      const data = docSnap.data();
-      if (data.endpoint === endpoint || data.subscription?.endpoint === endpoint) {
-        await updateDoc(doc(db, 'user_devices', docSnap.id), {
-          active: false,
-          updatedAt: new Date().toISOString()
-        }).catch(() => null);
-      }
-    });
-  } catch (err) {
-    console.warn('[AndradeAgro PushEngine] Warning deactivating in Firestore:', err);
+  } catch (err: any) {
+    console.warn('[AndradeAgro PushEngine] Warning deactivating in Firestore Admin:', err?.message || err);
   }
 }
 
@@ -573,16 +621,15 @@ export async function registerDevice(params: {
   }
   saveStore();
 
-  // Sync to Firestore
+  // Sync to Firestore via Admin SDK se disponível
   try {
-    const { app, db } = getFirebase();
-    const auth = getAuth(app);
-    if (!auth.currentUser) {
-      await signInAnonymously(auth).catch(() => null);
+    const adminDb = getFirebaseAdminDb();
+    if (adminDb) {
+      await adminDb.collection('user_devices').doc(record.id).set(record, { merge: true });
+      console.log(`[AndradeAgro PushEngine] Dispositivo registrado via Firebase Admin: ${record.id}`);
     }
-    await setDoc(doc(db, 'user_devices', record.id), record, { merge: true });
-  } catch (fsErr) {
-    console.warn('[AndradeAgro PushEngine] Warning syncing to Firestore:', fsErr);
+  } catch (fsErr: any) {
+    console.warn('[AndradeAgro PushEngine] Warning syncing to Firestore Admin:', fsErr?.message || fsErr);
   }
 
   return record;
@@ -630,7 +677,7 @@ export async function getEngineStatus(): Promise<any> {
     success: queryOk,
     querySuccess: queryOk,
     queryError: devices.length === 0 && lastFirestoreQueryError ? lastFirestoreQueryError : undefined,
-    vapidConfigured: true,
+    vapidConfigured: Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY),
     vapidPublicKey: VAPID_PUBLIC_KEY,
     totalDevices: devices.length,
     activeAuthorizedCount: activeValid.length,
@@ -666,6 +713,10 @@ export function resetEventDeduplication(params: { prefix?: string; eventId?: str
   };
 }
 
+/**
+ * Despacho principal de notificações Web Push para dispositivos autorizados.
+ * Protegido contra bloqueios de runtime, com timeouts estritos e tratamento de erros.
+ */
 export async function dispatchPushToAuthorizedUsers(event: {
   eventType: 'NEW_ISSUE' | 'NEW_MAINTENANCE' | 'OIL_CHANGE_DUE' | 'TEST';
   eventId: string;
@@ -701,20 +752,21 @@ export async function dispatchPushToAuthorizedUsers(event: {
     directUserRole
   } = event;
 
-  // ETAPA 1: Request chegou à Function?
+  // ETAPA 1: Request recebido no servidor
   console.log(`[AndradeAgro PushEngine] [ETAPA 1/6] Requisição de disparo recebida: EventType=${eventType}, EventId=${eventId}, Alvo=${targetUserId || 'TODOS'}, Operador=${directUserName || 'N/A'}`);
 
-  // ETAPA 2: Variáveis necessárias estão disponíveis? (Sem imprimir segredos)
+  // ETAPA 2: Auditoria de credenciais VAPID e Firebase
   const hasVapidPublic = Boolean(VAPID_PUBLIC_KEY && VAPID_PUBLIC_KEY.length > 20);
   const hasVapidPrivate = Boolean(VAPID_PRIVATE_KEY && VAPID_PRIVATE_KEY.length > 20);
   const hasVapidSubject = Boolean(VAPID_SUBJECT && VAPID_SUBJECT.length > 5);
-  const hasFirebaseCreds = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
+  const hasFirebaseAdmin = Boolean(getFirebaseAdminDb());
+  const hasFirebaseCreds = Boolean(hasFirebaseAdmin || (firebaseConfig.apiKey && firebaseConfig.projectId));
 
   console.log('[AndradeAgro PushEngine] [ETAPA 2/6] Auditoria de variáveis de ambiente:');
   console.log(`  - VAPID_PUBLIC_KEY: ${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}`);
   console.log(`  - VAPID_PRIVATE_KEY: ${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'}`);
   console.log(`  - VAPID_SUBJECT: ${hasVapidSubject ? 'PRESENTE' : 'AUSENTE'}`);
-  console.log(`  - Firebase credentials: ${hasFirebaseCreds ? 'PRESENTE' : 'AUSENTE'}`);
+  console.log(`  - Firebase Admin SDK: ${hasFirebaseAdmin ? 'INICIALIZADO' : 'NÃO CONFIGURADO (usando fallback)'}`);
 
   if (!hasVapidPrivate || !hasVapidPublic) {
     const varError = `Configuração VAPID incompleta (VAPID_PUBLIC_KEY: ${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}, VAPID_PRIVATE_KEY: ${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'})`;
@@ -798,28 +850,47 @@ export async function dispatchPushToAuthorizedUsers(event: {
     }
   });
 
-  // ETAPA 3: Firestore/dispositivos foram encontrados? Quantidade encontrada.
-  const allDevices = await fetchAllActiveDevices();
-  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total bruto de dispositivos ativos no repositório: ${allDevices.length}`);
+  // ETAPA 3: Obter dispositivos elegíveis de forma rápida e segura
+  const allDevices: PushDeviceRecord[] = [];
 
-  // Se uma subscrição direta do cliente foi enviada junto com o teste, assegurar presença
+  // Se uma subscrição direta do cliente foi enviada junto com o payload (ex: botão "Testar notificação")
+  // Adicionamos ela imediatamente à lista com prioridade máxima
   if (directSubscription && isValidPushSubscription(directSubscription)) {
-    const existing = allDevices.find(d => d.subscription && d.subscription.endpoint === directSubscription.endpoint);
-    if (!existing) {
-      allDevices.unshift({
-        id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
-        userId: targetUserId || 'direct-test-user',
-        userName: directUserName || 'Usuário Atual',
-        userRole: directUserRole || 'USUARIO',
-        endpoint: directSubscription.endpoint,
-        subscription: directSubscription,
-        active: true,
-        updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString()
-      });
-      console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Dispositivo do navegador atual incluído diretamente via payload: ${directUserName || 'Operador'}`);
-    }
+    const directRecord: PushDeviceRecord = {
+      id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
+      userId: targetUserId || 'direct-test-user',
+      userName: directUserName || 'Usuário Atual',
+      userRole: directUserRole || 'ADMIN',
+      endpoint: directSubscription.endpoint,
+      subscription: directSubscription,
+      active: true,
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
+    };
+    allDevices.push(directRecord);
+    console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Dispositivo direto incluído com prioridade: ${directUserName || 'Operador'}`);
   }
+
+  // Consulta do repositório/Firestore com timeout de proteção (máximo 4000ms para evitar timeout da função)
+  try {
+    const fetchPromise = fetchAllActiveDevices();
+    const timeoutPromise = new Promise<PushDeviceRecord[]>((resolve) =>
+      setTimeout(() => {
+        console.warn('[AndradeAgro PushEngine] Timeout de segurança de 4000ms atingido na busca de dispositivos. Prosseguindo.');
+        resolve([]);
+      }, 4000)
+    );
+    const remoteDevices = await Promise.race([fetchPromise, timeoutPromise]);
+    for (const d of remoteDevices) {
+      if (!allDevices.some(existing => existing.endpoint === d.endpoint)) {
+        allDevices.push(d);
+      }
+    }
+  } catch (fetchErr: any) {
+    console.warn('[AndradeAgro PushEngine] Aviso ao consultar dispositivos:', fetchErr?.message || fetchErr);
+  }
+
+  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado de dispositivos ativos no repositório: ${allDevices.length}`);
 
   // Filtragem e validação dos destinatários
   const targets = allDevices.filter(d => {
@@ -866,7 +937,7 @@ export async function dispatchPushToAuthorizedUsers(event: {
     };
   }
 
-  // ETAPA 4: Tentativa de envio iniciada?
+  // ETAPA 4: Tentativa de envio iniciada
   console.log(`[AndradeAgro PushEngine] [ETAPA 4/6] Tentativa de envio iniciada para ${targets.length} dispositivo(s). Assunto: "${title}"`);
 
   let sentCount = 0;
@@ -883,11 +954,15 @@ export async function dispatchPushToAuthorizedUsers(event: {
     TTL: 86400
   };
 
-  // Disparo para os serviços Push (ETAPA 5)
+  // Disparo para os serviços Push com timeout individual por dispositivo (máximo 5000ms)
   await Promise.all(
     targets.map(async (device) => {
       try {
-        const pushRes = await webpush.sendNotification(device.subscription as any, payload, vapidOptions);
+        const sendPromise = webpush.sendNotification(device.subscription as any, payload, vapidOptions);
+        const timeoutSend = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout de 5000ms no envio push')), 5000)
+        );
+        const pushRes = await Promise.race([sendPromise, timeoutSend]);
         sentCount++;
         console.log(`[AndradeAgro PushEngine] [ETAPA 5/6] Sucesso no envio para ${device.userName} (${device.deviceInfo?.platform || 'dispositivo'}) - Código HTTP ${pushRes?.statusCode || 201}`);
       } catch (err: any) {
@@ -911,7 +986,7 @@ export async function dispatchPushToAuthorizedUsers(event: {
     }
   }
 
-  // ETAPA 6: Erro técnico real ou Sucesso registrado
+  // ETAPA 6: Finalização técnica
   const isSuccess = sentCount > 0;
   if (!isSuccess) {
     console.error(`[AndradeAgro PushEngine] [ETAPA 6/6] ERRO TÉCNICO REAL: Nenhuma notificação entregue. Falhas: ${errors.join('; ')}`);

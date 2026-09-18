@@ -12,6 +12,14 @@ interface ReportProblemModalProps {
   darkMode: boolean;
 }
 
+interface UploadAlertState {
+  type: 'error' | 'partial';
+  title: string;
+  message: string;
+  technicalReason: string;
+  successfulPhotos?: { urls: string[]; paths: string[] };
+}
+
 export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
   isOpen,
   onClose,
@@ -26,6 +34,7 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatusText, setSubmitStatusText] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [uploadAlert, setUploadAlert] = useState<UploadAlertState | null>(null);
 
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
@@ -40,6 +49,7 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
     if (!files || files.length === 0) return;
 
     setErrorMessage(null);
+    setUploadAlert(null);
     const filesArray = Array.from(files);
     const availableSlots = MAX_PHOTOS - selectedPhotos.length;
 
@@ -55,22 +65,25 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
     try {
       const processedList: ProcessedPhoto[] = [];
       for (const file of filesToProcess) {
-        // Validate format
-        if (!file.type.match(/^image\/(jpeg|jpg|png|webp)$/i)) {
-          setErrorMessage('Formato não suportado. Use apenas imagens JPG, PNG ou WEBP.');
+        // Validação flexível e compatível com celulares (Android, iOS/Safari, HEIC/HEIF)
+        const isImage = (file.type && file.type.startsWith('image/')) || 
+                        /\.(jpe?g|png|webp|heic|heif|bmp|gif)$/i.test(file.name);
+        
+        if (!isImage) {
+          setErrorMessage('Formato não suportado. Use apenas arquivos de imagem.');
           continue;
         }
+
         const processed = await compressDefectImage(file);
         processedList.push(processed);
       }
 
       setSelectedPhotos(prev => [...prev, ...processedList].slice(0, MAX_PHOTOS));
     } catch (err: any) {
-      console.error('[AndradeAgro] Erro ao comprimir foto:', err);
+      console.error('[AndradeAgro] Erro ao processar foto:', err);
       setErrorMessage(err.message || 'Erro ao processar imagem.');
     } finally {
       setIsCompressing(false);
-      // Reset input value so same photo can be re-selected if needed
       e.target.value = '';
     }
   };
@@ -84,6 +97,7 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
       return prev.filter((_, idx) => idx !== indexToRemove);
     });
     setErrorMessage(null);
+    setUploadAlert(null);
   };
 
   const handleClose = () => {
@@ -95,49 +109,18 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
     setSelectedPhotos([]);
     setDescription('');
     setErrorMessage(null);
+    setUploadAlert(null);
     onClose();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!description.trim() || isSubmitting) return;
-
+  // Salva o defeito de forma definitiva preservando texto e metadados
+  const saveIssueRecord = (
+    issueId: string, 
+    finalUrls: string[], 
+    finalPaths: string[]
+  ) => {
     setIsSubmitting(true);
-    setErrorMessage(null);
-
-    // Pre-generate unique issue ID for storage grouping (Regra 7: defeitos/{issueId}/{photoId})
-    const issueId = `iss-${Date.now()}`;
-    let photoUrls: string[] = [];
-    let photoStoragePaths: string[] = [];
-
-    // If photos are attached, upload to Firebase Storage
-    if (selectedPhotos.length > 0) {
-      setSubmitStatusText('Comprimindo e enviando fotos...');
-      try {
-        const uploadResult = await uploadDefectPhotos(issueId, selectedPhotos);
-        photoUrls = uploadResult.photoUrls;
-        photoStoragePaths = uploadResult.photoStoragePaths;
-      } catch (uploadErr: any) {
-        console.error('[AndradeAgro] Falha no upload para Firebase Storage:', uploadErr);
-        // Regra 11: Se o upload falhar, informar com clareza e permitir salvar sem foto ou tentar novamente
-        const proceedWithoutPhotos = window.confirm(
-          'Não foi possível enviar as fotos para o servidor de armazenamento.\n\nDeseja salvar o defeito sem as fotos para não perder o registro?'
-        );
-
-        if (!proceedWithoutPhotos) {
-          setIsSubmitting(false);
-          setSubmitStatusText('');
-          setErrorMessage('Envio de foto cancelado. Você pode tentar novamente ou remover as fotos.');
-          return;
-        }
-        // Fallback: save without photos (preserves defect integrity)
-        photoUrls = [];
-        photoStoragePaths = [];
-      }
-    }
-
     setSubmitStatusText('Registrando defeito no sistema...');
-
     try {
       onSubmit({
         id: issueId,
@@ -147,24 +130,77 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
         reportedByUserId: currentUser.id,
         reportedByUserName: currentUser.name,
         description: description.trim(),
-        photoUrl: photoUrls[0] || undefined,
-        photoUrls: photoUrls.length > 0 ? photoUrls : undefined,
-        photoStoragePaths: photoStoragePaths.length > 0 ? photoStoragePaths : undefined
+        photoUrl: finalUrls[0] || undefined,
+        photoUrls: finalUrls.length > 0 ? finalUrls : undefined,
+        photoStoragePaths: finalPaths.length > 0 ? finalPaths : undefined
       });
 
-      // Cleanup preview memory
+      // Limpar recursos de preview da memória
       selectedPhotos.forEach(p => {
         if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
       });
       setSelectedPhotos([]);
       setDescription('');
       setIsSubmitting(false);
+      setUploadAlert(null);
       onClose();
     } catch (saveErr: any) {
       console.error('[AndradeAgro] Erro ao salvar defeito:', saveErr);
       setIsSubmitting(false);
       setErrorMessage('Erro ao registrar defeito. Tente novamente.');
     }
+  };
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!description.trim() || isSubmitting) return;
+
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setUploadAlert(null);
+
+    const issueId = `iss-${Date.now()}`;
+    let photoUrls: string[] = [];
+    let photoStoragePaths: string[] = [];
+
+    // Se houver fotos anexadas, tentar upload para o Firebase Storage
+    if (selectedPhotos.length > 0) {
+      setSubmitStatusText(`Comprimindo e enviando ${selectedPhotos.length} foto(s)...`);
+      try {
+        const uploadResult = await uploadDefectPhotos(issueId, selectedPhotos);
+        photoUrls = uploadResult.photoUrls;
+        photoStoragePaths = uploadResult.photoStoragePaths;
+
+        // Se houve sucesso parcial (algumas enviadas e algumas falhas), dar opção ao usuário sem descartar
+        if (uploadResult.failedCount > 0 && photoUrls.length > 0) {
+          setIsSubmitting(false);
+          setSubmitStatusText('');
+          setUploadAlert({
+            type: 'partial',
+            title: 'Envio Parcial de Fotos',
+            message: `${photoUrls.length} de ${selectedPhotos.length} foto(s) foram salvas no armazenamento, mas ${uploadResult.failedCount} falhou.`,
+            technicalReason: uploadResult.lastErrorMessage || 'Falha na transmissão.',
+            successfulPhotos: { urls: photoUrls, paths: photoStoragePaths }
+          });
+          return;
+        }
+      } catch (uploadErr: any) {
+        console.error('[AndradeAgro] Falha no upload para Firebase Storage:', uploadErr);
+        setIsSubmitting(false);
+        setSubmitStatusText('');
+
+        // Se o upload falhar, NÃO apaga o texto do defeito e informa claramente o motivo
+        setUploadAlert({
+          type: 'error',
+          title: 'Servidor de Armazenamento Indisponível',
+          message: 'Não foi possível salvar as fotos no servidor de armazenamento.',
+          technicalReason: uploadErr.message || 'Erro ao conectar ao Firebase Storage.'
+        });
+        return;
+      }
+    }
+
+    saveIssueRecord(issueId, photoUrls, photoStoragePaths);
   };
 
   return (
@@ -252,22 +288,24 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
               </span>
             </div>
 
-            {/* Hidden native inputs for Camera and Gallery */}
+            {/* Hidden native inputs for Camera and Gallery (Compatível com Android Chrome/Edge e iOS Safari/Chrome) */}
             <input
               type="file"
               ref={cameraInputRef}
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/*"
               capture="environment"
               onChange={handleFileChange}
               className="hidden"
+              id="report-problem-camera-input"
             />
             <input
               type="file"
               ref={galleryInputRef}
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/*"
               multiple
               onChange={handleFileChange}
               className="hidden"
+              id="report-problem-gallery-input"
             />
 
             {/* Action Buttons to Add Photo */}
@@ -277,7 +315,7 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
                   type="button"
                   onClick={() => cameraInputRef.current?.click()}
                   disabled={isSubmitting || isCompressing}
-                  className="flex items-center justify-center gap-2 p-2.5 rounded-2xl border text-xs font-bold transition-all bg-slate-50 dark:bg-emerald-950/40 border-slate-200 dark:border-emerald-900 text-slate-700 dark:text-emerald-200 hover:bg-slate-100 dark:hover:bg-emerald-900/60 active:scale-[0.98] disabled:opacity-50"
+                  className="flex items-center justify-center gap-2 p-2.5 rounded-2xl border text-xs font-bold transition-all bg-slate-50 dark:bg-emerald-950/40 border-slate-200 dark:border-emerald-900 text-slate-700 dark:text-emerald-200 hover:bg-slate-100 dark:hover:bg-emerald-900/60 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                 >
                   <Camera className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   <span>Tirar Foto</span>
@@ -287,7 +325,7 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
                   type="button"
                   onClick={() => galleryInputRef.current?.click()}
                   disabled={isSubmitting || isCompressing}
-                  className="flex items-center justify-center gap-2 p-2.5 rounded-2xl border text-xs font-bold transition-all bg-slate-50 dark:bg-emerald-950/40 border-slate-200 dark:border-emerald-900 text-slate-700 dark:text-emerald-200 hover:bg-slate-100 dark:hover:bg-emerald-900/60 active:scale-[0.98] disabled:opacity-50"
+                  className="flex items-center justify-center gap-2 p-2.5 rounded-2xl border text-xs font-bold transition-all bg-slate-50 dark:bg-emerald-950/40 border-slate-200 dark:border-emerald-900 text-slate-700 dark:text-emerald-200 hover:bg-slate-100 dark:hover:bg-emerald-900/60 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                 >
                   <ImageIcon className="w-4 h-4 text-blue-500 dark:text-blue-400" />
                   <span>Escolher da Galeria</span>
@@ -304,7 +342,7 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
             {isCompressing && (
               <div className="p-2.5 rounded-2xl bg-slate-100 dark:bg-emerald-950/80 text-slate-600 dark:text-emerald-300 text-xs flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-600 dark:text-emerald-400" />
-                <span>Otimizando e comprimindo foto...</span>
+                <span>Otimizando e preparando foto...</span>
               </div>
             )}
 
@@ -313,6 +351,61 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
               <div className="p-2.5 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-300 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{errorMessage}</span>
+              </div>
+            )}
+
+            {/* Banner Informativo de Falha de Upload com Ações Não-Destrutivas */}
+            {uploadAlert && (
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs space-y-2.5 animate-in fade-in">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-sm text-amber-800 dark:text-amber-300">{uploadAlert.title}</p>
+                    <p className="text-slate-700 dark:text-slate-300">{uploadAlert.message}</p>
+                    <div className="p-2 rounded-xl bg-black/5 dark:bg-black/30 text-[11px] font-mono text-slate-600 dark:text-slate-400 break-words">
+                      {uploadAlert.technicalReason}
+                    </div>
+                    <p className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      ✓ O texto do defeito e todos os dados digitados foram preservados.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-500/20">
+                  {uploadAlert.type === 'partial' && uploadAlert.successfulPhotos && (
+                    <button
+                      type="button"
+                      onClick={() => saveIssueRecord(`iss-${Date.now()}`, uploadAlert.successfulPhotos!.urls, uploadAlert.successfulPhotos!.paths)}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition-all"
+                    >
+                      Salvar com Fotos Enviadas ({uploadAlert.successfulPhotos.urls.length})
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleSubmit()}
+                    className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-sm transition-all"
+                  >
+                    Tentar Novamente
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => saveIssueRecord(`iss-${Date.now()}`, [], [])}
+                    className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-bold text-xs transition-all"
+                  >
+                    Salvar Defeito Sem Fotos
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setUploadAlert(null)}
+                    className="px-2.5 py-1.5 rounded-xl text-slate-500 hover:text-slate-700 dark:text-slate-400 font-medium text-xs transition-all"
+                  >
+                    Editar Foto
+                  </button>
+                </div>
               </div>
             )}
 
@@ -341,7 +434,7 @@ export const ReportProblemModal: React.FC<ReportProblemModalProps> = ({
                           onClick={() => handleRemovePhoto(idx)}
                           disabled={isSubmitting}
                           title="Remover foto"
-                          className="p-1 text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/50 transition-colors"
+                          className="p-1 text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/50 transition-colors cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

@@ -13,27 +13,81 @@ export interface ProcessedPhoto {
 export interface UploadedPhotoResult {
   photoUrls: string[];
   photoStoragePaths: string[];
+  failedCount: number;
+  lastErrorMessage?: string;
+  errors?: string[];
+}
+
+/**
+ * Traduz e detalha erros técnicos do Firebase Storage para mensagens claras ao usuário.
+ */
+export function parseStorageErrorMessage(err: any): string {
+  if (!err) return 'Erro desconhecido de comunicação com o servidor de armazenamento.';
+  
+  const code = err.code || '';
+  const message = err.message || '';
+  const status = err.status_ || (err.customData && err.customData.status_) || 0;
+
+  // 404: Bucket não provisionado ou não existente no Firebase Console
+  if (
+    status === 404 || 
+    (code === 'storage/unknown' && (message.includes('404') || message.includes('unknown error occurred'))) ||
+    message.includes('bucket') && message.includes('not found')
+  ) {
+    return 'O bucket de armazenamento "andrade-agro.firebasestorage.app" ainda não foi ativado no Console do Firebase (Google Cloud Storage retornou 404 Not Found). É necessário acessar o Firebase Console e clicar em "Começar" no menu Storage.';
+  }
+
+  // 403 / unauthorized: Regras de segurança bloqueando
+  if (code === 'storage/unauthorized' || message.includes('unauthorized') || message.includes('permission')) {
+    return 'Permissão negada pelas regras de segurança do Firebase Storage (storage.rules). Verifique se a sessão do usuário está ativa.';
+  }
+
+  if (code === 'storage/quota-exceeded') {
+    return 'Cota de armazenamento do Firebase Storage excedida.';
+  }
+
+  if (code === 'storage/retry-limit-exceeded' || message.includes('network') || message.includes('Failed to fetch')) {
+    return 'Tempo limite de conexão esgotado ou falha de conexão com a internet ao enviar a foto.';
+  }
+
+  if (code === 'storage/canceled') {
+    return 'O envio da imagem foi cancelado pelo usuário.';
+  }
+
+  return message || 'Falha técnica ao tentar salvar imagem no Firebase Storage.';
 }
 
 /**
  * Compresses an image file client-side using HTML5 Canvas.
  * Targets ~200 KB to 500 KB while maintaining high visual clarity of the defect.
+ * Compatível com fotos de câmeras de celular (Android, iOS/Safari, HEIC/HEIF).
  */
 export async function compressDefectImage(file: File): Promise<ProcessedPhoto> {
   return new Promise((resolve, reject) => {
-    // Validate that it is an image
-    if (!file.type.startsWith('image/')) {
-      return reject(new Error('Apenas arquivos de imagem (JPG, PNG, WEBP) são permitidos.'));
+    // Validar se o arquivo é imagem (inclusive formatos de celular como HEIC/HEIF ou arquivos sem MIME no mobile)
+    const isImage = (file.type && file.type.startsWith('image/')) || 
+                    /\.(jpe?g|png|webp|heic|heif|bmp|gif)$/i.test(file.name);
+    
+    if (!isImage) {
+      return reject(new Error('Apenas arquivos de imagem (JPG, PNG, WEBP, HEIC) são permitidos.'));
     }
 
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Falha ao ler o arquivo da foto.'));
+    reader.onerror = () => reject(new Error('Falha ao ler o arquivo da foto do dispositivo.'));
     reader.onload = (e) => {
       const img = new Image();
-      img.onerror = () => reject(new Error('Não foi possível carregar a imagem selecionada.'));
+      img.onerror = () => {
+        // Alerta informativo caso seja HEIC puro não suportado pelo canvas do navegador
+        if (/\.(heic|heif)$/i.test(file.name) || file.type.includes('heic') || file.type.includes('heif')) {
+          reject(new Error('O formato HEIC desta foto não pôde ser decodificado pelo navegador. No iPhone, tire a foto pela câmera do aplicativo ou ajuste a câmera para "Mais Compatível".'));
+        } else {
+          reject(new Error('Não foi possível carregar e decodificar a imagem selecionada.'));
+        }
+      };
+
       img.onload = () => {
         try {
-          const maxDim = 1600; // Sharp enough for defect details without bloating
+          const maxDim = 1600; // Nitidez ideal para visualizar detalhes de peças e vazamentos
           let width = img.width;
           let height = img.height;
 
@@ -55,12 +109,12 @@ export async function compressDefectImage(file: File): Promise<ProcessedPhoto> {
             return reject(new Error('Erro ao processar imagem no navegador.'));
           }
 
-          // Fill white background in case of transparent PNG
+          // Fundo branco caso a imagem tenha transparência
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
 
-          // Initial quality trial
+          // Compressão progressiva visando 200KB - 500KB
           let quality = 0.82;
           
           const attemptCompression = (q: number): Promise<Blob> => {
@@ -68,7 +122,7 @@ export async function compressDefectImage(file: File): Promise<ProcessedPhoto> {
               canvas.toBlob(
                 (blob) => {
                   if (blob) resBlob(blob);
-                  else rejBlob(new Error('Falha ao gerar arquivo comprimido.'));
+                  else rejBlob(new Error('Falha ao gerar arquivo comprimido da imagem.'));
                 },
                 'image/jpeg',
                 q
@@ -78,7 +132,6 @@ export async function compressDefectImage(file: File): Promise<ProcessedPhoto> {
 
           attemptCompression(quality).then(async (blob) => {
             let finalBlob = blob;
-            // Target ~200KB - 500KB. If larger than 550KB, reduce quality step
             if (finalBlob.size > 550 * 1024) {
               const secondBlob = await attemptCompression(0.70);
               finalBlob = secondBlob;
@@ -116,14 +169,15 @@ export async function compressDefectImage(file: File): Promise<ProcessedPhoto> {
 /**
  * Uploads a list of processed photo blobs to Firebase Storage.
  * Organized strictly by: defeitos/{issueId}/{photoId}.jpg
- * Cleans up any uploaded files in this batch if any upload fails (avoiding orphans).
+ * REGRA: Se várias fotos forem selecionadas e apenas uma falhar, NÃO descarta
+ * automaticamente as que foram enviadas com sucesso.
  */
 export async function uploadDefectPhotos(
   issueId: string,
   photos: ProcessedPhoto[]
 ): Promise<UploadedPhotoResult> {
   if (!photos || photos.length === 0) {
-    return { photoUrls: [], photoStoragePaths: [] };
+    return { photoUrls: [], photoStoragePaths: [], failedCount: 0 };
   }
 
   // Ensure authenticated session
@@ -131,50 +185,61 @@ export async function uploadDefectPhotos(
 
   const uploadedPaths: string[] = [];
   const uploadedUrls: string[] = [];
+  const errors: string[] = [];
 
-  try {
-    for (let i = 0; i < photos.length; i++) {
-      const p = photos[i];
-      const storagePath = `defeitos/${issueId}/foto_${i + 1}_${Date.now()}.jpg`;
-      const fileRef = ref(storage, storagePath);
+  for (let i = 0; i < photos.length; i++) {
+    const p = photos[i];
+    const storagePath = `defeitos/${issueId}/foto_${i + 1}_${Date.now()}.jpg`;
+    const fileRef = ref(storage, storagePath);
 
-      console.log(`[AndradeAgro Storage] Fazendo upload da foto ${i + 1}/${photos.length}: ${storagePath} (${(p.sizeBytes / 1024).toFixed(1)} KB)`);
+    console.log(`[AndradeAgro Storage] Fazendo upload da foto ${i + 1}/${photos.length}: ${storagePath} (${(p.sizeBytes / 1024).toFixed(1)} KB)`);
 
-      const metadata = {
-        contentType: 'image/jpeg',
-        customMetadata: {
-          issueId,
-          originalName: p.fileName,
-          uploadedAt: new Date().toISOString()
-        }
-      };
+    const metadata = {
+      contentType: 'image/jpeg',
+      customMetadata: {
+        issueId,
+        originalName: p.fileName,
+        uploadedAt: new Date().toISOString()
+      }
+    };
 
+    try {
       await uploadBytes(fileRef, p.blob, metadata);
       const downloadUrl = await getDownloadURL(fileRef);
 
       uploadedPaths.push(storagePath);
       uploadedUrls.push(downloadUrl);
+    } catch (photoErr: any) {
+      const parsedMsg = parseStorageErrorMessage(photoErr);
+      console.error(`[AndradeAgro Storage] Erro ao enviar foto ${i + 1}/${photos.length}:`, photoErr);
+      errors.push(`Foto ${i + 1} (${p.fileName}): ${parsedMsg}`);
     }
-
-    console.log(`[AndradeAgro Storage] Sucesso no upload de ${uploadedUrls.length} foto(s) para o defeito ${issueId}.`);
-    return {
-      photoUrls: uploadedUrls,
-      photoStoragePaths: uploadedPaths
-    };
-  } catch (err: any) {
-    console.error(`[AndradeAgro Storage] Falha durante upload de fotos do defeito ${issueId}:`, err);
-    // Rollback uploaded photos from this attempt to avoid orphan files (Regra 10)
-    if (uploadedPaths.length > 0) {
-      console.warn(`[AndradeAgro Storage] Limpando ${uploadedPaths.length} arquivo(s) enviados antes da falha...`);
-      await deleteDefectPhotos(uploadedPaths).catch(() => {});
-    }
-    throw err;
   }
+
+  // Se todas as fotos falharem, lançar erro com a mensagem detalhada da causa
+  if (uploadedUrls.length === 0 && photos.length > 0) {
+    const mainErrorMsg = errors[0] || 'Falha ao enviar fotos para o servidor de armazenamento.';
+    const uploadErr = new Error(mainErrorMsg);
+    (uploadErr as any).errors = errors;
+    (uploadErr as any).uploadedPaths = uploadedPaths;
+    (uploadErr as any).uploadedUrls = uploadedUrls;
+    throw uploadErr;
+  }
+
+  console.log(`[AndradeAgro Storage] Concluído upload: ${uploadedUrls.length} com sucesso, ${errors.length} falhas.`);
+
+  return {
+    photoUrls: uploadedUrls,
+    photoStoragePaths: uploadedPaths,
+    failedCount: errors.length,
+    lastErrorMessage: errors.length > 0 ? errors.join('\n') : undefined,
+    errors
+  };
 }
 
 /**
  * Deletes photos from Firebase Storage associated with a defect.
- * Called when an issue is resolved (Regra 9) or during rollback.
+ * Called when an issue is resolved (Regra 9) or during cleanup.
  */
 export async function deleteDefectPhotos(storagePathsOrUrls: string[]): Promise<void> {
   if (!storagePathsOrUrls || storagePathsOrUrls.length === 0) {
@@ -186,20 +251,20 @@ export async function deleteDefectPhotos(storagePathsOrUrls: string[]): Promise<
 
   for (const item of storagePathsOrUrls) {
     if (!item) continue;
+    // Ignorar data URLs ou URLs externas não pertencentes ao Firebase Storage
+    if (item.startsWith('data:') || item.includes('unsplash.com')) continue;
+
     try {
       let fileRef;
       if (item.startsWith('http://') || item.startsWith('https://')) {
-        // Direct reference by URL
         fileRef = ref(storage, item);
       } else {
-        // Direct path
         fileRef = ref(storage, item);
       }
 
       await deleteObject(fileRef);
       console.log(`[AndradeAgro Storage] Foto removida do Storage com sucesso: ${item}`);
     } catch (delErr: any) {
-      // If the object was already deleted or doesn't exist, ignore error safely
       if (delErr?.code === 'storage/object-not-found' || delErr?.message?.includes('not-found')) {
         console.info(`[AndradeAgro Storage] Foto já não existia no Storage: ${item}`);
       } else {

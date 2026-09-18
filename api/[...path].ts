@@ -16,11 +16,15 @@ export default async function handler(req: any, res: any) {
 
   const rawUrl = req.url || '';
   const pathname = rawUrl.split('?')[0];
+  const queryPath = Array.isArray(req.query?.path)
+    ? req.query.path.join('/')
+    : (typeof req.query?.path === 'string' ? req.query.path : '');
+  const combined = `${pathname}/${queryPath}`.toLowerCase();
 
   // Failsafe: se uma requisição de notificações for capturada pelo catch-all do Vercel
-  if (pathname.includes('/notifications/') || pathname.includes('/notificacoes/')) {
-    const match = pathname.match(/\/(?:notifications|notificacoes)\/([^/?]+)/);
-    const action = match ? match[1] : '';
+  if (combined.includes('notification') || combined.includes('notificac') || req.query?.action) {
+    const match = combined.match(/(?:notifications|notificacoes)\/([^/?]+)/);
+    const action = match ? match[1] : (req.query?.action || (queryPath.split('/').pop() || ''));
     
     try {
       if (action === 'status' && req.method === 'GET') {

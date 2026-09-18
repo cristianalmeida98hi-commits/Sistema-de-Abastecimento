@@ -200,7 +200,7 @@ async function getFirebaseAuthToken(): Promise<string | null> {
     const apiKey = firebaseConfig.apiKey;
     const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
+    const timer = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -242,7 +242,7 @@ async function fetchFirestoreDevicesRest(): Promise<{ devices: PushDeviceRecord[
 
     const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/user_devices?pageSize=100`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4500);
+    const timer = setTimeout(() => controller.abort(), 9000);
 
     const res = await fetch(firestoreUrl, {
       headers: { 'Authorization': `Bearer ${token}` },
@@ -624,10 +624,12 @@ export async function getEngineStatus(): Promise<any> {
     d => d.active !== false && d.subscription && isValidPushSubscription(d.subscription)
   );
 
+  const queryOk = devices.length > 0 || !lastFirestoreQueryError;
+
   return {
-    success: !lastFirestoreQueryError || devices.length > 0,
-    querySuccess: !lastFirestoreQueryError,
-    queryError: lastFirestoreQueryError || undefined,
+    success: queryOk,
+    querySuccess: queryOk,
+    queryError: devices.length === 0 && lastFirestoreQueryError ? lastFirestoreQueryError : undefined,
     vapidConfigured: true,
     vapidPublicKey: VAPID_PUBLIC_KEY,
     totalDevices: devices.length,

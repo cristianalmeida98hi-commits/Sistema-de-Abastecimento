@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Bell, BellOff, CheckCircle2, AlertTriangle, ShieldCheck, 
-  Smartphone, Monitor, Send, RefreshCw, SmartphoneCharging, Info
+  Smartphone, Monitor, Send, RefreshCw, SmartphoneCharging, Info,
+  ChevronDown, ChevronUp, Copy, Check, Terminal, HardDrive, CheckCircle
 } from 'lucide-react';
 import { User } from '../types';
 import { 
   isPushSupported, getNotificationPermission, isStoredPushActive, 
   isSubscriptionActive, enablePushNotifications, disablePushNotifications, 
-  sendTestPushNotification, fetchServerNotificationStatus 
+  sendTestPushNotification, fetchServerNotificationStatus,
+  getPushDiagnosticsInfo, PushDiagnosticsInfo
 } from '../utils/pushNotifications';
 
 interface PushNotificationSettingsCardProps {
@@ -29,9 +31,15 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
     authorizedDevices: Array<{ userName: string; userRole: string; platform: string; updatedAt: string }>;
     querySuccess?: boolean;
     error?: string;
+    source?: string;
+    notice?: string;
   } | null>(null);
   const [statusLoading, setStatusLoading] = useState<boolean>(true);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [statusSource, setStatusSource] = useState<string>('servidor');
+  const [diagnostics, setDiagnostics] = useState<PushDiagnosticsInfo | null>(null);
+  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
+  const [copiedDiag, setCopiedDiag] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   const checkStatus = async () => {
@@ -50,35 +58,58 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
       const perm = getNotificationPermission();
       setPermission(perm);
 
+      // Coletar diagnóstico detalhado do navegador e hardware
+      const diagInfo = await getPushDiagnosticsInfo().catch(() => null);
+      if (diagInfo) {
+        setDiagnostics(diagInfo);
+      }
+
       const userId = currentUser?.id || '';
       const storedActive = userId ? isStoredPushActive(userId) : false;
       const subActive = await isSubscriptionActive().catch(() => false);
       setIsActive(Boolean(storedActive && subActive && perm === 'granted'));
 
+      // Consulta de status do servidor com fallback automático e direto ao Firestore
       const sStatus = await fetchServerNotificationStatus().catch((err) => ({
         success: false,
         querySuccess: false,
-        error: err?.message || 'Falha ao consultar servidor',
+        error: err?.message || 'Falha de comunicação com o servidor',
         totalDevices: 0,
         activeAuthorizedCount: 0,
-        authorizedDevices: []
+        authorizedDevices: [],
+        source: 'error',
+        notice: undefined
       }));
 
       if (sStatus) {
-        if (sStatus.querySuccess === false || sStatus.error) {
-          setStatusError(sStatus.error || 'Falha ao consultar dispositivos');
+        const activeCount = Number(sStatus.activeAuthorizedCount) || 0;
+        const src = sStatus.source === 'firestore_direct' ? 'Firestore (Direto)' : 'API Vercel';
+        setStatusSource(src);
+
+        if (activeCount > 0 || sStatus.querySuccess === true) {
+          setStatusError(null);
+          setServerStatus({
+            activeAuthorizedCount: activeCount,
+            authorizedDevices: Array.isArray(sStatus.authorizedDevices) ? sStatus.authorizedDevices : [],
+            querySuccess: true,
+            source: src,
+            notice: sStatus.notice
+          });
+        } else if (sStatus.error) {
+          setStatusError(sStatus.error);
           setServerStatus({
             activeAuthorizedCount: 0,
             authorizedDevices: [],
             querySuccess: false,
-            error: sStatus.error
+            error: sStatus.error,
+            source: src
           });
         } else {
-          setStatusError(null);
           setServerStatus({
-            activeAuthorizedCount: Number(sStatus.activeAuthorizedCount) || 0,
-            authorizedDevices: Array.isArray(sStatus.authorizedDevices) ? sStatus.authorizedDevices : [],
-            querySuccess: true
+            activeAuthorizedCount: 0,
+            authorizedDevices: [],
+            querySuccess: true,
+            source: src
           });
         }
       } else {
@@ -162,7 +193,7 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
       if (res?.success) {
         setIsActive(true);
         setPermission('granted');
-        setFeedback({ type: 'success', text: 'Dispositivo sincronizado com o servidor e Firestore!' });
+        setFeedback({ type: 'success', text: 'Dispositivo sincronizado com sucesso no Firestore!' });
       } else {
         const safeText = typeof res?.message === 'string' ? res.message : 'Falha ao sincronizar dispositivo.';
         setFeedback({ type: 'error', text: safeText });
@@ -212,13 +243,27 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
     }
   };
 
+  const copyDiagnosticReport = () => {
+    const report = {
+      timestamp: new Date().toISOString(),
+      user: currentUser?.name,
+      role: currentUser?.role,
+      browserPermission: permission,
+      isActiveOnDevice: isActive,
+      supported: supported,
+      diagnostics: diagnostics,
+      serverStatus: serverStatus,
+      statusError: statusError,
+      statusSource: statusSource
+    };
+    navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+    setCopiedDiag(true);
+    setTimeout(() => setCopiedDiag(false), 2500);
+  };
+
   if (!currentUser) {
     return null;
   }
-
-  const isCurrentDeviceRegistered = Boolean(
-    serverStatus?.authorizedDevices?.some(d => d && d.userName === currentUser?.name)
-  );
 
   return (
     <div 
@@ -257,6 +302,11 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
               <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
               Bloqueadas no Navegador
             </span>
+          ) : permission === 'granted' ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+              <span className="w-2 h-2 rounded-full bg-amber-400" />
+              Permissão Concedida (Pendente Registro)
+            </span>
           ) : !supported ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
               Não Suportado
@@ -274,48 +324,111 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
         Receba notificações sonoras e visuais diretamente no celular (<strong className="text-emerald-300">Android Chrome ou PWA instalado</strong>) mesmo com o aplicativo fechado ou em segundo plano.
       </p>
 
+      {/* Granted Permission Alert for Pending Device */}
+      {permission === 'granted' && !isActive && (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-start gap-2.5">
+          <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <span className="font-bold">Permissão já autorizada no seu navegador!</span>
+            <p className="text-[11px] text-amber-200/90">
+              O navegador já concedeu permissão e por isso não exibirá um novo pop-up. Basta clicar em <strong>"Sincronizar Dispositivo"</strong> abaixo para gerar o token e salvar seu aparelho no Firestore.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Diagnostic status strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
+        {/* Permissão do Navegador */}
         <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-800/30 flex items-center gap-2">
           <Smartphone className="w-4 h-4 text-[#FACC15] shrink-0" />
           <div>
             <div className="text-[10px] text-emerald-400 font-semibold uppercase">Permissão Navegador</div>
-            <div className="font-bold text-slate-100 capitalize">
-              {permission === 'granted' ? 'Concedida' : permission === 'denied' ? 'Bloqueada' : 'Não Solicitada'}
-            </div>
-          </div>
-        </div>
-
-        <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-800/30 flex items-center gap-2">
-          <SmartphoneCharging className="w-4 h-4 text-emerald-400 shrink-0" />
-          <div>
-            <div className="text-[10px] text-emerald-400 font-semibold uppercase">Dispositivos no Servidor</div>
-            <div className="font-bold text-slate-100">
-              {statusLoading ? (
-                <span className="text-amber-300 flex items-center gap-1">
-                  <RefreshCw className="w-3 h-3 animate-spin" /> Consultando...
+            <div className="font-bold text-slate-100 capitalize flex items-center gap-1.5">
+              {permission === 'granted' ? (
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" /> Concedida
                 </span>
-              ) : statusError ? (
-                <span className="text-red-400 text-xs font-semibold" title={statusError}>
-                  Falha na consulta
+              ) : permission === 'denied' ? (
+                <span className="text-red-400 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" /> Bloqueada
                 </span>
-              ) : serverStatus ? (
-                `${serverStatus.activeAuthorizedCount} ativo(s)`
               ) : (
-                <span className="text-slate-400 text-xs">Indisponível</span>
+                <span className="text-amber-300">Não Solicitada</span>
               )}
             </div>
           </div>
         </div>
 
+        {/* Dispositivos no Servidor / Firestore */}
+        <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-800/30 flex items-center gap-2">
+          <SmartphoneCharging className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] text-emerald-400 font-semibold uppercase flex items-center justify-between">
+              <span>Dispositivos Ativos</span>
+              {serverStatus?.source && (
+                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-800/40 text-emerald-300">
+                  {serverStatus.source.includes('Firestore') ? 'Firestore' : 'API'}
+                </span>
+              )}
+            </div>
+            <div className="font-bold text-slate-100 truncate">
+              {statusLoading ? (
+                <span className="text-amber-300 flex items-center gap-1 text-[11px]">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> Consultando...
+                </span>
+              ) : serverStatus && (serverStatus.activeAuthorizedCount > 0 || serverStatus.querySuccess) ? (
+                <span className="text-emerald-300">
+                  {serverStatus.activeAuthorizedCount} ativo(s)
+                </span>
+              ) : statusError ? (
+                <span className="text-red-400 text-xs font-semibold">
+                  Erro na consulta
+                </span>
+              ) : (
+                <span className="text-slate-400 text-xs">0 ativo(s)</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Destinatários Autorizados */}
         <div className="p-2.5 rounded-2xl bg-emerald-950/40 border border-emerald-800/30 flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
           <div>
             <div className="text-[10px] text-emerald-400 font-semibold uppercase">Destinatários</div>
-            <div className="font-bold text-slate-100">Dispositivos Permitidos</div>
+            <div className="font-bold text-slate-100">Operador & Manutenção</div>
           </div>
         </div>
       </div>
+
+      {/* Error explanation if present */}
+      {statusError && !serverStatus?.activeAuthorizedCount && (
+        <div className="p-3 rounded-xl bg-red-900/30 border border-red-700/50 text-xs text-red-200 flex items-start justify-between gap-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold">Aviso ao consultar dispositivos:</span>
+              <p className="text-[11px] text-red-300/90 mt-0.5">{statusError}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={checkStatus}
+            className="px-2.5 py-1 rounded bg-red-800/50 hover:bg-red-700/60 text-red-200 text-[10px] font-bold shrink-0 transition-colors"
+          >
+            Tentar Novamente
+          </button>
+        </div>
+      )}
+
+      {/* Notice if loaded via Firestore fallback */}
+      {serverStatus?.notice && (
+        <div className="p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-700/40 text-[11px] text-emerald-300/90 flex items-center gap-2">
+          <HardDrive className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span>{serverStatus.notice}</span>
+        </div>
+      )}
 
       {/* Authorized Events Info */}
       <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-800/40 text-xs space-y-2">
@@ -361,7 +474,7 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
 
       {/* Actions */}
       <div className="pt-2 flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             id="toggle-push-notifications-btn"
             type="button"
@@ -383,19 +496,32 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
             <span>{isActive ? 'Desativar Notificações' : 'Ativar Notificações Push'}</span>
           </button>
 
-          {isActive && (
+          {/* Botão Sincronizar sempre visível se a permissão estiver concedida */}
+          {permission === 'granted' && (
             <button
               id="resync-push-device-btn"
               type="button"
               onClick={handleSync}
               disabled={loading || syncing}
               className="px-3 py-2.5 rounded-xl bg-emerald-900/50 hover:bg-emerald-800/60 text-emerald-200 border border-emerald-700/50 font-semibold text-xs flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 min-h-[44px]"
-              title="Revalidar chave VAPID e reinscrever token no servidor"
+              title="Registra ou atualiza a chave deste dispositivo no Firestore"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-[#FACC15]' : ''}`} />
-              <span>Sincronizar</span>
+              <span>Sincronizar Dispositivo</span>
             </button>
           )}
+
+          {/* Botão Toggle Diagnóstico Técnico */}
+          <button
+            id="toggle-diagnostics-btn"
+            type="button"
+            onClick={() => setShowDiagnostics(!showDiagnostics)}
+            className="px-3 py-2.5 rounded-xl bg-emerald-950/50 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-800/40 font-medium text-xs flex items-center gap-1 transition-all min-h-[44px]"
+          >
+            <Terminal className="w-3.5 h-3.5 text-amber-400" />
+            <span>Diagnóstico Técnico</span>
+            {showDiagnostics ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+          </button>
         </div>
 
         {(isActive || permission === 'granted') && (
@@ -416,6 +542,74 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
           </button>
         )}
       </div>
+
+      {/* Painel de Diagnóstico Técnico Detalhado */}
+      {showDiagnostics && (
+        <div className="mt-3 p-4 rounded-2xl bg-emerald-950/80 border border-emerald-700/50 text-xs space-y-3">
+          <div className="flex items-center justify-between border-b border-emerald-800/60 pb-2">
+            <span className="font-bold text-amber-400 flex items-center gap-1.5">
+              <Terminal className="w-4 h-4" /> Relatório Técnico de Notificações
+            </span>
+            <button
+              type="button"
+              onClick={copyDiagnosticReport}
+              className="px-2.5 py-1 rounded bg-emerald-800/60 hover:bg-emerald-700/60 text-emerald-200 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+            >
+              {copiedDiag ? <Check className="w-3 h-3 text-[#FACC15]" /> : <Copy className="w-3 h-3" />}
+              <span>{copiedDiag ? 'Copiado!' : 'Copiar Relatório'}</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block">Navegador / Permissão Nativa:</span>
+              <span className="font-bold text-slate-100">{permission}</span>
+            </div>
+
+            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block">Service Worker:</span>
+              <span className="font-bold text-slate-100">
+                {diagnostics?.serviceWorkerActive ? 'Ativo e Controlando' : diagnostics?.serviceWorkerRegistered ? 'Registrado (Iniciando)' : 'Não detectado'}
+              </span>
+            </div>
+
+            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block">PushManager no Navegador:</span>
+              <span className="font-bold text-slate-100">
+                {diagnostics?.pushManagerAvailable ? 'Disponível' : 'Indisponível (necessário HTTPS / Safari 16.4+)'}
+              </span>
+            </div>
+
+            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block">Inscrição Push Local:</span>
+              <span className="font-bold text-slate-100 truncate">
+                {diagnostics?.hasLocalSubscription ? 'Presente no dispositivo' : 'Inexistente neste aparelho'}
+              </span>
+            </div>
+
+            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block">Chave VAPID Pública Ativa:</span>
+              <span className="font-mono text-emerald-300">
+                {diagnostics?.vapidPublicKeySnippet || 'BGidTH8J...V3H4s'}
+              </span>
+            </div>
+
+            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block">Origem da Consulta de Dispositivos:</span>
+              <span className="font-bold text-amber-300">
+                {statusSource}
+              </span>
+            </div>
+
+            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40 md:col-span-2">
+              <span className="text-slate-400 block">Plataforma & Modo:</span>
+              <span className="font-bold text-slate-100">
+                {diagnostics?.platform || 'Desconhecida'} | {diagnostics?.isPWA ? 'PWA Instalado' : 'Navegador Web'} {diagnostics?.isMobile ? '(Mobile)' : '(Desktop)'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="text-[11px] text-slate-400 flex items-center gap-1.5 pt-1">
         <Info className="w-3.5 h-3.5 text-emerald-400 shrink-0" />

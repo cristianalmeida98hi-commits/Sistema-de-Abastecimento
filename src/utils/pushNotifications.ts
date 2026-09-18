@@ -1,6 +1,6 @@
 import { User, UserRole, PushNotificationPayload } from '../types';
 import { db, ensureFirebaseAuth } from '../lib/firebase';
-import { doc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 
 /**
  * Chave pública VAPID oficial do sistema AndradeAgro (RFC 8292).
@@ -58,7 +58,7 @@ export async function safeApiFetch<T = any>(
   console.log(`[AndradeAgro API] Requisição: ${method} ${url}`);
 
   const controller = new AbortController();
-  const timeoutMs = 6500;
+  const timeoutMs = 15000;
   const timeoutTimer = setTimeout(() => {
     controller.abort();
   }, timeoutMs);
@@ -959,30 +959,74 @@ export async function fetchServerNotificationStatus(): Promise<{
     platform: string;
     updatedAt: string;
   }>;
+  source?: string;
+  notice?: string;
 } | null> {
+  let backendError: string | null = null;
+
   try {
     const result = await safeApiFetch('/api/notifications/status');
-    if (!result.ok) {
+    if (result.ok && result.data && (result.data.querySuccess !== false || (result.data.activeAuthorizedCount || 0) > 0)) {
       return {
-        success: false,
-        querySuccess: false,
-        error: result.error || `Erro do servidor (Status ${result.status})`,
-        vapidConfigured: false,
-        totalDevices: 0,
-        activeAuthorizedCount: 0,
-        authorizedDevices: []
+        ...result.data,
+        source: 'backend_api'
       };
     }
-    return result.data || null;
+    backendError = result.error || (result.data?.error ? String(result.data.error) : `Status HTTP ${result.status}`);
   } catch (err: any) {
+    backendError = err?.message || 'Falha de conexão com o servidor';
+  }
+
+  // Fallback Resiliente: se a API do backend estiver fria, lenta ou retornar aviso,
+  // consulta diretamente a coleção 'user_devices' via Firestore SDK para exibir os dispositivos reais
+  try {
+    await ensureFirebaseAuth();
+    const snap = await getDocs(collection(db, 'user_devices'));
+    const activeDevices: Array<{
+      userName: string;
+      userRole: string;
+      platform: string;
+      updatedAt: string;
+    }> = [];
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data && data.active !== false && data.subscription) {
+        activeDevices.push({
+          userName: data.userName || 'Usuário',
+          userRole: data.userRole || 'FUNCIONARIO',
+          platform: data.deviceInfo?.platform || 'desconhecido',
+          updatedAt: data.updatedAt || new Date().toISOString()
+        });
+      }
+    });
+
+    const activeCount = activeDevices.length;
+    const totalCount = snap.size;
+    const vapidKey = await getVapidPublicKey().catch(() => OFFICIAL_VAPID_PUBLIC_KEY);
+
+    return {
+      success: true,
+      querySuccess: true,
+      vapidConfigured: true,
+      vapidPublicKey: vapidKey,
+      totalDevices: totalCount,
+      activeAuthorizedCount: activeCount,
+      authorizedDevices: activeDevices,
+      source: 'firestore_direct',
+      notice: backendError ? `Dados lidos do Firestore (aviso backend: ${backendError})` : undefined
+    };
+  } catch (fsErr: any) {
+    console.warn('[Push Notification] Fallback direto ao Firestore também falhou:', fsErr?.message || fsErr);
     return {
       success: false,
       querySuccess: false,
-      error: err?.message || 'Falha de conexão com o servidor',
+      error: backendError || fsErr?.message || 'Falha ao consultar dispositivos',
       vapidConfigured: false,
       totalDevices: 0,
       activeAuthorizedCount: 0,
-      authorizedDevices: []
+      authorizedDevices: [],
+      source: 'error'
     };
   }
 }
@@ -993,4 +1037,73 @@ export async function fetchServerNotificationStatus(): Promise<{
 export async function cleanupPushOnLogout(currentUser: User): Promise<void> {
   // Device subscription is intentionally retained so mobile devices continue to receive critical fleet alerts
   console.log(`[Push Notification] User ${currentUser.name} logged out; push notification subscription preserved.`);
+}
+
+export interface PushDiagnosticsInfo {
+  supported: boolean;
+  permission: NotificationPermission | 'unsupported';
+  serviceWorkerRegistered: boolean;
+  serviceWorkerActive: boolean;
+  pushManagerAvailable: boolean;
+  hasLocalSubscription: boolean;
+  localSubscriptionEndpoint?: string;
+  vapidPublicKeySnippet?: string;
+  isPWA: boolean;
+  isMobile: boolean;
+  platform: string;
+  userAgent: string;
+}
+
+/**
+ * Coleta diagnóstico técnico abrangente do estado local de Push Notifications
+ */
+export async function getPushDiagnosticsInfo(): Promise<PushDiagnosticsInfo> {
+  const supported = isPushSupported();
+  const perm = getNotificationPermission();
+  const dev = getDeviceInfo();
+
+  let swReg = false;
+  let swAct = false;
+  let hasSub = false;
+  let endpoint = '';
+
+  if (supported && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) {
+        swReg = true;
+        swAct = Boolean(reg.active);
+        const sub = await reg.pushManager.getSubscription();
+        if (sub && sub.endpoint) {
+          hasSub = true;
+          endpoint = sub.endpoint;
+        }
+      }
+    } catch (e) {
+      console.warn('[Push Notification] Falha ao inspecionar SW:', e);
+    }
+  }
+
+  let vapidSnippet = '';
+  try {
+    const key = await getVapidPublicKey().catch(() => OFFICIAL_VAPID_PUBLIC_KEY);
+    if (key && key.length > 16) {
+      vapidSnippet = `${key.slice(0, 8)}...${key.slice(-8)}`;
+    }
+  } catch {}
+
+  return {
+    supported,
+    permission: perm,
+    serviceWorkerRegistered: swReg,
+    serviceWorkerActive: swAct,
+    pushManagerAvailable: Boolean(typeof window !== 'undefined' && 'PushManager' in window),
+    hasLocalSubscription: hasSub,
+    localSubscriptionEndpoint: endpoint ? `${endpoint.slice(0, 40)}...` : undefined,
+    vapidPublicKeySnippet: vapidSnippet,
+    isPWA: dev.isPWA,
+    isMobile: dev.isMobile,
+    platform: dev.platform,
+    userAgent: dev.userAgent
+  };
 }

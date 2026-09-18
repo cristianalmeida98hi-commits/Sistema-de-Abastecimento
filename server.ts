@@ -451,7 +451,7 @@ async function startServer() {
   }
 
   // PUSH NOTIFICATIONS API
-  app.get('/api/notifications/vapid-public-key', (req, res) => {
+  app.get(['/api/notifications/vapid-public-key', '/api/notificacoes/vapid-public-key'], (req, res) => {
     const key = vapidKeys?.publicKey || OFFICIAL_VAPID_PUBLIC_KEY;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -629,7 +629,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/notifications/status', async (req, res) => {
+  app.get(['/api/notifications/status', '/api/notificacoes/status'], async (req, res) => {
     try {
       const devices = await fetchRegisteredDevices();
       const activeDevices = devices.filter(d => 

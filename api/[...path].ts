@@ -18,8 +18,9 @@ export default async function handler(req: any, res: any) {
   const pathname = rawUrl.split('?')[0];
 
   // Failsafe: se uma requisição de notificações for capturada pelo catch-all do Vercel
-  if (pathname.includes('/notifications/')) {
-    const action = pathname.split('/notifications/')[1].split('/')[0];
+  if (pathname.includes('/notifications/') || pathname.includes('/notificacoes/')) {
+    const match = pathname.match(/\/(?:notifications|notificacoes)\/([^/?]+)/);
+    const action = match ? match[1] : '';
     
     try {
       if (action === 'status' && req.method === 'GET') {

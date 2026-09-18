@@ -6,7 +6,7 @@ import {
 import { 
   X, Truck, Fuel, Wrench, AlertTriangle, CheckCircle2, Clock, 
   Calendar, FileText, User as UserIcon, BarChart3, Shield, Filter, 
-  PlusCircle, RefreshCw, AlertCircle, Camera, Check, ChevronRight,
+  PlusCircle, RefreshCw, AlertCircle, Camera, Check, ChevronRight, ChevronLeft,
   TrendingUp, Award, Layers, Sparkles, Edit, Trash2, Info, DollarSign,
   Plus, CheckSquare, ArrowLeft, Droplet
 } from 'lucide-react';
@@ -77,6 +77,9 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
 
   const [activeTab, setActiveTab] = useState<'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES'>(initialTab);
   const [isReportProblemOpen, setIsReportProblemOpen] = useState(false);
+  const [selectedIssueForPhotos, setSelectedIssueForPhotos] = useState<MachineIssue | null>(null);
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [issueToConfirmResolve, setIssueToConfirmResolve] = useState<MachineIssue | null>(null);
   const [recordingItem, setRecordingItem] = useState<PreventiveMaintenanceItem | null>(null);
   const [recordHourmeter, setRecordHourmeter] = useState<number>(vehicle.currentHourmeter || vehicle.currentKm || 0);
   const [recordNotes, setRecordNotes] = useState<string>('');
@@ -2323,19 +2326,45 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                           "{iss.description}"
                         </p>
 
-                        {iss.photoUrl && (
-                          <div className="w-36 h-28 rounded-xl overflow-hidden border">
-                            <img src={iss.photoUrl} alt="Foto do defeito" className="w-full h-full object-cover" />
-                          </div>
-                        )}
+                        {/* Regra 8: Indicador leve de foto anexada (não carregar todas as fotos na listagem geral) */}
+                        {(() => {
+                          const photos = iss.photoUrls && iss.photoUrls.length > 0 
+                            ? iss.photoUrls 
+                            : (iss.photoUrl ? [iss.photoUrl] : []);
+                          if (photos.length === 0) return null;
+
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedIssueForPhotos(iss);
+                                setActivePhotoIndex(0);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 active:scale-95 cursor-pointer"
+                            >
+                              <Camera className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                              <span>{photos.length > 1 ? `📷 ${photos.length} Fotos Anexadas` : '📷 Foto Anexada'}</span>
+                            </button>
+                          );
+                        })()}
 
                         {isEffectivelyOpen && onResolveIssue && (
                           <button
+                            type="button"
                             onClick={() => {
-                              onResolveIssue(iss.id);
-                              setActionSuccessMsg('Problema marcado como resolvido!');
+                              const photos = iss.photoUrls && iss.photoUrls.length > 0 
+                                ? iss.photoUrls 
+                                : (iss.photoUrl ? [iss.photoUrl] : []);
+                              
+                              // Regra 19: Se possuir fotos, exibir diálogo de confirmação
+                              if (photos.length > 0) {
+                                setIssueToConfirmResolve(iss);
+                              } else {
+                                onResolveIssue(iss.id);
+                                setActionSuccessMsg('Problema marcado como resolvido!');
+                              }
                             }}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs"
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>Marcar Como Resolvido</span>
@@ -2676,6 +2705,169 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
         )}
 
         {/* Sub-modal: Informar Problema */}
+        {/* Modal para Visualização de Fotos do Defeito (Regra 8) */}
+        {selectedIssueForPhotos && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in">
+            <div className={`w-full max-w-2xl rounded-3xl p-5 border shadow-2xl space-y-4 max-h-[90vh] flex flex-col ${
+              darkMode ? 'bg-[#042d23] border-emerald-900 text-slate-100' : 'bg-white border-slate-100 text-slate-900'
+            }`}>
+              <div className="flex items-center justify-between border-b pb-3 border-emerald-800/20">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                    <Camera className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-sm">
+                      Fotos do Defeito • {vehicle.model}
+                    </h4>
+                    <p className="text-[10px] text-slate-500">
+                      Relatado por {selectedIssueForPhotos.reportedByUserName} em {formatDateTimeBR(selectedIssueForPhotos.dateTime)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIssueForPhotos(null)}
+                  className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-emerald-900/50"
+                >
+                  <X className="w-5 h-5 text-slate-500" />
+                </button>
+              </div>
+
+              <p className="text-xs font-medium text-slate-700 dark:text-emerald-200 bg-slate-50 dark:bg-emerald-950/40 p-3 rounded-2xl border border-slate-200/80 dark:border-emerald-900">
+                "{selectedIssueForPhotos.description}"
+              </p>
+
+              {/* Image Viewer */}
+              {(() => {
+                const photos = selectedIssueForPhotos.photoUrls && selectedIssueForPhotos.photoUrls.length > 0
+                  ? selectedIssueForPhotos.photoUrls
+                  : (selectedIssueForPhotos.photoUrl ? [selectedIssueForPhotos.photoUrl] : []);
+                const currentPhoto = photos[activePhotoIndex] || photos[0];
+
+                return (
+                  <div className="space-y-3 flex-1 flex flex-col items-center justify-center min-h-[220px]">
+                    <div className="relative w-full max-h-[50vh] flex items-center justify-center rounded-2xl overflow-hidden bg-black/40 border border-slate-200 dark:border-emerald-800">
+                      {currentPhoto ? (
+                        <img
+                          src={currentPhoto}
+                          alt={`Foto do defeito ${activePhotoIndex + 1}`}
+                          className="max-w-full max-h-[50vh] object-contain rounded-xl"
+                        />
+                      ) : (
+                        <div className="p-8 text-center text-xs text-slate-400">
+                          Nenhuma foto disponível
+                        </div>
+                      )}
+
+                      {photos.length > 1 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setActivePhotoIndex(prev => (prev > 0 ? prev - 1 : photos.length - 1))}
+                            className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white transition-all"
+                            title="Foto anterior"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActivePhotoIndex(prev => (prev < photos.length - 1 ? prev + 1 : 0))}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white transition-all"
+                            title="Próxima foto"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {photos.length > 1 && (
+                      <div className="flex items-center gap-2">
+                        {photos.map((_, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setActivePhotoIndex(idx)}
+                            className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                              activePhotoIndex === idx
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-slate-100 dark:bg-emerald-950/60 text-slate-600 dark:text-emerald-300'
+                            }`}
+                          >
+                            Foto {idx + 1}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedIssueForPhotos(null)}
+                  className="px-5 py-2.5 rounded-xl bg-slate-100 dark:bg-emerald-950/60 font-bold text-xs text-slate-700 dark:text-emerald-200 hover:bg-slate-200 dark:hover:bg-emerald-900"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Confirmação para Resolução com Exclusão de Fotos (Regra 19) */}
+        {issueToConfirmResolve && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in">
+            <div className={`w-full max-w-sm rounded-3xl p-6 border shadow-2xl space-y-4 ${
+              darkMode ? 'bg-[#042d23] border-emerald-900 text-slate-100' : 'bg-white border-slate-100 text-slate-900'
+            }`}>
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-500 shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-slate-100">
+                    Resolver este defeito?
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Confirmação de finalização
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-emerald-200 leading-relaxed">
+                As fotos anexadas a este defeito serão excluídas permanentemente.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIssueToConfirmResolve(null)}
+                  className="px-4 py-2.5 rounded-xl font-bold text-xs text-slate-600 dark:text-emerald-300 hover:bg-slate-100 dark:hover:bg-emerald-900/50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = issueToConfirmResolve.id;
+                    setIssueToConfirmResolve(null);
+                    if (onResolveIssue) {
+                      onResolveIssue(id);
+                      setActionSuccessMsg('Problema marcado como resolvido e fotos removidas!');
+                    }
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md transition-all active:scale-95"
+                >
+                  Resolver defeito
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <ReportProblemModal
           isOpen={isReportProblemOpen}
           onClose={() => setIsReportProblemOpen(false)}

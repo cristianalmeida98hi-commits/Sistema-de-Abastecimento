@@ -312,6 +312,8 @@ export interface MachineIssue {
   reportedByUserName: string;
   description: string;
   photoUrl?: string;
+  photoUrls?: string[];
+  photoStoragePaths?: string[];
   dateTime: string;
   status: 'ABERTO' | 'EM_ANALISE' | 'RESOLVIDO';
   resolvedAt?: string;

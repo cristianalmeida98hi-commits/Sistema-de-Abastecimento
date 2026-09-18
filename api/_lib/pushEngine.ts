@@ -30,33 +30,72 @@ export interface PushDeviceRecord {
   createdAt: string;
 }
 
-export const OFFICIAL_VAPID_KEYS = {
-  publicKey: 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s',
-  privateKey: 'jIzx37tfbmK5NxYiLQYbcze3XSBg9Il6kBLeDW6zQxA'
-};
+export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
 
 function cleanKey(k?: string): string {
   if (!k) return '';
   return k.trim().replace(/^["']|["']$/g, '').replace(/\\n/g, '').replace(/\r?\n/g, '').trim();
 }
 
-const VAPID_SUBJECT = cleanKey(process.env.VAPID_SUBJECT) || 'mailto:suporte@andradeagro.com.br';
+/**
+ * Fallback para o banco persistente data/db.json (ambiente Google AI Studio)
+ */
+function loadFallbackDbKeys(): { publicKey?: string; privateKey?: string; subject?: string } {
+  try {
+    const candidates = [
+      path.join(process.cwd(), 'data', 'db.json'),
+      path.join('/tmp', 'andradeagro_db.json')
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed?.andradeagro_vapid_keys) {
+          return parsed.andradeagro_vapid_keys;
+        }
+      }
+    }
+  } catch {}
+  return {};
+}
+
+const fallbackDbKeys = loadFallbackDbKeys();
+
+// 1. Prioridade: Variáveis de ambiente (Vercel)
+// 2. Fallback: data/db.json (Google AI Studio)
+const VAPID_SUBJECT = 
+  cleanKey(process.env.VAPID_SUBJECT) || 
+  cleanKey(fallbackDbKeys.subject) || 
+  'mailto:suporte@andradeagro.com.br';
+
 const VAPID_PUBLIC_KEY = 
   cleanKey(process.env.VAPID_PUBLIC_KEY) || 
   cleanKey(process.env.VITE_VAPID_PUBLIC_KEY) || 
-  OFFICIAL_VAPID_KEYS.publicKey;
+  cleanKey(fallbackDbKeys.publicKey) || 
+  OFFICIAL_VAPID_PUBLIC_KEY;
+
 const VAPID_PRIVATE_KEY = 
   cleanKey(process.env.VAPID_PRIVATE_KEY) || 
   cleanKey(process.env.PRIVATE_VAPID_KEY) || 
-  OFFICIAL_VAPID_KEYS.privateKey;
+  cleanKey(fallbackDbKeys.privateKey);
+
+export const OFFICIAL_VAPID_KEYS = {
+  publicKey: VAPID_PUBLIC_KEY,
+  privateKey: VAPID_PRIVATE_KEY
+};
 
 let vapidConfiguredSuccessfully = false;
 let vapidConfigError: string | null = null;
 
 try {
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-  vapidConfiguredSuccessfully = true;
-  console.log('[AndradeAgro PushEngine] VAPID configurado com sucesso no servidor.');
+  if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+    vapidConfiguredSuccessfully = true;
+    console.log('[AndradeAgro PushEngine] VAPID configurado com sucesso no servidor.');
+  } else {
+    vapidConfigError = 'Chaves VAPID incompletas (VAPID_PUBLIC_KEY ou VAPID_PRIVATE_KEY ausentes)';
+    console.warn('[AndradeAgro PushEngine] ' + vapidConfigError);
+  }
 } catch (e: any) {
   vapidConfigError = e?.message || String(e);
   console.error('[AndradeAgro PushEngine] Erro ao configurar VAPID:', vapidConfigError);

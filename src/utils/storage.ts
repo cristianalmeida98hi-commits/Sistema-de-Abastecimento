@@ -22,6 +22,7 @@ import {
 import { 
   getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO 
 } from './calculations';
+import { deleteDefectPhotos } from './defectPhotoService';
 
 const SESSION_KEYS = {
   SESSION_USER: 'andradeagro_session_user_v1',
@@ -1470,12 +1471,12 @@ export async function deleteMaintenance(id: string): Promise<void> {
 }
 
 // Machine Issue Mutators
-export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' | 'status'>): Promise<MachineIssue> {
+export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'dateTime' | 'status'> & { id?: string }): Promise<MachineIssue> {
   const currentDateTimeISO = getNowSaoPauloISO();
   const currentDateBR = getTodayDateSaoPaulo();
   const newIssue: MachineIssue = {
     ...issueData,
-    id: `iss-${Date.now()}`,
+    id: issueData.id || `iss-${Date.now()}`,
     dateTime: currentDateTimeISO,
     status: 'ABERTO'
   };
@@ -1496,8 +1497,20 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
   cache.alerts = [newAlert, ...cache.alerts];
   notifyDataUpdated();
 
-  await setDoc(doc(db, 'machine_issues', cleaned.id), cleaned);
-  await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
+  try {
+    await setDoc(doc(db, 'machine_issues', cleaned.id), cleaned);
+    await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
+  } catch (err) {
+    // Prevent orphan files in Firebase Storage if Firestore write fails (Regra 10)
+    const photosToRollback = [
+      ...(newIssue.photoStoragePaths || []),
+      ...(newIssue.photoUrls || (newIssue.photoUrl ? [newIssue.photoUrl] : []))
+    ];
+    if (photosToRollback.length > 0) {
+      deleteDefectPhotos(photosToRollback).catch(() => {});
+    }
+    throw err;
+  }
 
   logAuditEvent('CRIAR', 'Problema', `Relatou problema em ${newIssue.equipmentName}: ${newIssue.description}`);
 
@@ -1515,11 +1528,29 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
 
 export async function resolveMachineIssue(issueId: string, notes?: string): Promise<void> {
   const user = getCurrentUser();
+  const targetIssue = cache.machineIssues.find(i => i.id === issueId);
+
+  // Rule 9: Photo must be deleted from Firebase Storage when issue is marked RESOLVIDO
+  const photosToDelete: string[] = [
+    ...(targetIssue?.photoStoragePaths || []),
+    ...(targetIssue?.photoUrls || (targetIssue?.photoUrl ? [targetIssue.photoUrl] : []))
+  ];
+  if (photosToDelete.length > 0) {
+    try {
+      await deleteDefectPhotos(photosToDelete);
+    } catch (photoErr) {
+      console.warn('[AndradeAgro Storage] Aviso ao excluir fotos do Storage ao resolver defeito:', photoErr);
+    }
+  }
+
   const fields = cleanUndefined({
     status: 'RESOLVIDO',
     resolvedAt: new Date().toISOString(),
     resolvedBy: user?.name || 'Administrador',
-    notes: notes || ''
+    notes: notes || '',
+    photoUrl: '',
+    photoUrls: [],
+    photoStoragePaths: []
   });
 
   cache.machineIssues = cache.machineIssues.map(i => i.id === issueId ? { ...i, ...fields } as MachineIssue : i);

@@ -120,30 +120,29 @@ async function startServer() {
   loadDatabase();
 
   // Web Push / FCM VAPID Configuration Setup
-  const DEFAULT_STATIC_VAPID_KEYS = {
-    publicKey: 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s',
-    privateKey: 'jIzx37tfbmK5NxYiLQYbcze3XSBg9Il6kBLeDW6zQxA'
-  };
+  const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
 
   const wp = (webpushLib as any).default || webpushLib;
 
-  let vapidKeys = serverDb['andradeagro_vapid_keys'];
-  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    vapidKeys = {
-      publicKey: process.env.VAPID_PUBLIC_KEY,
-      privateKey: process.env.VAPID_PRIVATE_KEY
-    };
-  } else if (!vapidKeys || !vapidKeys.publicKey || !vapidKeys.privateKey) {
-    vapidKeys = DEFAULT_STATIC_VAPID_KEYS;
-    serverDb['andradeagro_vapid_keys'] = vapidKeys;
-    saveDatabase();
-    console.log('[Push Notification] Initialized persistent default VAPID keys.');
-  }
+  // 1. Prioridade: Variáveis de ambiente (Vercel)
+  // 2. Fallback: data/db.json (Google AI Studio)
+  const envVapidPublic = (process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY || '').trim().replace(/^["']|["']$/g, '');
+  const envVapidPrivate = (process.env.VAPID_PRIVATE_KEY || process.env.PRIVATE_VAPID_KEY || '').trim().replace(/^["']|["']$/g, '');
+  const dbVapidKeys = serverDb['andradeagro_vapid_keys'] || {};
 
-  const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:suporte@andradeagro.com.br';
+  const vapidKeys = {
+    publicKey: envVapidPublic || dbVapidKeys.publicKey || OFFICIAL_VAPID_PUBLIC_KEY,
+    privateKey: envVapidPrivate || dbVapidKeys.privateKey || ''
+  };
+
+  const vapidSubject = (process.env.VAPID_SUBJECT || dbVapidKeys.subject || 'mailto:suporte@andradeagro.com.br').trim().replace(/^["']|["']$/g, '');
   try {
-    wp.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
-    console.log('[Push Notification] Web Push VAPID setup successfully configured.');
+    if (vapidKeys.publicKey && vapidKeys.privateKey) {
+      wp.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
+      console.log('[Push Notification] Web Push VAPID setup successfully configured.');
+    } else {
+      console.warn('[Push Notification] Chaves VAPID incompletas no servidor.');
+    }
   } catch (err) {
     console.error('[Push Notification] Error configuring VAPID:', err);
   }
@@ -453,7 +452,7 @@ async function startServer() {
 
   // PUSH NOTIFICATIONS API
   app.get('/api/notifications/vapid-public-key', (req, res) => {
-    const key = vapidKeys?.publicKey || DEFAULT_STATIC_VAPID_KEYS.publicKey;
+    const key = vapidKeys?.publicKey || OFFICIAL_VAPID_PUBLIC_KEY;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Access-Control-Allow-Origin', '*');

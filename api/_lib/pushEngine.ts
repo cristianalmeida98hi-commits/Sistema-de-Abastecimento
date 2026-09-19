@@ -871,26 +871,35 @@ export async function dispatchPushToAuthorizedUsers(event: {
     console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Dispositivo direto incluído com prioridade: ${directUserName || 'Operador'}`);
   }
 
-  // Consulta do repositório/Firestore com timeout de proteção (máximo 4000ms para evitar timeout da função)
-  try {
-    const fetchPromise = fetchAllActiveDevices();
-    const timeoutPromise = new Promise<PushDeviceRecord[]>((resolve) =>
-      setTimeout(() => {
-        console.warn('[AndradeAgro PushEngine] Timeout de segurança de 4000ms atingido na busca de dispositivos. Prosseguindo.');
-        resolve([]);
-      }, 4000)
-    );
-    const remoteDevices = await Promise.race([fetchPromise, timeoutPromise]);
-    for (const d of remoteDevices) {
-      if (!allDevices.some(existing => existing.endpoint === d.endpoint)) {
-        allDevices.push(d);
+  // Se for TEST e já tivermos a subscrição direta do usuário que acionou o teste,
+  // NÃO consultamos os outros dispositivos remotos do Firestore para que a resposta seja instantânea (< 800ms)
+  // e totalmente imune ao timeout de 10s da Vercel!
+  const isDirectTest = eventType === 'TEST' && allDevices.length > 0;
+
+  if (!isDirectTest) {
+    // Consulta do repositório/Firestore com timeout de proteção estrito (máximo 2500ms)
+    try {
+      const fetchPromise = fetchAllActiveDevices();
+      const timeoutPromise = new Promise<PushDeviceRecord[]>((resolve) =>
+        setTimeout(() => {
+          console.warn('[AndradeAgro PushEngine] Timeout de segurança de 2500ms atingido na busca de dispositivos. Prosseguindo.');
+          resolve([]);
+        }, 2500)
+      );
+      const remoteDevices = await Promise.race([fetchPromise, timeoutPromise]);
+      for (const d of remoteDevices) {
+        if (!allDevices.some(existing => existing.endpoint === d.endpoint)) {
+          allDevices.push(d);
+        }
       }
+    } catch (fetchErr: any) {
+      console.warn('[AndradeAgro PushEngine] Aviso ao consultar dispositivos:', fetchErr?.message || fetchErr);
     }
-  } catch (fetchErr: any) {
-    console.warn('[AndradeAgro PushEngine] Aviso ao consultar dispositivos:', fetchErr?.message || fetchErr);
+  } else {
+    console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Teste direto identificado. Pulando busca de terceiros para resposta instantânea (< 800ms).`);
   }
 
-  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado de dispositivos ativos no repositório: ${allDevices.length}`);
+  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado de dispositivos elegíveis para este disparo: ${allDevices.length}`);
 
   // Filtragem e validação dos destinatários
   const targets = allDevices.filter(d => {
@@ -954,13 +963,13 @@ export async function dispatchPushToAuthorizedUsers(event: {
     TTL: 86400
   };
 
-  // Disparo para os serviços Push com timeout individual por dispositivo (máximo 5000ms)
+  // Disparo para os serviços Push com timeout individual por dispositivo (máximo 3500ms)
   await Promise.all(
     targets.map(async (device) => {
       try {
         const sendPromise = webpush.sendNotification(device.subscription as any, payload, vapidOptions);
         const timeoutSend = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout de 5000ms no envio push')), 5000)
+          setTimeout(() => reject(new Error('Timeout de 3500ms no envio push')), 3500)
         );
         const pushRes = await Promise.race([sendPromise, timeoutSend]);
         sentCount++;

@@ -344,25 +344,39 @@ async function startServer() {
     console.log(`[Push Notification] [1. Início] Preparando envio de ${eventType} (ID: ${eventId})`);
 
     // Fetch all active devices (Firestore + Local DB)
-    const allDevices = await fetchRegisteredDevices();
+    const allDevices: any[] = [];
 
-    // If direct test subscription was passed and valid, register/ensure it
+    // If direct test subscription was passed and valid, register/ensure it with highest priority
     if (directSubscription && isValidPushSubscription(directSubscription)) {
-      const existing = allDevices.find(d => d.subscription && d.subscription.endpoint === directSubscription.endpoint);
-      if (!existing) {
-        allDevices.unshift({
-          id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
-          userId: targetUserId || 'direct-test-user',
-          userName: directUserName || 'Usuário Atual',
-          userRole: directUserRole || 'USUARIO',
-          endpoint: directSubscription.endpoint,
-          subscription: directSubscription,
-          deviceInfo: {},
-          active: true,
-          updatedAt: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        });
+      allDevices.push({
+        id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
+        userId: targetUserId || 'direct-test-user',
+        userName: directUserName || 'Usuário Atual',
+        userRole: directUserRole || 'USUARIO',
+        endpoint: directSubscription.endpoint,
+        subscription: directSubscription,
+        deviceInfo: {},
+        active: true,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    // Se for teste e já tiver subscrição direta do remetente, envia direto para ele sem esperar consulta externa
+    const isDirectTest = eventType === 'TEST' && allDevices.length > 0;
+    if (!isDirectTest) {
+      try {
+        const remoteDevices = await fetchRegisteredDevices();
+        for (const d of remoteDevices) {
+          if (!allDevices.some(existing => existing.endpoint === d.endpoint)) {
+            allDevices.push(d);
+          }
+        }
+      } catch (fErr: any) {
+        console.warn('[Push Notification] Warning fetching devices in server.ts:', fErr?.message || fErr);
       }
+    } else {
+      console.log('[Push Notification] Teste direto identificado em server.ts. Envio imediato para o dispositivo remetente.');
     }
 
     // Step 2 & 3: Filter and validate target devices
@@ -410,7 +424,11 @@ async function startServer() {
     await Promise.all(
       targetDevices.map(async (device) => {
         try {
-          const pushRes = await wp.sendNotification(device.subscription, payload, serverVapidOptions);
+          const sendPromise = wp.sendNotification(device.subscription, payload, serverVapidOptions);
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout de 3500ms no envio push')), 3500)
+          );
+          const pushRes = await Promise.race([sendPromise, timeoutPromise]);
           sentCount++;
           console.log(`[Push Notification] [4. Sucesso] Entregue para ${device.userName} (${device.endpoint.slice(0, 30)}...) - Status ${pushRes?.statusCode || 201}`);
         } catch (err: any) {

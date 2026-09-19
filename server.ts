@@ -184,6 +184,20 @@ async function startServer() {
     }
   }
 
+  function getStableDeviceId(endpoint: string): string {
+    if (!endpoint || typeof endpoint !== 'string') {
+      return 'dev-unknown';
+    }
+    let h = 0x811c9dc5;
+    for (let i = 0; i < endpoint.length; i++) {
+      h ^= endpoint.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    const hexHash = (h >>> 0).toString(16).padStart(8, '0');
+    const cleanSuffix = endpoint.replace(/[^a-zA-Z0-9]/g, '').slice(-16);
+    return `dev_${hexHash}_${cleanSuffix || 'sub'}`;
+  }
+
   async function fetchRegisteredDevices(): Promise<any[]> {
     const localDevices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
     const deviceMap = new Map<string, any>();
@@ -195,34 +209,60 @@ async function startServer() {
       }
     }
 
-    // 2. Fetch real devices from Firestore
+    // 2. Fetch real devices from Firestore with endpoint deduplication and most-recent timestamp priority
     try {
       const { app, db } = getServerFirestoreInstance();
       const auth = getAuth(app);
       if (!auth.currentUser) {
         await signInAnonymously(auth).catch(() => null);
       }
-      const snap = await getDocs(collection(db, 'user_devices'));
-      snap.forEach((docSnap) => {
+      
+      const snapPromise = getDocs(collection(db, 'user_devices'));
+      const timeoutPromise = new Promise<any>((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout de consulta do Firestore (3000ms)')), 3000)
+      );
+      const snap = await Promise.race([snapPromise, timeoutPromise]);
+
+      const docMap = new Map<string, { record: any; timestamp: number; active: boolean }>();
+
+      snap.forEach((docSnap: any) => {
         const data = docSnap.data();
-        if (data && data.active !== false && data.subscription) {
+        if (data && data.subscription) {
           const endpoint = data.endpoint || data.subscription?.endpoint;
           if (endpoint && isValidPushSubscription(data.subscription)) {
-            deviceMap.set(endpoint, {
-              id: docSnap.id,
-              userId: data.userId || '',
-              userName: data.userName || 'Usuário',
-              userRole: data.userRole || 'FUNCIONARIO',
-              endpoint,
-              subscription: data.subscription,
-              deviceInfo: data.deviceInfo || {},
-              active: true,
-              updatedAt: data.updatedAt || new Date().toISOString(),
-              createdAt: data.createdAt || new Date().toISOString()
-            });
+            const docUpdatedAt = data.updatedAt || data.createdAt || '';
+            const docTimestamp = docUpdatedAt ? new Date(docUpdatedAt).getTime() : 0;
+            const existing = docMap.get(endpoint);
+
+            if (!existing || docTimestamp >= existing.timestamp) {
+              docMap.set(endpoint, {
+                record: {
+                  id: docSnap.id,
+                  userId: data.userId || '',
+                  userName: data.userName || 'Usuário',
+                  userRole: data.userRole || 'FUNCIONARIO',
+                  endpoint,
+                  subscription: data.subscription,
+                  deviceInfo: data.deviceInfo || {},
+                  active: data.active !== false,
+                  updatedAt: docUpdatedAt || new Date().toISOString(),
+                  createdAt: data.createdAt || new Date().toISOString()
+                },
+                timestamp: docTimestamp,
+                active: data.active !== false
+              });
+            }
           }
         }
       });
+
+      for (const item of docMap.values()) {
+        if (item.active) {
+          deviceMap.set(item.record.endpoint, item.record);
+        } else {
+          deviceMap.delete(item.record.endpoint);
+        }
+      }
     } catch (err: any) {
       console.warn('[Push Notification] Warning fetching devices from Firestore:', err?.message || err);
     }
@@ -349,7 +389,7 @@ async function startServer() {
     // If direct test subscription was passed and valid, register/ensure it with highest priority
     if (directSubscription && isValidPushSubscription(directSubscription)) {
       allDevices.push({
-        id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
+        id: getStableDeviceId(directSubscription.endpoint),
         userId: targetUserId || 'direct-test-user',
         userName: directUserName || 'Usuário Atual',
         userRole: directUserRole || 'USUARIO',
@@ -510,12 +550,13 @@ async function startServer() {
       }
 
       let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
+      const stableId = getStableDeviceId(subscription.endpoint);
       const existingIndex = devices.findIndex((d: any) => 
-        d.subscription && d.subscription.endpoint === subscription.endpoint
+        (d.subscription && d.subscription.endpoint === subscription.endpoint) || d.id === stableId
       );
 
       const deviceRecord = {
-        id: existingIndex >= 0 ? devices[existingIndex].id : `dev-${userId}-${Date.now()}`,
+        id: stableId,
         userId,
         userName: userName || 'Usuário',
         userRole: userRole || 'FUNCIONARIO',

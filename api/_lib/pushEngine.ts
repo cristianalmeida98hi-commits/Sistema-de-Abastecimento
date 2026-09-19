@@ -298,33 +298,66 @@ async function fetchFirestoreDevicesRest(): Promise<{ devices: PushDeviceRecord[
     const data = (await res.json()) as any;
     const docs = data.documents || [];
 
-    const records: PushDeviceRecord[] = [];
+    const docMap = new Map<string, { record: PushDeviceRecord; timestamp: number; active: boolean }>();
+
     for (const rawDoc of docs) {
       const parsed = parseFirestoreDoc(rawDoc);
-      if (parsed && parsed.active !== false && parsed.subscription) {
+      if (parsed && parsed.subscription) {
         const endpoint = parsed.endpoint || parsed.subscription?.endpoint;
         if (endpoint && isValidPushSubscription(parsed.subscription)) {
-          records.push({
-            id: parsed.id || rawDoc.name.split('/').pop(),
-            userId: parsed.userId || '',
-            userName: parsed.userName || 'Usuário',
-            userRole: parsed.userRole || 'FUNCIONARIO',
-            endpoint,
-            subscription: parsed.subscription,
-            deviceInfo: parsed.deviceInfo || {},
-            active: true,
-            updatedAt: parsed.updatedAt || new Date().toISOString(),
-            createdAt: parsed.createdAt || new Date().toISOString()
-          });
+          const docUpdatedAt = parsed.updatedAt || parsed.createdAt || '';
+          const docTimestamp = docUpdatedAt ? new Date(docUpdatedAt).getTime() : 0;
+          const existing = docMap.get(endpoint);
+
+          if (!existing || docTimestamp >= existing.timestamp) {
+            docMap.set(endpoint, {
+              record: {
+                id: parsed.id || rawDoc.name.split('/').pop(),
+                userId: parsed.userId || '',
+                userName: parsed.userName || 'Usuário',
+                userRole: parsed.userRole || 'FUNCIONARIO',
+                endpoint,
+                subscription: parsed.subscription,
+                deviceInfo: parsed.deviceInfo || {},
+                active: parsed.active !== false,
+                updatedAt: docUpdatedAt || new Date().toISOString(),
+                createdAt: parsed.createdAt || new Date().toISOString()
+              },
+              timestamp: docTimestamp,
+              active: parsed.active !== false
+            });
+          }
         }
       }
     }
+
+    const records: PushDeviceRecord[] = Array.from(docMap.values())
+      .filter(item => item.active)
+      .map(item => item.record);
 
     return { devices: records };
   } catch (err: any) {
     const msg = err?.name === 'AbortError' ? 'Tempo limite esgotado ao consultar Firestore REST (timeout)' : err?.message || String(err);
     return { devices: [], error: msg };
   }
+}
+
+/**
+ * Generate a deterministic, collision-resistant device ID based on the push subscription endpoint.
+ * This guarantees idempotency: the same browser/endpoint always maps to the EXACT same Firestore document.
+ */
+export function getStableDeviceId(endpoint: string): string {
+  if (!endpoint || typeof endpoint !== 'string') {
+    return 'dev-unknown';
+  }
+  let h = 0x811c9dc5;
+  for (let i = 0; i < endpoint.length; i++) {
+    h ^= endpoint.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  const hexHash = (h >>> 0).toString(16).padStart(8, '0');
+  const cleanSuffix = endpoint.replace(/[^a-zA-Z0-9]/g, '').slice(-16);
+  return `dev_${hexHash}_${cleanSuffix || 'sub'}`;
 }
 
 export function isValidPushSubscription(sub: any): boolean {
@@ -433,26 +466,46 @@ export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
       const snap = await Promise.race([adminPromise, timeoutPromise]);
       console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Firebase Admin retornou ${snap.size} documento(s) em 'user_devices'.`);
       
+      const adminDocMap = new Map<string, { record: PushDeviceRecord; timestamp: number; active: boolean }>();
+
       snap.forEach((docSnap) => {
         const data = docSnap.data() as any;
-        if (data && data.active !== false && data.subscription) {
+        if (data && data.subscription) {
           const endpoint = data.endpoint || data.subscription?.endpoint;
           if (endpoint && isValidPushSubscription(data.subscription)) {
-            deviceMap.set(endpoint, {
-              id: docSnap.id,
-              userId: data.userId || '',
-              userName: data.userName || 'Usuário',
-              userRole: data.userRole || 'FUNCIONARIO',
-              endpoint,
-              subscription: data.subscription,
-              deviceInfo: data.deviceInfo || {},
-              active: true,
-              updatedAt: data.updatedAt || new Date().toISOString(),
-              createdAt: data.createdAt || new Date().toISOString()
-            });
+            const docUpdatedAt = data.updatedAt || data.createdAt || '';
+            const docTimestamp = docUpdatedAt ? new Date(docUpdatedAt).getTime() : 0;
+            const existing = adminDocMap.get(endpoint);
+
+            if (!existing || docTimestamp >= existing.timestamp) {
+              adminDocMap.set(endpoint, {
+                record: {
+                  id: docSnap.id,
+                  userId: data.userId || '',
+                  userName: data.userName || 'Usuário',
+                  userRole: data.userRole || 'FUNCIONARIO',
+                  endpoint,
+                  subscription: data.subscription,
+                  deviceInfo: data.deviceInfo || {},
+                  active: data.active !== false,
+                  updatedAt: docUpdatedAt || new Date().toISOString(),
+                  createdAt: data.createdAt || new Date().toISOString()
+                },
+                timestamp: docTimestamp,
+                active: data.active !== false
+              });
+            }
           }
         }
       });
+
+      for (const item of adminDocMap.values()) {
+        if (item.active) {
+          deviceMap.set(item.record.endpoint, item.record);
+        } else {
+          deviceMap.delete(item.record.endpoint);
+        }
+      }
 
       const result = Array.from(deviceMap.values());
       console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado via Admin: ${result.length} dispositivo(s).`);
@@ -499,11 +552,21 @@ export async function deactivateEndpointEverywhere(endpoint: string) {
   try {
     const adminDb = getFirebaseAdminDb();
     if (adminDb) {
+      const stableId = getStableDeviceId(endpoint);
       const snap = await adminDb.collection('user_devices').where('endpoint', '==', endpoint).get();
       const batch = adminDb.batch();
+      let updatedStable = false;
       snap.forEach((docSnap) => {
+        if (docSnap.id === stableId) updatedStable = true;
         batch.update(docSnap.ref, { active: false, updatedAt: new Date().toISOString() });
       });
+      if (!updatedStable) {
+        batch.set(adminDb.collection('user_devices').doc(stableId), {
+          active: false,
+          endpoint,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      }
       await batch.commit().catch(() => null);
     }
   } catch (err: any) {
@@ -594,15 +657,14 @@ export async function registerDevice(params: {
   loadStore();
   const { userId, userName, userRole, subscription, deviceInfo } = params;
   const endpoint = subscription?.endpoint || '';
-  const cleanHash = endpoint.slice(-16).replace(/[^a-zA-Z0-9]/g, '');
-  const id = `dev-${userId}-${cleanHash || Date.now()}`;
+  const stableId = getStableDeviceId(endpoint);
 
   const existingIdx = inMemoryStore.devices.findIndex(
-    d => d.subscription && d.subscription.endpoint === endpoint
+    d => (d.subscription && d.subscription.endpoint === endpoint) || d.id === stableId
   );
 
   const record: PushDeviceRecord = {
-    id: existingIdx >= 0 ? inMemoryStore.devices[existingIdx].id : id,
+    id: stableId,
     userId,
     userName: userName || 'Usuário',
     userRole: userRole || 'FUNCIONARIO',
@@ -857,7 +919,7 @@ export async function dispatchPushToAuthorizedUsers(event: {
   // Adicionamos ela imediatamente à lista com prioridade máxima
   if (directSubscription && isValidPushSubscription(directSubscription)) {
     const directRecord: PushDeviceRecord = {
-      id: `dev-${targetUserId || 'direct'}-${Date.now()}`,
+      id: getStableDeviceId(directSubscription.endpoint),
       userId: targetUserId || 'direct-test-user',
       userName: directUserName || 'Usuário Atual',
       userRole: directUserRole || 'ADMIN',

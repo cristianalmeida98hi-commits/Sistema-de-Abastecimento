@@ -315,6 +315,25 @@ async function getOrRenewSubscription(
 }
 
 /**
+ * Generate a deterministic, collision-resistant device ID based on the push subscription endpoint.
+ * This guarantees idempotency: the same browser/endpoint always maps to the EXACT same Firestore document,
+ * completely eliminating device duplication across page loads, logins, and tab restarts.
+ */
+export function getStableDeviceId(endpoint: string): string {
+  if (!endpoint || typeof endpoint !== 'string') {
+    return 'dev-unknown';
+  }
+  let h = 0x811c9dc5;
+  for (let i = 0; i < endpoint.length; i++) {
+    h ^= endpoint.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  const hexHash = (h >>> 0).toString(16).padStart(8, '0');
+  const cleanSuffix = endpoint.replace(/[^a-zA-Z0-9]/g, '').slice(-16);
+  return `dev_${hexHash}_${cleanSuffix || 'sub'}`;
+}
+
+/**
  * Detect client platform and device characteristics
  */
 function getDeviceInfo() {
@@ -442,8 +461,7 @@ export async function enablePushNotifications(currentUser: User): Promise<{
     const subJson = normalizeSubscription(sub);
     const deviceInfo = getDeviceInfo();
     const cleanEndpoint = sub.endpoint || '';
-    const hash = cleanEndpoint.slice(-16).replace(/[^a-zA-Z0-9]/g, '');
-    const deviceId = `dev-${currentUser.id}-${hash || Date.now()}`;
+    const deviceId = getStableDeviceId(cleanEndpoint);
 
     const deviceRecord = {
       id: deviceId,
@@ -463,7 +481,7 @@ export async function enablePushNotifications(currentUser: User): Promise<{
     try {
       await ensureFirebaseAuth();
       await setDoc(doc(db, 'user_devices', deviceId), deviceRecord, { merge: true });
-      console.log('[Push Notification] Device registered in Firestore user_devices.');
+      console.log('[Push Notification] Device registered idempotently in Firestore user_devices:', deviceId);
     } catch (fsErr) {
       console.warn('[Push Notification] Notice: Could not write device to Firestore directly:', fsErr);
     }
@@ -531,17 +549,15 @@ export async function disablePushNotifications(currentUser?: User): Promise<{
           });
 
           // Inform Firestore
-          if (currentUser?.id) {
-            const hash = endpoint.slice(-16).replace(/[^a-zA-Z0-9]/g, '');
-            const deviceId = `dev-${currentUser.id}-${hash}`;
-            try {
-              await updateDoc(doc(db, 'user_devices', deviceId), {
-                active: false,
-                updatedAt: new Date().toISOString()
-              });
-            } catch {
-              // Non-blocking
-            }
+          const stableId = getStableDeviceId(endpoint);
+          try {
+            await ensureFirebaseAuth();
+            await setDoc(doc(db, 'user_devices', stableId), {
+              active: false,
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+          } catch {
+            // Non-blocking
           }
         }
       }
@@ -894,8 +910,7 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
         const subJson = normalizeSubscription(sub);
         const deviceInfo = getDeviceInfo();
         const cleanEndpoint = sub.endpoint || '';
-        const hash = cleanEndpoint.slice(-16).replace(/[^a-zA-Z0-9]/g, '');
-        const deviceId = `dev-${currentUser.id}-${hash || Date.now()}`;
+        const deviceId = getStableDeviceId(cleanEndpoint);
 
         // Sync with backend server
         await safeApiFetch('/api/notifications/subscribe', {
@@ -910,7 +925,7 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
           })
         });
 
-        // Sync with Firestore user_devices with authenticated session
+        // Sync with Firestore user_devices idempotently with authenticated session
         try {
           await ensureFirebaseAuth();
           await setDoc(doc(db, 'user_devices', deviceId), {
@@ -930,7 +945,7 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
         }
 
         localStorage.setItem(`andradeagro_push_active_${currentUser.id}`, 'true');
-        console.log(`[Push Notification] Device verified and synchronized for ${currentUser.name} (${currentUser.role}).`);
+        console.log(`[Push Notification] Device verified and synchronized idempotently for ${currentUser.name} (${currentUser.role}).`);
       }
     } catch (syncErr) {
       console.warn('[Push Notification] Non-blocking auto-sync notice:', syncErr);
@@ -978,31 +993,53 @@ export async function fetchServerNotificationStatus(): Promise<{
   }
 
   // Fallback Resiliente: se a API do backend estiver fria, lenta ou retornar aviso,
-  // consulta diretamente a coleção 'user_devices' via Firestore SDK para exibir os dispositivos reais
+  // consulta diretamente a coleção 'user_devices' via Firestore SDK com deduplicação por endpoint físico
   try {
     await ensureFirebaseAuth();
-    const snap = await getDocs(collection(db, 'user_devices'));
-    const activeDevices: Array<{
+    
+    // Timeout de 4000ms para nunca travar o card em "consultando"
+    const snapPromise = getDocs(collection(db, 'user_devices'));
+    const timeoutPromise = new Promise<any>((_, reject) => 
+      setTimeout(() => reject(new Error('Timeout de consulta do Firestore (4000ms)')), 4000)
+    );
+    const snap = await Promise.race([snapPromise, timeoutPromise]);
+
+    const endpointDeviceMap = new Map<string, {
       userName: string;
       userRole: string;
       platform: string;
       updatedAt: string;
-    }> = [];
+      active: boolean;
+      timestamp: number;
+    }>();
 
-    snap.forEach((docSnap) => {
+    snap.forEach((docSnap: any) => {
       const data = docSnap.data();
-      if (data && data.active !== false && data.subscription) {
-        activeDevices.push({
-          userName: data.userName || 'Usuário',
-          userRole: data.userRole || 'FUNCIONARIO',
-          platform: data.deviceInfo?.platform || 'desconhecido',
-          updatedAt: data.updatedAt || new Date().toISOString()
-        });
+      const endpoint = data?.endpoint || data?.subscription?.endpoint;
+      if (endpoint && data.subscription) {
+        const docUpdatedAt = data.updatedAt || '';
+        const docTimestamp = docUpdatedAt ? new Date(docUpdatedAt).getTime() : 0;
+        const existing = endpointDeviceMap.get(endpoint);
+        // O documento mais recente para o mesmo endpoint físico sempre prevalece
+        if (!existing || docTimestamp >= existing.timestamp) {
+          endpointDeviceMap.set(endpoint, {
+            userName: data.userName || 'Usuário',
+            userRole: data.userRole || 'FUNCIONARIO',
+            platform: data.deviceInfo?.platform || 'desconhecido',
+            updatedAt: docUpdatedAt || new Date().toISOString(),
+            active: data.active !== false,
+            timestamp: docTimestamp
+          });
+        }
       }
     });
 
+    const activeDevices = Array.from(endpointDeviceMap.values())
+      .filter(d => d.active)
+      .map(({ active, timestamp, ...rest }) => rest);
+
     const activeCount = activeDevices.length;
-    const totalCount = snap.size;
+    const totalCount = endpointDeviceMap.size;
     const vapidKey = await getVapidPublicKey().catch(() => OFFICIAL_VAPID_PUBLIC_KEY);
 
     return {
@@ -1017,7 +1054,7 @@ export async function fetchServerNotificationStatus(): Promise<{
       notice: backendError ? `Dados lidos do Firestore (aviso backend: ${backendError})` : undefined
     };
   } catch (fsErr: any) {
-    console.warn('[Push Notification] Fallback direto ao Firestore também falhou:', fsErr?.message || fsErr);
+    console.warn('[Push Notification] Fallback direto ao Firestore:', fsErr?.message || fsErr);
     return {
       success: false,
       querySuccess: false,

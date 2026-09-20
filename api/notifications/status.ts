@@ -1,4 +1,4 @@
-import { handleCors, sendJson, getEngineStatus } from '../_lib/pushEngine.ts';
+import { handleCors, sendJson, getEngineStatus } from '../_lib/pushEngine';
 
 export default async function handler(req: any, res: any) {
   if (handleCors(req, res)) return;

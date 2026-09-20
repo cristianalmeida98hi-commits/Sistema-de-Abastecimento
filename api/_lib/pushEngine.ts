@@ -1,6 +1,7 @@
 import webpushLib from 'web-push';
 import fs from 'fs';
 import path from 'path';
+import defaultDbData from '../../data/db.json';
 import { initializeApp, getApps, cert, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 
@@ -41,6 +42,9 @@ function cleanKey(k?: string): string {
  */
 function loadFallbackDbKeys(): { publicKey?: string; privateKey?: string; subject?: string } {
   try {
+    if ((defaultDbData as any)?.andradeagro_vapid_keys) {
+      return (defaultDbData as any).andradeagro_vapid_keys;
+    }
     const candidates = [
       path.join(process.cwd(), 'data', 'db.json'),
       path.join('/tmp', 'andradeagro_db.json')
@@ -436,6 +440,12 @@ let inMemoryStore: {
 
 function loadStore() {
   try {
+    if (inMemoryStore.devices.length === 0 && Array.isArray((defaultDbData as any)?.andradeagro_user_devices_v1)) {
+      inMemoryStore.devices = (defaultDbData as any).andradeagro_user_devices_v1;
+    }
+    if (inMemoryStore.processedEvents.length === 0 && Array.isArray((defaultDbData as any)?.andradeagro_processed_push_events)) {
+      inMemoryStore.processedEvents = (defaultDbData as any).andradeagro_processed_push_events;
+    }
     const dbPath = getDbFilePath();
     if (fs.existsSync(dbPath)) {
       const raw = fs.readFileSync(dbPath, 'utf-8');

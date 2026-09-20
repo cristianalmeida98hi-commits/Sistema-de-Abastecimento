@@ -115,9 +115,44 @@ let adminInitAttempted = false;
 let lastFirestoreQueryError: string | null = null;
 let cachedAuthToken: { token: string; expiresAt: number } | null = null;
 
+export interface FirebaseAdminDiagnostics {
+  configured: boolean;
+  source: 'SERVICE_ACCOUNT_JSON' | 'CLIENT_KEYS' | 'EXISTING_APP' | 'NONE';
+  projectId: boolean;
+  clientEmail: boolean;
+  privateKey: boolean;
+}
+
+export function getFirebaseAdminDiagnostics(): FirebaseAdminDiagnostics {
+  const saEnv = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_SERVICE_ACCOUNT || process.env.FIREBASE_CREDENTIALS;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL;
+  const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY || process.env.GOOGLE_PRIVATE_KEY;
+  const projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+
+  if (adminDbInstance) {
+    return {
+      configured: true,
+      source: saEnv ? 'SERVICE_ACCOUNT_JSON' : (clientEmail && rawPrivateKey ? 'CLIENT_KEYS' : 'EXISTING_APP'),
+      projectId: Boolean(projectId),
+      clientEmail: Boolean(clientEmail || saEnv),
+      privateKey: Boolean(rawPrivateKey || saEnv)
+    };
+  }
+
+  return {
+    configured: false,
+    source: 'NONE',
+    projectId: Boolean(projectId),
+    clientEmail: Boolean(clientEmail || saEnv),
+    privateKey: Boolean(rawPrivateKey || saEnv)
+  };
+}
+
 /**
  * Inicialização segura e resiliente do Firebase Admin SDK.
  * Roda no ambiente Node.js / Serverless sem usar o SDK Web de cliente.
+ * NUNCA recorre a Application Default Credentials (ADC) cego sem Service Account,
+ * prevenindo o timeout de 10 segundos da Vercel/AWS Lambda.
  */
 export function getFirebaseAdminDb(): Firestore | null {
   if (adminDbInstance) return adminDbInstance;
@@ -128,61 +163,68 @@ export function getFirebaseAdminDb(): Firestore | null {
     const existingApps = getApps();
     if (existingApps && existingApps.length > 0 && existingApps[0]) {
       adminDbInstance = getFirestore(existingApps[0]);
+      console.log('[AndradeAgro PushEngine] Firebase Admin reutilizado a partir de App existente.');
       return adminDbInstance;
     }
 
-    const projectId = firebaseConfig.projectId;
+    const projectId = (process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId || '').trim();
 
-    // 1. Verificar se existe JSON de conta de serviço completo
-    const saEnv = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_SERVICE_ACCOUNT;
+    // 1. Verificar se existe JSON de conta de serviço completo (JSON puro ou Base64)
+    const saEnv = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_SERVICE_ACCOUNT || process.env.FIREBASE_CREDENTIALS;
     if (saEnv && typeof saEnv === 'string' && saEnv.trim().length > 10) {
       try {
-        const sa = JSON.parse(saEnv.trim());
+        let cleanSa = saEnv.trim();
+        if (!cleanSa.startsWith('{')) {
+          try {
+            cleanSa = Buffer.from(cleanSa, 'base64').toString('utf-8');
+          } catch {}
+        }
+        const sa = JSON.parse(cleanSa);
         const app = initializeApp({
           credential: cert(sa),
           projectId: sa.project_id || projectId
         }, 'andradeagro-admin-sa');
         adminDbInstance = getFirestore(app);
-        console.log('[AndradeAgro PushEngine] Firebase Admin inicializado via FIREBASE_SERVICE_ACCOUNT.');
+        console.log('[AndradeAgro PushEngine] Firebase Admin inicializado via Service Account JSON.');
         return adminDbInstance;
       } catch (saErr: any) {
         console.warn('[AndradeAgro PushEngine] Falha ao analisar FIREBASE_SERVICE_ACCOUNT:', saErr?.message || saErr);
       }
     }
 
-    // 2. Verificar se existem credenciais individuais (Client Email + Private Key)
-    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-    const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
-    if (clientEmail && rawPrivateKey) {
+    // 2. Verificar se existem credenciais individuais explícitas (Client Email + Private Key)
+    const clientEmail = (process.env.FIREBASE_CLIENT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL || '').trim();
+    const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY || process.env.GOOGLE_PRIVATE_KEY || '';
+    if (clientEmail && rawPrivateKey && rawPrivateKey.trim().length > 20) {
       try {
-        const privateKey = rawPrivateKey.replace(/\\n/g, '\n').trim();
+        let privateKey = rawPrivateKey.trim();
+        // Remove aspas adicionais caso injetadas no painel da Vercel
+        if ((privateKey.startsWith('"') && privateKey.endsWith('"')) || (privateKey.startsWith("'") && privateKey.endsWith("'"))) {
+          privateKey = privateKey.slice(1, -1);
+        }
+        // Converte quebras de linha literais (\n) para quebras reais de certificado PEM
+        privateKey = privateKey.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+
         const app = initializeApp({
           credential: cert({
-            projectId,
-            clientEmail: clientEmail.trim(),
+            projectId: projectId || 'andrade-agro',
+            clientEmail,
             privateKey
           }),
-          projectId
+          projectId: projectId || 'andrade-agro'
         }, 'andradeagro-admin-keys');
         adminDbInstance = getFirestore(app);
-        console.log('[AndradeAgro PushEngine] Firebase Admin inicializado via FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY.');
+        console.log('[AndradeAgro PushEngine] Firebase Admin inicializado com sucesso via FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY.');
         return adminDbInstance;
       } catch (keyErr: any) {
         console.warn('[AndradeAgro PushEngine] Falha ao inicializar Firebase Admin com chaves individuais:', keyErr?.message || keyErr);
       }
     }
 
-    // 3. Fallback de credenciais de ambiente (GCP / ADC)
-    try {
-      const app = initializeApp({
-        projectId
-      }, 'andradeagro-admin-adc');
-      adminDbInstance = getFirestore(app);
-      console.log('[AndradeAgro PushEngine] Firebase Admin inicializado via Application Default Credentials.');
-      return adminDbInstance;
-    } catch {
-      // Sem credenciais padrão disponíveis no ambiente atual
-    }
+    // 3. NÃO tentar ADC cego (Application Default Credentials) na Vercel/AWS.
+    // Na Vercel, ADC busca o servidor de metadados da GCP (169.254.169.254),
+    // que é inalcançável e causa o congelamento de 10s e encerramento forçado pela Vercel ("A server error has occurred").
+    console.log('[AndradeAgro PushEngine] Firebase Admin: Nenhuma credencial explícita de Service Account fornecida. ADC desabilitado preventivamente para eliminar risco de timeout na Vercel. Utilizando fallback direto.');
   } catch (err: any) {
     console.warn('[AndradeAgro PushEngine] Firebase Admin não pôde ser inicializado:', err?.message || err);
   }
@@ -741,6 +783,7 @@ export async function getEngineStatus(): Promise<any> {
     queryError: devices.length === 0 && lastFirestoreQueryError ? lastFirestoreQueryError : undefined,
     vapidConfigured: Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY),
     vapidPublicKey: VAPID_PUBLIC_KEY,
+    firebaseAdmin: getFirebaseAdminDiagnostics(),
     totalDevices: devices.length,
     activeAuthorizedCount: activeValid.length,
     authorizedDevices: activeValid.map(d => ({

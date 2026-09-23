@@ -1,5 +1,5 @@
 import { FuelLog, Vehicle, FuelType, Sector, GasStation } from '../types';
-import { getOperationTypeName, getActivityTypeName } from './operations';
+import { getOperationTypeName, getActivityTypeName, getEffectiveActivityName, getEffectiveCategoryName } from './operations';
 
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('pt-BR', {
@@ -472,11 +472,12 @@ export function calculateFuelLogMetrics(
   };
 }
 
-// PDF Export Function
+// PDF Export Function - Relatório Oficial Tradicional (Tabela)
 export async function exportFuelLogsPDF(
   logs: FuelLog[],
   title: string = 'Relatório de Abastecimentos',
-  companyInfo: { name: string; slogan: string; cnpj: string }
+  companyInfo: { name: string; slogan: string; cnpj: string },
+  canViewFinancial: boolean = true
 ) {
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
@@ -510,28 +511,43 @@ export async function exportFuelLogsPDF(
   doc.text(title, 14, 33);
 
   // Table Data
-  const tableData = logs.map(log => [
-    formatDateTimeBR(log.dateTime),
-    log.equipmentPlateOrCode,
-    log.equipmentName,
-    log.driverOrOperatorName,
-    `${getOperationTypeName(log.operationType)}${log.activityType ? ' - ' + getActivityTypeName(log.activityType, log.operationType) : ''}`,
-    log.gasStationName,
-    getFuelTypeName(log.fuelType),
-    `${log.liters} L`,
-    formatCurrency(log.pricePerLiter),
-    formatCurrency(log.totalValue),
-    log.calculatedAverageKmPerLiter ? `${log.calculatedAverageKmPerLiter} km/L` : log.calculatedAverageLitersPerHour ? `${log.calculatedAverageLitersPerHour} L/h` : '-'
-  ]);
+  const tableData = logs.map(log => {
+    const baseCols = [
+      formatDateTimeBR(log.dateTime),
+      log.equipmentPlateOrCode,
+      log.equipmentName,
+      log.driverOrOperatorName,
+      `${getOperationTypeName(log.operationType)}${log.activityType ? ' - ' + getActivityTypeName(log.activityType, log.operationType) : ''}`,
+      log.gasStationName,
+      getFuelTypeName(log.fuelType),
+      `${log.liters} L`
+    ];
 
-  const totalLiters = logs.reduce((acc, l) => acc + l.liters, 0);
-  const totalCost = logs.reduce((acc, l) => acc + l.totalValue, 0);
+    if (canViewFinancial) {
+      baseCols.push(formatCurrency(log.pricePerLiter));
+      baseCols.push(formatCurrency(log.totalValue));
+    }
+
+    baseCols.push(log.calculatedAverageKmPerLiter ? `${log.calculatedAverageKmPerLiter} km/L` : log.calculatedAverageLitersPerHour ? `${log.calculatedAverageLitersPerHour} L/h` : '-');
+    return baseCols;
+  });
+
+  const totalLiters = logs.reduce((acc, l) => acc + (l.liters || 0), 0);
+  const totalCost = logs.reduce((acc, l) => acc + (l.totalValue || 0), 0);
+
+  const headCols = canViewFinancial
+    ? ['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Motorista/Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'R$/L', 'Total R$', 'Média']
+    : ['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Motorista/Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'Média'];
+
+  const footCols = canViewFinancial
+    ? ['TOTAL', `${logs.length} reg.`, '-', '-', '-', '-', '-', `${totalLiters.toLocaleString('pt-BR')} L`, '-', formatCurrency(totalCost), '-']
+    : ['TOTAL', `${logs.length} reg.`, '-', '-', '-', '-', '-', `${totalLiters.toLocaleString('pt-BR')} L`, '-'];
 
   autoTable(doc, {
     startY: 38,
-    head: [['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Motorista/Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'R$/L', 'Total R$', 'Média']],
+    head: [headCols],
     body: tableData,
-    foot: [['TOTAL', `${logs.length} reg.`, '-', '-', '-', '-', '-', `${totalLiters.toLocaleString('pt-BR')} L`, '-', formatCurrency(totalCost), '-']],
+    foot: [footCols],
     theme: 'grid',
     headStyles: {
       fillColor: [20, 78, 46],
@@ -554,11 +570,560 @@ export async function exportFuelLogsPDF(
     }
   });
 
-  doc.save(`AndradeAgro_Relatorio_Abastecimentos_${new Date().toISOString().slice(0, 10)}.pdf`);
+  doc.save(`AndradeAgro_Relatorio_Oficial_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
-// Excel / CSV Export Function
-export function exportFuelLogsCSV(logs: FuelLog[], fileName: string = 'Abastecimentos_AndradeAgro') {
+export interface ExecutiveReportOptions {
+  logs: FuelLog[];
+  vehicles: Vehicle[];
+  companyInfo: { name: string; slogan: string; cnpj: string };
+  dateRangeStr: string;
+  canViewFinancial: boolean;
+  appliedFiltersDesc?: string;
+}
+
+// PDF Export Function - Relatório Executivo Completo com Resumo Gerencial e Gráficos Vetoriais
+export async function exportExecutiveReportPDF(options: ExecutiveReportOptions) {
+  const {
+    logs,
+    vehicles,
+    companyInfo,
+    dateRangeStr,
+    canViewFinancial,
+    appliedFiltersDesc = 'Filtros aplicados: Período padrão'
+  } = options;
+
+  const { default: jsPDF } = await import('jspdf');
+  const { default: autoTable } = await import('jspdf-autotable');
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  // 1. Cálculos do Resumo Gerencial
+  const totalLiters = logs.reduce((acc, l) => acc + (l.liters || 0), 0);
+  const totalCost = logs.reduce((acc, l) => acc + (l.totalValue || 0), 0);
+  const totalCount = logs.length;
+  const avgLitersPerLog = totalCount > 0 ? (totalLiters / totalCount) : 0;
+
+  // Mapa de setores dos veículos
+  const vehicleMap = new Map<string, Vehicle>();
+  vehicles.forEach(v => {
+    if (v.id) vehicleMap.set(v.id, v);
+  });
+
+  // Top Máquinas
+  const eqMap = new Map<string, { name: string; code: string; liters: number; cost: number; count: number }>();
+  // Top Operadores
+  const opMap = new Map<string, { name: string; liters: number; cost: number; count: number }>();
+  // Top Atividades
+  const actMap = new Map<string, { name: string; liters: number; cost: number; count: number }>();
+  // Top Operações
+  const operMap = new Map<string, { name: string; liters: number; cost: number; count: number }>();
+  // Consumo por Setor
+  const secMap = new Map<string, { name: string; liters: number; cost: number; count: number }>();
+  // Consumo Temporal (por data YYYY-MM-DD)
+  const timeMap = new Map<string, { date: string; liters: number; cost: number }>();
+
+  logs.forEach(l => {
+    const liters = l.liters || 0;
+    const cost = l.totalValue || 0;
+
+    // Equipamento
+    const eqKey = l.equipmentId || l.equipmentName || 'OUTRO';
+    const eqCur = eqMap.get(eqKey) || { name: l.equipmentName || 'Equipamento', code: l.equipmentPlateOrCode || '', liters: 0, cost: 0, count: 0 };
+    eqCur.liters += liters;
+    eqCur.cost += cost;
+    eqCur.count += 1;
+    eqMap.set(eqKey, eqCur);
+
+    // Operador
+    const opKey = l.driverOrOperatorId || l.driverOrOperatorName || 'NÃO INFORMADO';
+    const opCur = opMap.get(opKey) || { name: l.driverOrOperatorName || 'Não Informado', liters: 0, cost: 0, count: 0 };
+    opCur.liters += liters;
+    opCur.cost += cost;
+    opCur.count += 1;
+    opMap.set(opKey, opCur);
+
+    // Atividade
+    const actName = getEffectiveActivityName(l);
+    const actCur = actMap.get(actName) || { name: actName, liters: 0, cost: 0, count: 0 };
+    actCur.liters += liters;
+    actCur.cost += cost;
+    actCur.count += 1;
+    actMap.set(actName, actCur);
+
+    // Operação
+    const operName = getEffectiveCategoryName(l);
+    const operCur = operMap.get(operName) || { name: operName, liters: 0, cost: 0, count: 0 };
+    operCur.liters += liters;
+    operCur.cost += cost;
+    operCur.count += 1;
+    operMap.set(operName, operCur);
+
+    // Setor (via cruzamento com veículos)
+    const veh = vehicleMap.get(l.equipmentId);
+    const sectorRaw = veh?.sector || 'AGRICOLA';
+    const sectorLabel = getSectorName(sectorRaw);
+    const secCur = secMap.get(sectorLabel) || { name: sectorLabel, liters: 0, cost: 0, count: 0 };
+    secCur.liters += liters;
+    secCur.cost += cost;
+    secCur.count += 1;
+    secMap.set(sectorLabel, secCur);
+
+    // Temporal
+    const dateKey = (l.dateTime || '').slice(0, 10);
+    if (dateKey) {
+      const tCur = timeMap.get(dateKey) || { date: dateKey, liters: 0, cost: 0 };
+      tCur.liters += liters;
+      tCur.cost += cost;
+      timeMap.set(dateKey, tCur);
+    }
+  });
+
+  const sortedEq = Array.from(eqMap.values()).sort((a, b) => b.liters - a.liters);
+  const sortedOp = Array.from(opMap.values()).sort((a, b) => b.liters - a.liters);
+  const sortedAct = Array.from(actMap.values()).sort((a, b) => b.liters - a.liters);
+  const sortedOper = Array.from(operMap.values()).sort((a, b) => b.liters - a.liters);
+  const sortedSec = Array.from(secMap.values()).sort((a, b) => b.liters - a.liters);
+  const sortedTime = Array.from(timeMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  const topEquipment = sortedEq[0];
+  const topOperator = sortedOp[0];
+  const topActivity = sortedAct[0];
+  const topOperation = sortedOper[0];
+  const topSector = sortedSec[0];
+
+  // ==========================================
+  // PÁGINA 1: DASHBOARD EXECUTIVO & GRÁFICOS
+  // ==========================================
+
+  // Cabeçalho Principal Verde Floresta
+  doc.setFillColor(15, 56, 34);
+  doc.rect(0, 0, 297, 23, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text(companyInfo.name.toUpperCase(), 14, 11);
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text(companyInfo.slogan, 14, 17);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.text('RELATÓRIO EXECUTIVO GERENCIAL', 283, 10, { align: 'right' });
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Emissão: ${formatDateTimeBR(new Date().toISOString())} • CNPJ: ${companyInfo.cnpj}`, 283, 17, { align: 'right' });
+
+  // Faixa de Contexto e Período
+  doc.setFillColor(243, 247, 244);
+  doc.setDrawColor(210, 225, 215);
+  doc.rect(14, 26, 269, 9, 'FD');
+
+  doc.setTextColor(20, 50, 30);
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Período Selecionado: ${dateRangeStr}`, 18, 32);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(80, 100, 90);
+  doc.text(`${totalCount} abastecimentos filtrados • ${appliedFiltersDesc}`, 280, 32, { align: 'right' });
+
+  // ------------------------------------------
+  // CARDS DE RESUMO GERENCIAL (Grid 4x2)
+  // ------------------------------------------
+  const cardsStartY = 38;
+  const cardW = 64.5;
+  const cardH = 15;
+  const cardGap = 4;
+
+  const kpiList = [
+    {
+      title: 'VOLUME TOTAL',
+      value: `${totalLiters.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} L`,
+      sub: `${totalCount} abastecimentos`,
+      color: [16, 110, 60]
+    },
+    {
+      title: 'INVESTIMENTO TOTAL',
+      value: canViewFinancial ? formatCurrency(totalCost) : 'Restrito (Admin)',
+      sub: canViewFinancial && totalLiters > 0 ? `Méd: ${formatCurrency(totalCost / totalLiters)}/L` : 'Perfil Operacional',
+      color: canViewFinancial ? [180, 100, 15] : [100, 110, 120]
+    },
+    {
+      title: 'MÉDIA POR ABASTECIMENTO',
+      value: `${avgLitersPerLog.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} L`,
+      sub: totalCount > 0 ? 'Média por operação' : 'Sem registros',
+      color: [14, 116, 144]
+    },
+    {
+      title: 'MÁQUINA MAIOR CONSUMO',
+      value: topEquipment ? `${topEquipment.name.slice(0, 18)}` : 'N/A',
+      sub: topEquipment ? `${topEquipment.liters.toLocaleString('pt-BR')} L (${totalLiters > 0 ? Math.round((topEquipment.liters / totalLiters) * 100) : 0}%)` : '-',
+      color: [120, 53, 15]
+    },
+    {
+      title: 'OPERADOR MAIOR VOLUME',
+      value: topOperator ? `${topOperator.name.slice(0, 18)}` : 'N/A',
+      sub: topOperator ? `${topOperator.liters.toLocaleString('pt-BR')} L (${topOperator.count} abastec.)` : '-',
+      color: [30, 64, 175]
+    },
+    {
+      title: 'ATIVIDADE COM MAIOR CONSUMO',
+      value: topActivity ? `${topActivity.name.slice(0, 18)}` : 'N/A',
+      sub: topActivity ? `${topActivity.liters.toLocaleString('pt-BR')} L (${totalLiters > 0 ? Math.round((topActivity.liters / totalLiters) * 100) : 0}%)` : '-',
+      color: [13, 148, 136]
+    },
+    {
+      title: 'OPERAÇÃO COM MAIOR CONSUMO',
+      value: topOperation ? `${topOperation.name.slice(0, 18)}` : 'N/A',
+      sub: topOperation ? `${topOperation.liters.toLocaleString('pt-BR')} L` : '-',
+      color: [109, 40, 217]
+    },
+    {
+      title: 'SETOR COM MAIOR CONSUMO',
+      value: topSector ? `${topSector.name.slice(0, 18)}` : 'N/A',
+      sub: topSector ? `${topSector.liters.toLocaleString('pt-BR')} L` : '-',
+      color: [157, 23, 77]
+    }
+  ];
+
+  kpiList.forEach((kpi, idx) => {
+    const col = idx % 4;
+    const row = Math.floor(idx / 4);
+    const x = 14 + col * (cardW + cardGap);
+    const y = cardsStartY + row * (cardH + 3);
+
+    // Fundo do card
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(220, 230, 225);
+    doc.rect(x, y, cardW, cardH, 'FD');
+
+    // Borda superior colorida indicativa
+    doc.setFillColor(kpi.color[0], kpi.color[1], kpi.color[2]);
+    doc.rect(x, y, cardW, 1.4, 'F');
+
+    // Título
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 115, 110);
+    doc.text(kpi.title, x + 2.5, y + 4.5);
+
+    // Valor Principal
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(kpi.color[0], kpi.color[1], kpi.color[2]);
+    doc.text(kpi.value, x + 2.5, y + 9.5);
+
+    // Subtítulo
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(110, 125, 120);
+    doc.text(kpi.sub, x + 2.5, y + 13.5);
+  });
+
+  // ------------------------------------------
+  // SEÇÃO DE GRÁFICOS VETORIAIS NATIVOS JSPDF
+  // ------------------------------------------
+  const chartSectionY = 74;
+  const panelW = 132.5;
+  const panelH = 59;
+
+  // Função auxiliar para desenhar quadro de gráfico
+  const drawChartBox = (x: number, y: number, w: number, h: number, title: string, subtitle: string) => {
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(215, 225, 220);
+    doc.rect(x, y, w, h, 'FD');
+
+    // Header do painel
+    doc.setFillColor(246, 249, 247);
+    doc.rect(x, y, w, 7.5, 'F');
+    doc.setDrawColor(225, 235, 230);
+    doc.line(x, y + 7.5, x + w, y + 7.5);
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(20, 60, 40);
+    doc.text(title, x + 3, y + 5);
+
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 115, 110);
+    doc.text(subtitle, x + w - 3, y + 5, { align: 'right' });
+  };
+
+  // 1. Gráfico Top Atividades (Top Left)
+  const g1X = 14;
+  const g1Y = chartSectionY;
+  drawChartBox(g1X, g1Y, panelW, panelH, '📊 CONSUMO POR ATIVIDADE (LITROS)', 'Top 5 Atividades');
+  const top5Activities = sortedAct.slice(0, 5);
+  const maxActLiters = top5Activities.length > 0 ? Math.max(...top5Activities.map(a => a.liters), 1) : 1;
+
+  if (top5Activities.length === 0) {
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text('Sem abastecimentos no período selecionado.', g1X + 15, g1Y + 25);
+  } else {
+    top5Activities.forEach((act, idx) => {
+      const itemY = g1Y + 11.5 + idx * 9.2;
+      const barMaxWidth = panelW - 54;
+      const barW = Math.max(2, (act.liters / maxActLiters) * barMaxWidth);
+      const pct = totalLiters > 0 ? ((act.liters / totalLiters) * 100).toFixed(1) : '0';
+
+      // Nome da Atividade
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(40, 50, 45);
+      doc.text(act.name.length > 18 ? `${act.name.slice(0, 16)}..` : act.name, g1X + 3, itemY + 3.2);
+
+      // Barra de fundo cinza
+      doc.setFillColor(240, 244, 242);
+      doc.rect(g1X + 34, itemY, barMaxWidth, 4.5, 'F');
+
+      // Barra preenchida verde esmeralda
+      doc.setFillColor(16, 140, 75);
+      doc.rect(g1X + 34, itemY, barW, 4.5, 'F');
+
+      // Valor à direita
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(20, 60, 40);
+      doc.text(`${act.liters.toLocaleString('pt-BR')} L (${pct}%)`, g1X + panelW - 3, itemY + 3.3, { align: 'right' });
+    });
+  }
+
+  // 2. Gráfico Top Equipamentos (Top Right)
+  const g2X = 150.5;
+  const g2Y = chartSectionY;
+  drawChartBox(g2X, g2Y, panelW, panelH, '🚜 CONSUMO POR EQUIPAMENTO / MÁQUINA', 'Top 5 Máquinas');
+  const top5Equipments = sortedEq.slice(0, 5);
+  const maxEqLiters = top5Equipments.length > 0 ? Math.max(...top5Equipments.map(e => e.liters), 1) : 1;
+
+  if (top5Equipments.length === 0) {
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text('Sem abastecimentos no período selecionado.', g2X + 15, g2Y + 25);
+  } else {
+    top5Equipments.forEach((eq, idx) => {
+      const itemY = g2Y + 11.5 + idx * 9.2;
+      const barMaxWidth = panelW - 54;
+      const barW = Math.max(2, (eq.liters / maxEqLiters) * barMaxWidth);
+      const pct = totalLiters > 0 ? ((eq.liters / totalLiters) * 100).toFixed(1) : '0';
+
+      // Nome e Placa
+      const label = eq.code ? `${eq.name.slice(0, 14)} (${eq.code.slice(0, 7)})` : eq.name.slice(0, 18);
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(40, 50, 45);
+      doc.text(label, g2X + 3, itemY + 3.2);
+
+      // Barra de fundo
+      doc.setFillColor(240, 244, 242);
+      doc.rect(g2X + 44, itemY, barMaxWidth - 10, 4.5, 'F');
+
+      // Barra âmbar / amarelo agro
+      doc.setFillColor(217, 119, 6);
+      doc.rect(g2X + 44, itemY, (barW / barMaxWidth) * (barMaxWidth - 10), 4.5, 'F');
+
+      // Valor à direita
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(140, 60, 10);
+      doc.text(`${eq.liters.toLocaleString('pt-BR')} L (${pct}%)`, g2X + panelW - 3, itemY + 3.3, { align: 'right' });
+    });
+  }
+
+  // 3. Gráfico Consumo por Setor (Bottom Left)
+  const g3X = 14;
+  const g3Y = chartSectionY + panelH + 4;
+  drawChartBox(g3X, g3Y, panelW, panelH, '🏷️ CONSUMO POR SETOR (CRUZAMENTO VEÍCULOS)', 'Distribuição por Setor');
+  const maxSecLiters = sortedSec.length > 0 ? Math.max(...sortedSec.map(s => s.liters), 1) : 1;
+
+  if (sortedSec.length === 0) {
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text('Sem abastecimentos no período selecionado.', g3X + 15, g3Y + 25);
+  } else {
+    sortedSec.slice(0, 5).forEach((sec, idx) => {
+      const itemY = g3Y + 11.5 + idx * 9.2;
+      const barMaxWidth = panelW - 54;
+      const barW = Math.max(2, (sec.liters / maxSecLiters) * barMaxWidth);
+      const pct = totalLiters > 0 ? ((sec.liters / totalLiters) * 100).toFixed(1) : '0';
+
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(40, 50, 45);
+      doc.text(sec.name.length > 18 ? `${sec.name.slice(0, 16)}..` : sec.name, g3X + 3, itemY + 3.2);
+
+      // Barra de fundo
+      doc.setFillColor(240, 244, 242);
+      doc.rect(g3X + 34, itemY, barMaxWidth, 4.5, 'F');
+
+      // Barra azul petróleo / ciano agro
+      doc.setFillColor(2, 132, 199);
+      doc.rect(g3X + 34, itemY, barW, 4.5, 'F');
+
+      // Valor à direita
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(2, 100, 160);
+      doc.text(`${sec.liters.toLocaleString('pt-BR')} L (${pct}%)`, g3X + panelW - 3, itemY + 3.3, { align: 'right' });
+    });
+  }
+
+  // 4. Gráfico Consumo Temporal por Período (Bottom Right)
+  const g4X = 150.5;
+  const g4Y = chartSectionY + panelH + 4;
+  drawChartBox(g4X, g4Y, panelW, panelH, '📅 CONSUMO TEMPORAL NO PERÍODO', 'Litros por Dia / Lançamento');
+
+  if (sortedTime.length === 0) {
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text('Sem abastecimentos no período selecionado.', g4X + 15, g4Y + 25);
+  } else {
+    // Amostragem de até 14 pontos para caber perfeitamente no painel
+    const timeSlice = sortedTime.slice(-14);
+    const maxTimeLiters = Math.max(...timeSlice.map(t => t.liters), 1);
+    const chartInnerW = panelW - 20;
+    const chartInnerH = panelH - 22;
+    const colStep = chartInnerW / Math.max(timeSlice.length, 1);
+    const barWidth = Math.min(colStep * 0.65, 8);
+
+    // Linha base
+    doc.setDrawColor(210, 220, 215);
+    doc.line(g4X + 10, g4Y + 14 + chartInnerH, g4X + 10 + chartInnerW, g4Y + 14 + chartInnerH);
+
+    timeSlice.forEach((pt, idx) => {
+      const colX = g4X + 10 + idx * colStep + (colStep - barWidth) / 2;
+      const barH = Math.max(1.5, (pt.liters / maxTimeLiters) * chartInnerH);
+      const barY = g4Y + 14 + chartInnerH - barH;
+
+      // Coluna vertical
+      doc.setFillColor(15, 118, 110);
+      doc.rect(colX, barY, barWidth, barH, 'F');
+
+      // Valor no topo se houver espaço
+      if (timeSlice.length <= 10) {
+        doc.setFontSize(5.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 90, 80);
+        doc.text(`${Math.round(pt.liters)}`, colX + barWidth / 2, barY - 1, { align: 'center' });
+      }
+
+      // Rótulo da data (DD/MM) abaixo
+      const [, m, d] = pt.date.split('-');
+      doc.setFontSize(5.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(90, 105, 100);
+      doc.text(`${d}/${m}`, colX + barWidth / 2, g4Y + 17 + chartInnerH, { align: 'center' });
+    });
+  }
+
+  // Rodapé da Página 1
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'italic');
+  doc.setTextColor(120, 135, 130);
+  doc.text('AndradeAgro • Sistema de Gestão de Abastecimento e Frotas • Relatório Executivo Gerencial', 14, 203);
+  doc.text('Página 1 (Resumo & Gráficos)', 283, 203, { align: 'right' });
+
+  // ==========================================
+  // PÁGINA 2 EM DIANTE: TABELA DETALHADA
+  // ==========================================
+  doc.addPage('a4', 'landscape');
+
+  // Cabeçalho resumido para páginas de dados
+  doc.setFillColor(15, 56, 34);
+  doc.rect(0, 0, 297, 16, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(13);
+  doc.setFont('helvetica', 'bold');
+  doc.text(companyInfo.name.toUpperCase(), 14, 9);
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Tabela Detalhada de Lançamentos • Período: ${dateRangeStr} • Total: ${logs.length} registros`, 14, 13.5);
+
+  doc.text(`Emitido em: ${formatDateTimeBR(new Date().toISOString())}`, 283, 10, { align: 'right' });
+
+  // Tabela com ou sem colunas financeiras
+  const tableData = logs.map(log => {
+    const row = [
+      formatDateTimeBR(log.dateTime),
+      log.equipmentPlateOrCode || '-',
+      log.equipmentName,
+      log.driverOrOperatorName,
+      `${getOperationTypeName(log.operationType)}${log.activityType ? ' - ' + getActivityTypeName(log.activityType, log.operationType) : ''}`,
+      log.gasStationName,
+      getFuelTypeName(log.fuelType),
+      `${log.liters} L`
+    ];
+
+    if (canViewFinancial) {
+      row.push(formatCurrency(log.pricePerLiter));
+      row.push(formatCurrency(log.totalValue));
+    }
+
+    row.push(log.calculatedAverageKmPerLiter ? `${log.calculatedAverageKmPerLiter} km/L` : log.calculatedAverageLitersPerHour ? `${log.calculatedAverageLitersPerHour} L/h` : '-');
+    return row;
+  });
+
+  const headCols = canViewFinancial
+    ? ['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Motorista/Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'R$/L', 'Total R$', 'Média']
+    : ['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Motorista/Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'Média'];
+
+  const footCols = canViewFinancial
+    ? ['TOTAL', `${logs.length} reg.`, '-', '-', '-', '-', '-', `${totalLiters.toLocaleString('pt-BR')} L`, '-', formatCurrency(totalCost), '-']
+    : ['TOTAL', `${logs.length} reg.`, '-', '-', '-', '-', '-', `${totalLiters.toLocaleString('pt-BR')} L`, '-'];
+
+  autoTable(doc, {
+    startY: 21,
+    head: [headCols],
+    body: tableData,
+    foot: [footCols],
+    showHead: 'everyPage',
+    theme: 'grid',
+    headStyles: {
+      fillColor: [20, 78, 46],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7.5
+    },
+    footStyles: {
+      fillColor: [230, 240, 234],
+      textColor: [15, 56, 34],
+      fontStyle: 'bold',
+      fontSize: 8
+    },
+    styles: {
+      fontSize: 6.8,
+      cellPadding: 1.4
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 248]
+    },
+    didDrawPage: (data) => {
+      // Rodapé em cada página adicional
+      const pageNumber = (doc as any).internal.getCurrentPageInfo().pageNumber;
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(120, 135, 130);
+      doc.text(`AndradeAgro • Relatório Executivo Gerencial • ${dateRangeStr}`, 14, 203);
+      doc.text(`Página ${pageNumber}`, 283, 203, { align: 'right' });
+    }
+  });
+
+  doc.save(`AndradeAgro_Relatorio_Executivo_${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+// Excel / CSV Export Function - Tradicional
+export function exportFuelLogsCSV(logs: FuelLog[], fileName: string = 'Abastecimentos_AndradeAgro', canViewFinancial: boolean = true) {
   const headers = [
     'Data/Hora',
     'ID Equipamento',
@@ -571,47 +1136,263 @@ export function exportFuelLogsCSV(logs: FuelLog[], fileName: string = 'Abastecim
     'Frentista / Atendente',
     'Posto',
     'Tipo de Combustível',
-    'Litros',
-    'Valor por Litro (R$)',
-    'Valor Total (R$)',
+    'Litros'
+  ];
+
+  if (canViewFinancial) {
+    headers.push('Valor por Litro (R$)');
+    headers.push('Valor Total (R$)');
+  }
+
+  headers.push(
     'KM no Abastecimento',
     'Horímetro no Abastecimento',
     'Média km/L',
-    'Média L/h',
-    'Custo por KM (R$)',
-    'Custo por Hora (R$)',
-    'Observações'
-  ];
+    'Média L/h'
+  );
 
-  const rows = logs.map(l => [
-    `"${formatDateTimeBR(l.dateTime)}"`,
-    `"${l.equipmentId}"`,
-    `"${l.equipmentCategory}"`,
-    `"${l.equipmentPlateOrCode}"`,
-    `"${l.equipmentName.replace(/"/g, '""')}"`,
-    `"${getOperationTypeName(l.operationType)}"`,
-    `"${l.activityType ? getActivityTypeName(l.activityType, l.operationType) : ''}"`,
-    `"${l.driverOrOperatorName.replace(/"/g, '""')}"`,
-    `"${l.attendantName.replace(/"/g, '""')}"`,
-    `"${l.gasStationName.replace(/"/g, '""')}"`,
-    `"${getFuelTypeName(l.fuelType)}"`,
-    l.liters,
-    l.pricePerLiter,
-    l.totalValue,
-    l.kmAtFueling ?? '',
-    l.hourmeterAtFueling ?? '',
-    l.calculatedAverageKmPerLiter ?? '',
-    l.calculatedAverageLitersPerHour ?? '',
-    l.costPerKm ?? '',
-    l.costPerHour ?? '',
-    `"${(l.observations || '').replace(/"/g, '""')}"`
-  ]);
+  if (canViewFinancial) {
+    headers.push('Custo por KM (R$)');
+    headers.push('Custo por Hora (R$)');
+  }
+
+  headers.push('Observações');
+
+  const rows = logs.map(l => {
+    const row = [
+      `"${formatDateTimeBR(l.dateTime)}"`,
+      `"${l.equipmentId}"`,
+      `"${l.equipmentCategory}"`,
+      `"${l.equipmentPlateOrCode}"`,
+      `"${(l.equipmentName || '').replace(/"/g, '""')}"`,
+      `"${getOperationTypeName(l.operationType)}"`,
+      `"${l.activityType ? getActivityTypeName(l.activityType, l.operationType) : ''}"`,
+      `"${(l.driverOrOperatorName || '').replace(/"/g, '""')}"`,
+      `"${(l.attendantName || '').replace(/"/g, '""')}"`,
+      `"${(l.gasStationName || '').replace(/"/g, '""')}"`,
+      `"${getFuelTypeName(l.fuelType)}"`,
+      l.liters
+    ];
+
+    if (canViewFinancial) {
+      row.push(l.pricePerLiter as any);
+      row.push(l.totalValue as any);
+    }
+
+    row.push(
+      l.kmAtFueling ?? '' as any,
+      l.hourmeterAtFueling ?? '' as any,
+      l.calculatedAverageKmPerLiter ?? '' as any,
+      l.calculatedAverageLitersPerHour ?? '' as any
+    );
+
+    if (canViewFinancial) {
+      row.push(l.costPerKm ?? '' as any);
+      row.push(l.costPerHour ?? '' as any);
+    }
+
+    row.push(`"${(l.observations || '').replace(/"/g, '""')}"`);
+    return row;
+  });
 
   const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(';'), ...rows.map(e => e.join(';'))].join('\n');
   const encodedUri = encodeURI(csvContent);
   const link = document.createElement('a');
   link.setAttribute('href', encodedUri);
   link.setAttribute('download', `${fileName}_${new Date().toISOString().slice(0, 10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+// Exportação Completa e Estruturada: Relatório Gerencial
+export function exportManagerialCSV(options: {
+  logs: FuelLog[];
+  vehicles: Vehicle[];
+  dateRangeStr: string;
+  canViewFinancial: boolean;
+  companyName: string;
+}) {
+  const { logs, vehicles, dateRangeStr, canViewFinancial, companyName } = options;
+
+  const totalLiters = logs.reduce((acc, l) => acc + (l.liters || 0), 0);
+  const totalCost = logs.reduce((acc, l) => acc + (l.totalValue || 0), 0);
+  const totalCount = logs.length;
+  const avgLiters = totalCount > 0 ? totalLiters / totalCount : 0;
+
+  // Mapa de setores dos veículos
+  const vehicleMap = new Map<string, Vehicle>();
+  vehicles.forEach(v => {
+    if (v.id) vehicleMap.set(v.id, v);
+  });
+
+  // Agrupamentos
+  const actMap = new Map<string, { liters: number; cost: number; count: number }>();
+  const operMap = new Map<string, { liters: number; cost: number; count: number }>();
+  const eqMap = new Map<string, { name: string; code: string; sector: string; liters: number; cost: number; count: number }>();
+  const secMap = new Map<string, { liters: number; cost: number; count: number }>();
+
+  logs.forEach(l => {
+    const liters = l.liters || 0;
+    const cost = l.totalValue || 0;
+    const act = getEffectiveActivityName(l);
+    const oper = getEffectiveCategoryName(l);
+    const veh = vehicleMap.get(l.equipmentId);
+    const sector = getSectorName(veh?.sector || 'AGRICOLA');
+
+    // Atividade
+    const a = actMap.get(act) || { liters: 0, cost: 0, count: 0 };
+    a.liters += liters; a.cost += cost; a.count += 1;
+    actMap.set(act, a);
+
+    // Operação
+    const o = operMap.get(oper) || { liters: 0, cost: 0, count: 0 };
+    o.liters += liters; o.cost += cost; o.count += 1;
+    operMap.set(oper, o);
+
+    // Equipamento
+    const eqKey = l.equipmentId || l.equipmentName;
+    const eq = eqMap.get(eqKey) || { name: l.equipmentName, code: l.equipmentPlateOrCode, sector, liters: 0, cost: 0, count: 0 };
+    eq.liters += liters; eq.cost += cost; eq.count += 1;
+    eqMap.set(eqKey, eq);
+
+    // Setor
+    const s = secMap.get(sector) || { liters: 0, cost: 0, count: 0 };
+    s.liters += liters; s.cost += cost; s.count += 1;
+    secMap.set(sector, s);
+  });
+
+  const lines: string[] = [];
+
+  // Seção 1: Cabeçalho
+  lines.push(`"# RELATÓRIO GERENCIAL DE ABASTECIMENTOS - ${companyName.toUpperCase()}"`);
+  lines.push(`"# Período: ${dateRangeStr} | Gerado em: ${formatDateTimeBR(new Date().toISOString())}"`);
+  lines.push('');
+
+  // Seção 2: Resumo Gerencial
+  lines.push('"# --- RESUMO GERENCIAL ---"');
+  lines.push('Indicador;Valor');
+  lines.push(`"Total de Abastecimentos";${totalCount}`);
+  lines.push(`"Volume Total Abastecido (Litros)";${totalLiters.toFixed(1)}`);
+  lines.push(`"Média de Litros por Abastecimento";${avgLiters.toFixed(1)}`);
+  if (canViewFinancial) {
+    lines.push(`"Investimento Total (R$)";${totalCost.toFixed(2)}`);
+    lines.push(`"Custo Médio por Litro (R$)";${totalLiters > 0 ? (totalCost / totalLiters).toFixed(2) : '0.00'}`);
+  }
+  lines.push('');
+
+  // Seção 3: Consumo por Atividade
+  lines.push('"# --- CONSUMO POR ATIVIDADE ---"');
+  lines.push(canViewFinancial ? 'Atividade;Litros;Percentual;Qtd Abastecimentos;Valor Total (R$)' : 'Atividade;Litros;Percentual;Qtd Abastecimentos');
+  Array.from(actMap.entries())
+    .sort((a, b) => b[1].liters - a[1].liters)
+    .forEach(([name, data]) => {
+      const pct = totalLiters > 0 ? ((data.liters / totalLiters) * 100).toFixed(1) + '%' : '0%';
+      if (canViewFinancial) {
+        lines.push(`"${name}";${data.liters.toFixed(1)};${pct};${data.count};${data.cost.toFixed(2)}`);
+      } else {
+        lines.push(`"${name}";${data.liters.toFixed(1)};${pct};${data.count}`);
+      }
+    });
+  lines.push('');
+
+  // Seção 4: Consumo por Operação
+  lines.push('"# --- CONSUMO POR OPERAÇÃO ---"');
+  lines.push(canViewFinancial ? 'Operação;Litros;Percentual;Qtd Abastecimentos;Valor Total (R$)' : 'Operação;Litros;Percentual;Qtd Abastecimentos');
+  Array.from(operMap.entries())
+    .sort((a, b) => b[1].liters - a[1].liters)
+    .forEach(([name, data]) => {
+      const pct = totalLiters > 0 ? ((data.liters / totalLiters) * 100).toFixed(1) + '%' : '0%';
+      if (canViewFinancial) {
+        lines.push(`"${name}";${data.liters.toFixed(1)};${pct};${data.count};${data.cost.toFixed(2)}`);
+      } else {
+        lines.push(`"${name}";${data.liters.toFixed(1)};${pct};${data.count}`);
+      }
+    });
+  lines.push('');
+
+  // Seção 5: Consumo por Equipamento (Top Máquinas)
+  lines.push('"# --- CONSUMO POR EQUIPAMENTO ---"');
+  lines.push(canViewFinancial ? 'Equipamento;Placa/Código;Setor;Litros;Percentual;Qtd Abastecimentos;Valor Total (R$)' : 'Equipamento;Placa/Código;Setor;Litros;Percentual;Qtd Abastecimentos');
+  Array.from(eqMap.values())
+    .sort((a, b) => b.liters - a.liters)
+    .forEach(e => {
+      const pct = totalLiters > 0 ? ((e.liters / totalLiters) * 100).toFixed(1) + '%' : '0%';
+      if (canViewFinancial) {
+        lines.push(`"${e.name}";"${e.code}";"${e.sector}";${e.liters.toFixed(1)};${pct};${e.count};${e.cost.toFixed(2)}`);
+      } else {
+        lines.push(`"${e.name}";"${e.code}";"${e.sector}";${e.liters.toFixed(1)};${pct};${e.count}`);
+      }
+    });
+  lines.push('');
+
+  // Seção 6: Consumo por Setor
+  lines.push('"# --- CONSUMO POR SETOR ---"');
+  lines.push(canViewFinancial ? 'Setor;Litros;Percentual;Qtd Abastecimentos;Valor Total (R$)' : 'Setor;Litros;Percentual;Qtd Abastecimentos');
+  Array.from(secMap.entries())
+    .sort((a, b) => b[1].liters - a[1].liters)
+    .forEach(([name, data]) => {
+      const pct = totalLiters > 0 ? ((data.liters / totalLiters) * 100).toFixed(1) + '%' : '0%';
+      if (canViewFinancial) {
+        lines.push(`"${name}";${data.liters.toFixed(1)};${pct};${data.count};${data.cost.toFixed(2)}`);
+      } else {
+        lines.push(`"${name}";${data.liters.toFixed(1)};${pct};${data.count}`);
+      }
+    });
+  lines.push('');
+
+  // Seção 7: Lançamentos Detalhados
+  lines.push('"# --- LANÇAMENTOS DETALHADOS ---"');
+  const headers = [
+    'Data/Hora',
+    'ID Equipamento',
+    'Placa / Código',
+    'Nome Equipamento',
+    'Tipo de Operação',
+    'Atividade',
+    'Motorista / Operador',
+    'Posto',
+    'Combustível',
+    'Litros'
+  ];
+  if (canViewFinancial) {
+    headers.push('R$/L', 'Total R$');
+  }
+  headers.push('KM', 'Horímetro', 'Média');
+  lines.push(headers.join(';'));
+
+  logs.forEach(l => {
+    const row = [
+      `"${formatDateTimeBR(l.dateTime)}"`,
+      `"${l.equipmentId}"`,
+      `"${l.equipmentPlateOrCode}"`,
+      `"${(l.equipmentName || '').replace(/"/g, '""')}"`,
+      `"${getOperationTypeName(l.operationType)}"`,
+      `"${l.activityType ? getActivityTypeName(l.activityType, l.operationType) : ''}"`,
+      `"${(l.driverOrOperatorName || '').replace(/"/g, '""')}"`,
+      `"${(l.gasStationName || '').replace(/"/g, '""')}"`,
+      `"${getFuelTypeName(l.fuelType)}"`,
+      l.liters
+    ];
+
+    if (canViewFinancial) {
+      row.push(l.pricePerLiter as any, l.totalValue as any);
+    }
+
+    row.push(
+      l.kmAtFueling ?? '' as any,
+      l.hourmeterAtFueling ?? '' as any,
+      (l.calculatedAverageKmPerLiter ? `${l.calculatedAverageKmPerLiter} km/L` : l.calculatedAverageLitersPerHour ? `${l.calculatedAverageLitersPerHour} L/h` : '-') as any
+    );
+
+    lines.push(row.join(';'));
+  });
+
+  const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + lines.join('\n');
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement('a');
+  link.setAttribute('href', encodedUri);
+  link.setAttribute('download', `AndradeAgro_Relatorio_Gerencial_${new Date().toISOString().slice(0, 10)}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

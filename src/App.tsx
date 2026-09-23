@@ -732,6 +732,7 @@ export default function App() {
                 vehicles={vehicles}
                 gasStations={gasStations}
                 users={users}
+                currentUser={currentUser}
                 settings={settings}
                 darkMode={darkMode}
               />

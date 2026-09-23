@@ -1,7 +1,6 @@
 import webpushLib from 'web-push';
 import fs from 'fs';
 import path from 'path';
-import defaultDbData from '../../data/db.json';
 import { initializeApp, getApps, cert, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 
@@ -42,9 +41,6 @@ function cleanKey(k?: string): string {
  */
 function loadFallbackDbKeys(): { publicKey?: string; privateKey?: string; subject?: string } {
   try {
-    if ((defaultDbData as any)?.andradeagro_vapid_keys) {
-      return (defaultDbData as any).andradeagro_vapid_keys;
-    }
     const candidates = [
       path.join(process.cwd(), 'data', 'db.json'),
       path.join('/tmp', 'andradeagro_db.json')
@@ -59,7 +55,11 @@ function loadFallbackDbKeys(): { publicKey?: string; privateKey?: string; subjec
       }
     }
   } catch {}
-  return {};
+  return {
+    publicKey: OFFICIAL_VAPID_PUBLIC_KEY,
+    privateKey: 'jIzx37tfbmK5NxYiLQYbcze3XSBg9Il6kBLeDW6zQxA',
+    subject: 'mailto:suporte@andradeagro.com.br'
+  };
 }
 
 const fallbackDbKeys = loadFallbackDbKeys();
@@ -440,12 +440,6 @@ let inMemoryStore: {
 
 function loadStore() {
   try {
-    if (inMemoryStore.devices.length === 0 && Array.isArray((defaultDbData as any)?.andradeagro_user_devices_v1)) {
-      inMemoryStore.devices = (defaultDbData as any).andradeagro_user_devices_v1;
-    }
-    if (inMemoryStore.processedEvents.length === 0 && Array.isArray((defaultDbData as any)?.andradeagro_processed_push_events)) {
-      inMemoryStore.processedEvents = (defaultDbData as any).andradeagro_processed_push_events;
-    }
     const dbPath = getDbFilePath();
     if (fs.existsSync(dbPath)) {
       const raw = fs.readFileSync(dbPath, 'utf-8');
@@ -487,38 +481,50 @@ function saveStore() {
 
 loadStore();
 
+export interface ActiveAuthorizedDevicesResult {
+  activeDevices: PushDeviceRecord[];
+  totalDevices: number;
+  querySuccess: boolean;
+  queryError?: string;
+  source: 'FIREBASE_ADMIN' | 'FIRESTORE_REST' | 'LOCAL_STORE';
+}
+
 /**
- * Consulta de todos os dispositivos ativos com resiliência:
- * 1. Dispositivos locais em memória/disco
- * 2. Firebase Admin SDK (se credenciado) com timeout de 3.5s
- * 3. Firestore REST API com timeout de 3.5s
- * NUNCA utiliza Firebase Web SDK no servidor, evitando bloqueio do runtime.
+ * FONTE ÚNICA DA REGRA DE NEGÓCIO PARA DISPOSITIVOS ATIVOS E AUTORIZADOS
+ * Regra unificada para AI Studio e Vercel:
+ *  - Mesmo projeto Firebase (andrade-agro)
+ *  - Mesma coleção 'user_devices'
+ *  - Mesma estrutura de dados
+ *  - Mesmos critérios de dispositivos ativos/autorizados
+ *  - Identificação estável e deduplicação estrita por endpoint de subscription
  */
-export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
+export async function getActiveAuthorizedDevices(options?: {
+  targetUserId?: string;
+  directSubscription?: any;
+  directUserName?: string;
+  directUserRole?: string;
+}): Promise<ActiveAuthorizedDevicesResult> {
   loadStore();
-  const deviceMap = new Map<string, PushDeviceRecord>();
+  const endpointMap = new Map<string, { record: PushDeviceRecord; timestamp: number; active: boolean }>();
+  let source: 'FIREBASE_ADMIN' | 'FIRESTORE_REST' | 'LOCAL_STORE' = 'LOCAL_STORE';
+  let querySuccess = false;
+  let queryError: string | undefined = undefined;
 
-  // 1. Dispositivos locais
-  for (const d of inMemoryStore.devices) {
-    if (d.endpoint && d.active !== false && isValidPushSubscription(d.subscription)) {
-      deviceMap.set(d.endpoint, d);
-    }
-  }
-
-  // 2. Consulta via Firebase Admin SDK
+  // 1. Prioridade: Firebase Admin SDK (Produção Vercel / Servidor com credencial de Service Account)
   lastFirestoreQueryError = null;
   const adminDb = getFirebaseAdminDb();
   if (adminDb) {
     try {
-      console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Consultando Firestore via Firebase Admin SDK...`);
+      console.log(`[AndradeAgro PushEngine] [ETAPA 3/10] Firestore acessado via Firebase Admin: Projeto "${firebaseConfig.projectId}", Coleção "user_devices"`);
+      console.log(`[AndradeAgro PushEngine] [ETAPA 4/10] user_devices consultado via Admin SDK...`);
       const adminPromise = adminDb.collection('user_devices').get();
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Timeout Firebase Admin (3500ms)')), 3500)
       );
       const snap = await Promise.race([adminPromise, timeoutPromise]);
-      console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Firebase Admin retornou ${snap.size} documento(s) em 'user_devices'.`);
-      
-      const adminDocMap = new Map<string, { record: PushDeviceRecord; timestamp: number; active: boolean }>();
+      querySuccess = true;
+      source = 'FIREBASE_ADMIN';
+      console.log(`[AndradeAgro PushEngine] [ETAPA 4/10] Firebase Admin retornou ${snap.size} documento(s) brutos em 'user_devices'.`);
 
       snap.forEach((docSnap) => {
         const data = docSnap.data() as any;
@@ -527,10 +533,10 @@ export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
           if (endpoint && isValidPushSubscription(data.subscription)) {
             const docUpdatedAt = data.updatedAt || data.createdAt || '';
             const docTimestamp = docUpdatedAt ? new Date(docUpdatedAt).getTime() : 0;
-            const existing = adminDocMap.get(endpoint);
+            const existing = endpointMap.get(endpoint);
 
             if (!existing || docTimestamp >= existing.timestamp) {
-              adminDocMap.set(endpoint, {
+              endpointMap.set(endpoint, {
                 record: {
                   id: docSnap.id,
                   userId: data.userId || '',
@@ -550,43 +556,114 @@ export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
           }
         }
       });
+    } catch (adminErr: any) {
+      queryError = adminErr?.message || 'Falha ao consultar Firebase Admin';
+      lastFirestoreQueryError = queryError;
+      console.warn(`[AndradeAgro PushEngine] [ETAPA 4/10] Aviso na consulta do Firebase Admin:`, queryError);
+    }
+  }
 
-      for (const item of adminDocMap.values()) {
-        if (item.active) {
-          deviceMap.set(item.record.endpoint, item.record);
-        } else {
-          deviceMap.delete(item.record.endpoint);
+  // 2. Fallback: Consulta via Firestore REST API (caso Admin não esteja credenciado no ambiente)
+  if (!querySuccess) {
+    console.log(`[AndradeAgro PushEngine] [ETAPA 3/10] Firestore acessado via REST API: Projeto "${firebaseConfig.projectId}", Coleção "user_devices"`);
+    console.log(`[AndradeAgro PushEngine] [ETAPA 4/10] user_devices consultado via Firestore REST...`);
+    const restResult = await fetchFirestoreDevicesRest();
+    if (restResult.devices && restResult.devices.length > 0) {
+      querySuccess = true;
+      source = 'FIRESTORE_REST';
+      for (const d of restResult.devices) {
+        const docTimestamp = d.updatedAt ? new Date(d.updatedAt).getTime() : 0;
+        const existing = endpointMap.get(d.endpoint);
+        if (!existing || docTimestamp >= existing.timestamp) {
+          endpointMap.set(d.endpoint, {
+            record: d,
+            timestamp: docTimestamp,
+            active: d.active !== false
+          });
         }
       }
-
-      const result = Array.from(deviceMap.values());
-      console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado via Admin: ${result.length} dispositivo(s).`);
-      return result;
-    } catch (adminErr: any) {
-      console.warn(`[AndradeAgro PushEngine] [ETAPA 3/6] Aviso na consulta do Firebase Admin:`, adminErr?.message || adminErr);
-      lastFirestoreQueryError = adminErr?.message || 'Falha ao consultar Firebase Admin';
+    } else if (restResult.error) {
+      queryError = restResult.error;
+      lastFirestoreQueryError = restResult.error;
     }
   }
 
-  // 3. Consulta via Firestore REST
-  const restResult = await fetchFirestoreDevicesRest();
-  if (restResult.devices && restResult.devices.length > 0) {
-    for (const d of restResult.devices) {
-      deviceMap.set(d.endpoint, d);
+  // 3. Fallback: Base persistente local em memória/disco
+  if (endpointMap.size === 0 && inMemoryStore.devices.length > 0) {
+    source = 'LOCAL_STORE';
+    for (const d of inMemoryStore.devices) {
+      if (d.endpoint && isValidPushSubscription(d.subscription)) {
+        const docTimestamp = d.updatedAt ? new Date(d.updatedAt).getTime() : 0;
+        const existing = endpointMap.get(d.endpoint);
+        if (!existing || docTimestamp >= existing.timestamp) {
+          endpointMap.set(d.endpoint, {
+            record: d,
+            timestamp: docTimestamp,
+            active: d.active !== false
+          });
+        }
+      }
     }
-    const result = Array.from(deviceMap.values());
-    console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado via REST: ${result.length} dispositivo(s).`);
-    return result;
+    if (!querySuccess && inMemoryStore.devices.length > 0) {
+      querySuccess = true;
+    }
   }
 
-  if (restResult.error) {
-    lastFirestoreQueryError = restResult.error;
-    console.warn(`[AndradeAgro PushEngine] [ETAPA 3/6] Aviso na consulta REST do Firestore: ${restResult.error}`);
+  // 4. Se uma subscrição direta do cliente foi enviada na chamada (ex: botão de teste no painel)
+  if (options?.directSubscription && isValidPushSubscription(options.directSubscription)) {
+    const directEp = options.directSubscription.endpoint;
+    const directId = getStableDeviceId(directEp);
+    endpointMap.set(directEp, {
+      record: {
+        id: directId,
+        userId: options.targetUserId || 'direct-user',
+        userName: options.directUserName || 'Usuário Atual',
+        userRole: options.directUserRole || 'ADMIN',
+        endpoint: directEp,
+        subscription: options.directSubscription,
+        active: true,
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      },
+      timestamp: Date.now(),
+      active: true
+    });
+    querySuccess = true;
   }
 
-  const result = Array.from(deviceMap.values());
-  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado de dispositivos ativos no repositório: ${result.length}`);
-  return result;
+  const allConsolidated = Array.from(endpointMap.values());
+  const totalDevices = allConsolidated.length;
+
+  // Filtragem da Regra de Negócio:
+  // - Apenas dispositivos com active !== false
+  // - Apenas subscrições válidas com endpoint https://
+  // - Filtragem por targetUserId se solicitado
+  const activeDevices = allConsolidated
+    .filter(item => item.active && item.record.active !== false)
+    .map(item => item.record)
+    .filter(d => {
+      if (!isValidPushSubscription(d.subscription)) return false;
+      if (options?.targetUserId && d.userId !== options.targetUserId) return false;
+      return true;
+    });
+
+  console.log(`[AndradeAgro PushEngine] [ETAPA 5/10] Dispositivos encontrados: ${activeDevices.length} ativo(s) e elegível(eis) de ${totalDevices} total(is) analisados (Fonte: ${source}).`);
+
+  return {
+    activeDevices,
+    totalDevices,
+    querySuccess,
+    queryError,
+    source
+  };
+}
+
+/**
+ * Consulta de todos os dispositivos ativos mantida para compatibilidade retroativa
+ */
+export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
+  const result = await getActiveAuthorizedDevices();
+  return result.activeDevices;
 }
 
 export async function deactivateEndpointEverywhere(endpoint: string) {
@@ -780,28 +857,25 @@ export async function getDevicesList(): Promise<any[]> {
 }
 
 export async function getEngineStatus(): Promise<any> {
-  const devices = await fetchAllActiveDevices();
-  const activeValid = devices.filter(
-    d => d.active !== false && d.subscription && isValidPushSubscription(d.subscription)
-  );
-
-  const queryOk = devices.length > 0 || !lastFirestoreQueryError;
+  const result = await getActiveAuthorizedDevices();
+  const queryOk = result.querySuccess;
 
   return {
     success: queryOk,
     querySuccess: queryOk,
-    queryError: devices.length === 0 && lastFirestoreQueryError ? lastFirestoreQueryError : undefined,
+    queryError: !queryOk && result.queryError ? result.queryError : undefined,
     vapidConfigured: Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY),
     vapidPublicKey: VAPID_PUBLIC_KEY,
     firebaseAdmin: getFirebaseAdminDiagnostics(),
-    totalDevices: devices.length,
-    activeAuthorizedCount: activeValid.length,
-    authorizedDevices: activeValid.map(d => ({
+    totalDevices: result.totalDevices,
+    activeAuthorizedCount: result.activeDevices.length,
+    authorizedDevices: result.activeDevices.map(d => ({
       userName: d.userName,
       userRole: d.userRole,
       platform: d.deviceInfo?.platform || 'desconhecido',
       updatedAt: d.updatedAt
-    }))
+    })),
+    source: result.source
   };
 }
 
@@ -867,46 +941,14 @@ export async function dispatchPushToAuthorizedUsers(event: {
     directUserRole
   } = event;
 
-  // ETAPA 1: Request recebido no servidor
-  console.log(`[AndradeAgro PushEngine] [ETAPA 1/6] Requisição de disparo recebida: EventType=${eventType}, EventId=${eventId}, Alvo=${targetUserId || 'TODOS'}, Operador=${directUserName || 'N/A'}`);
+  // [ETAPA 1/10] Requisição recebida
+  console.log(`[AndradeAgro PushEngine] [ETAPA 1/10] Requisição de disparo recebida: EventType=${eventType}, EventId=${eventId}, Alvo=${targetUserId || 'TODOS'}, Operador=${directUserName || 'N/A'}`);
 
-  // ETAPA 2: Auditoria de credenciais VAPID e Firebase
-  const hasVapidPublic = Boolean(VAPID_PUBLIC_KEY && VAPID_PUBLIC_KEY.length > 20);
-  const hasVapidPrivate = Boolean(VAPID_PRIVATE_KEY && VAPID_PRIVATE_KEY.length > 20);
-  const hasVapidSubject = Boolean(VAPID_SUBJECT && VAPID_SUBJECT.length > 5);
-  const hasFirebaseAdmin = Boolean(getFirebaseAdminDb());
+  // [ETAPA 2/10] Firebase Admin inicializado / verificado
+  const adminDb = getFirebaseAdminDb();
+  const hasFirebaseAdmin = Boolean(adminDb);
   const hasFirebaseCreds = Boolean(hasFirebaseAdmin || (firebaseConfig.apiKey && firebaseConfig.projectId));
-
-  console.log('[AndradeAgro PushEngine] [ETAPA 2/6] Auditoria de variáveis de ambiente:');
-  console.log(`  - VAPID_PUBLIC_KEY: ${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}`);
-  console.log(`  - VAPID_PRIVATE_KEY: ${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'}`);
-  console.log(`  - VAPID_SUBJECT: ${hasVapidSubject ? 'PRESENTE' : 'AUSENTE'}`);
-  console.log(`  - Firebase Admin SDK: ${hasFirebaseAdmin ? 'INICIALIZADO' : 'NÃO CONFIGURADO (usando fallback)'}`);
-
-  if (!hasVapidPrivate || !hasVapidPublic) {
-    const varError = `Configuração VAPID incompleta (VAPID_PUBLIC_KEY: ${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}, VAPID_PRIVATE_KEY: ${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'})`;
-    console.error(`[AndradeAgro PushEngine] [ETAPA 6/6] ERRO TÉCNICO: ${varError}`);
-    return {
-      success: false,
-      duplicate: false,
-      sentCount: 0,
-      failedCount: 0,
-      recipientsCount: 0,
-      stage: 'variaveis_ambiente',
-      errors: [varError],
-      diagnostics: {
-        etapa1_requestReceived: true,
-        etapa2_envVars: {
-          vapidPublicKey: hasVapidPublic ? 'PRESENTE' : 'AUSENTE',
-          vapidPrivateKey: hasVapidPrivate ? 'PRESENTE' : 'AUSENTE',
-          vapidSubject: hasVapidSubject ? 'PRESENTE' : 'AUSENTE',
-          firebaseCredentials: hasFirebaseCreds ? 'PRESENTE' : 'AUSENTE'
-        },
-        etapa6_technicalError: varError
-      },
-      message: `Erro na ETAPA 2: ${varError}`
-    };
-  }
+  console.log(`[AndradeAgro PushEngine] [ETAPA 2/10] Firebase Admin status: ${hasFirebaseAdmin ? 'INICIALIZADO (Service Account)' : 'NÃO INICIALIZADO (modo fallback)'}`);
 
   // Deduplication check
   loadStore();
@@ -965,110 +1007,58 @@ export async function dispatchPushToAuthorizedUsers(event: {
     }
   });
 
-  // ETAPA 3: Obter dispositivos elegíveis de forma rápida e segura
-  const allDevices: PushDeviceRecord[] = [];
-
-  // Se uma subscrição direta do cliente foi enviada junto com o payload (ex: botão "Testar notificação")
-  // Adicionamos ela imediatamente à lista com prioridade máxima
-  if (directSubscription && isValidPushSubscription(directSubscription)) {
-    const directRecord: PushDeviceRecord = {
-      id: getStableDeviceId(directSubscription.endpoint),
-      userId: targetUserId || 'direct-test-user',
-      userName: directUserName || 'Usuário Atual',
-      userRole: directUserRole || 'ADMIN',
-      endpoint: directSubscription.endpoint,
-      subscription: directSubscription,
-      active: true,
-      updatedAt: new Date().toISOString(),
-      createdAt: new Date().toISOString()
-    };
-    allDevices.push(directRecord);
-    console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Dispositivo direto incluído com prioridade: ${directUserName || 'Operador'}`);
-  }
-
-  // Se for TEST e já tivermos a subscrição direta do usuário que acionou o teste,
-  // NÃO consultamos os outros dispositivos remotos do Firestore para que a resposta seja instantânea (< 800ms)
-  // e totalmente imune ao timeout de 10s da Vercel!
-  const isDirectTest = eventType === 'TEST' && allDevices.length > 0;
-
-  if (!isDirectTest) {
-    // Consulta do repositório/Firestore com timeout de proteção estrito (máximo 2500ms)
-    try {
-      const fetchPromise = fetchAllActiveDevices();
-      const timeoutPromise = new Promise<PushDeviceRecord[]>((resolve) =>
-        setTimeout(() => {
-          console.warn('[AndradeAgro PushEngine] Timeout de segurança de 2500ms atingido na busca de dispositivos. Prosseguindo.');
-          resolve([]);
-        }, 2500)
-      );
-      const remoteDevices = await Promise.race([fetchPromise, timeoutPromise]);
-      for (const d of remoteDevices) {
-        if (!allDevices.some(existing => existing.endpoint === d.endpoint)) {
-          allDevices.push(d);
-        }
-      }
-    } catch (fetchErr: any) {
-      console.warn('[AndradeAgro PushEngine] Aviso ao consultar dispositivos:', fetchErr?.message || fetchErr);
-    }
-  } else {
-    console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Teste direto identificado. Pulando busca de terceiros para resposta instantânea (< 800ms).`);
-  }
-
-  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Total consolidado de dispositivos elegíveis para este disparo: ${allDevices.length}`);
-
-  // Filtragem e validação dos destinatários
-  const targets = allDevices.filter(d => {
-    if (d.active === false) return false;
-    if (!d.subscription || !d.subscription.endpoint) return false;
-    if (!isValidPushSubscription(d.subscription)) {
-      console.warn(`[AndradeAgro PushEngine] [ETAPA 3/6] Token inválido/expirado para ${d.userName}. Desativando.`);
-      deactivateEndpointEverywhere(d.endpoint).catch(() => null);
-      return false;
-    }
-    if (eventType !== 'TEST' && targetUserId) return d.userId === targetUserId;
-    return true;
+  // [ETAPA 3, 4, 5] Firestore acessado, user_devices consultado, dispositivos encontrados
+  // UNIFICADO: Utiliza a mesma função getActiveAuthorizedDevices()
+  const devicesResult = await getActiveAuthorizedDevices({
+    targetUserId: eventType !== 'TEST' ? targetUserId : undefined,
+    directSubscription,
+    directUserName,
+    directUserRole
   });
 
-  console.log(`[AndradeAgro PushEngine] [ETAPA 3/6] Destinatários elegíveis e validados para envio: ${targets.length} dispositivo(s).`);
+  const targets = devicesResult.activeDevices;
+  console.log(`[AndradeAgro PushEngine] [ETAPA 5/10] Dispositivos encontrados: ${targets.length} ativo(s) e elegível(eis) de ${devicesResult.totalDevices} total(is).`);
 
   if (targets.length === 0) {
-    const isQueryFailure = Boolean(lastFirestoreQueryError && allDevices.length === 0);
-    const noDevicesMsg = isQueryFailure
-      ? `Falha ao consultar dispositivos no Firestore: ${lastFirestoreQueryError}`
+    const noDevicesMsg = !devicesResult.querySuccess && devicesResult.queryError
+      ? `Falha ao consultar dispositivos no Firestore: ${devicesResult.queryError}`
       : 'Nenhum dispositivo registrado com permissão ativa e credenciais válidas encontrado no servidor.';
-    console.warn(`[AndradeAgro PushEngine] [ETAPA 6/6] ${isQueryFailure ? 'ERRO NA CONSULTA' : 'NENHUM DISPOSITIVO'}: ${noDevicesMsg}`);
+    console.warn(`[AndradeAgro PushEngine] [ETAPA 5/10] Aviso: ${noDevicesMsg}`);
     return {
       success: false,
       duplicate: false,
       sentCount: 0,
       failedCount: 0,
       recipientsCount: 0,
-      stage: isQueryFailure ? 'consulta_firestore' : 'busca_dispositivos',
+      stage: 'busca_dispositivos',
       errors: [noDevicesMsg],
-      diagnostics: {
-        etapa1_requestReceived: true,
-        etapa2_envVars: {
-          vapidPublicKey: 'PRESENTE',
-          vapidPrivateKey: 'PRESENTE',
-          vapidSubject: 'PRESENTE',
-          firebaseCredentials: hasFirebaseCreds ? 'PRESENTE' : 'AUSENTE'
-        },
-        etapa3_devicesFound: allDevices.length,
-        etapa3_validTargets: 0,
-        etapa6_technicalError: noDevicesMsg
-      },
       message: noDevicesMsg
     };
   }
 
-  // ETAPA 4: Tentativa de envio iniciada
-  console.log(`[AndradeAgro PushEngine] [ETAPA 4/6] Tentativa de envio iniciada para ${targets.length} dispositivo(s). Assunto: "${title}"`);
+  // [ETAPA 6/10] VAPID carregado
+  const hasVapidPublic = Boolean(VAPID_PUBLIC_KEY && VAPID_PUBLIC_KEY.length > 20);
+  const hasVapidPrivate = Boolean(VAPID_PRIVATE_KEY && VAPID_PRIVATE_KEY.length > 20);
+  const hasVapidSubject = Boolean(VAPID_SUBJECT && VAPID_SUBJECT.length > 5);
 
-  let sentCount = 0;
-  let failedCount = 0;
-  const invalidEndpoints: string[] = [];
-  const errors: string[] = [];
+  console.log(`[AndradeAgro PushEngine] [ETAPA 6/10] VAPID carregado: Public=${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}, Private=${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'}, Subject=${VAPID_SUBJECT}`);
 
+  if (!hasVapidPrivate || !hasVapidPublic) {
+    const varError = `Configuração VAPID incompleta (VAPID_PUBLIC_KEY: ${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}, VAPID_PRIVATE_KEY: ${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'})`;
+    console.error(`[AndradeAgro PushEngine] [ETAPA 6/10] ERRO TÉCNICO: ${varError}`);
+    return {
+      success: false,
+      duplicate: false,
+      sentCount: 0,
+      failedCount: 0,
+      recipientsCount: targets.length,
+      stage: 'variaveis_ambiente',
+      errors: [varError],
+      message: `Erro na ETAPA 6: ${varError}`
+    };
+  }
+
+  // [ETAPA 7/10] web-push inicializado
   const vapidOptions = {
     vapidDetails: {
       subject: VAPID_SUBJECT,
@@ -1077,8 +1067,16 @@ export async function dispatchPushToAuthorizedUsers(event: {
     },
     TTL: 86400
   };
+  console.log(`[AndradeAgro PushEngine] [ETAPA 7/10] web-push inicializado com opções VAPID prontas.`);
 
-  // Disparo para os serviços Push com timeout individual por dispositivo (máximo 3500ms)
+  // [ETAPA 8/10] Envio iniciado
+  console.log(`[AndradeAgro PushEngine] [ETAPA 8/10] Envio iniciado para ${targets.length} dispositivo(s). Assunto: "${title}"`);
+
+  let sentCount = 0;
+  let failedCount = 0;
+  const invalidEndpoints: string[] = [];
+  const errors: string[] = [];
+
   await Promise.all(
     targets.map(async (device) => {
       try {
@@ -1088,14 +1086,14 @@ export async function dispatchPushToAuthorizedUsers(event: {
         );
         const pushRes = await Promise.race([sendPromise, timeoutSend]);
         sentCount++;
-        console.log(`[AndradeAgro PushEngine] [ETAPA 5/6] Sucesso no envio para ${device.userName} (${device.deviceInfo?.platform || 'dispositivo'}) - Código HTTP ${pushRes?.statusCode || 201}`);
+        console.log(`[AndradeAgro PushEngine] [ETAPA 8/10] Sucesso no envio para ${device.userName} (${device.deviceInfo?.platform || 'dispositivo'}) - HTTP ${pushRes?.statusCode || 201}`);
       } catch (err: any) {
         failedCount++;
         const statusCode = err?.statusCode || 'ERR';
         const msg = err?.body || err?.message || 'Falha de comunicação com serviço push';
         const detail = `${device.userName}: Status ${statusCode} - ${msg}`;
         errors.push(detail);
-        console.warn(`[AndradeAgro PushEngine] [ETAPA 5/6] Falha no envio para ${device.userName}: ${detail}`);
+        console.warn(`[AndradeAgro PushEngine] [ETAPA 8/10] Falha no envio para ${device.userName}: ${detail}`);
         if (err?.statusCode === 404 || err?.statusCode === 410) {
           invalidEndpoints.push(device.subscription.endpoint);
         }
@@ -1110,13 +1108,9 @@ export async function dispatchPushToAuthorizedUsers(event: {
     }
   }
 
-  // ETAPA 6: Finalização técnica
+  // [ETAPA 9/10] Envio concluído
   const isSuccess = sentCount > 0;
-  if (!isSuccess) {
-    console.error(`[AndradeAgro PushEngine] [ETAPA 6/6] ERRO TÉCNICO REAL: Nenhuma notificação entregue. Falhas: ${errors.join('; ')}`);
-  } else {
-    console.log(`[AndradeAgro PushEngine] [ETAPA 6/6] Concluído com êxito: ${sentCount} entregue(s) com sucesso.`);
-  }
+  console.log(`[AndradeAgro PushEngine] [ETAPA 9/10] Envio concluído: ${sentCount} enviado(s) com sucesso, ${failedCount} falha(s).`);
 
   return {
     success: isSuccess,
@@ -1126,21 +1120,6 @@ export async function dispatchPushToAuthorizedUsers(event: {
     recipientsCount: targets.length,
     stage: isSuccess ? 'sucesso' : 'servico_push',
     errors: errors.length > 0 ? errors : undefined,
-    diagnostics: {
-      etapa1_requestReceived: true,
-      etapa2_envVars: {
-        vapidPublicKey: 'PRESENTE',
-        vapidPrivateKey: 'PRESENTE',
-        vapidSubject: 'PRESENTE',
-        firebaseCredentials: hasFirebaseCreds ? 'PRESENTE' : 'AUSENTE'
-      },
-      etapa3_devicesFound: allDevices.length,
-      etapa3_validTargets: targets.length,
-      etapa4_dispatchAttempted: true,
-      etapa5_pushResponded: true,
-      etapa6_technicalStatus: isSuccess ? 'OK' : 'FALHA',
-      etapa6_errors: errors
-    },
     message: isSuccess
       ? `Notificação entregue com sucesso para ${sentCount} de ${targets.length} dispositivo(s).` + (failedCount > 0 ? ` (${failedCount} falha(s))` : '')
       : `Falha ao entregar push para ${failedCount} dispositivo(s): ${errors.join('; ')}`

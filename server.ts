@@ -270,6 +270,69 @@ async function startServer() {
     return Array.from(deviceMap.values());
   }
 
+  // UNIFIED DEVICE SELECTION: getActiveAuthorizedDevices
+  async function getActiveAuthorizedDevices(options?: {
+    targetUserId?: string;
+    directSubscription?: any;
+    directUserName?: string;
+    directUserRole?: string;
+  }) {
+    const devices = await fetchRegisteredDevices();
+    const endpointMap = new Map<string, { record: any; timestamp: number; active: boolean }>();
+
+    for (const d of devices) {
+      if (d.endpoint && isValidPushSubscription(d.subscription)) {
+        const docUpdatedAt = d.updatedAt || d.createdAt || '';
+        const docTimestamp = docUpdatedAt ? new Date(docUpdatedAt).getTime() : 0;
+        const existing = endpointMap.get(d.endpoint);
+        if (!existing || docTimestamp >= existing.timestamp) {
+          endpointMap.set(d.endpoint, {
+            record: d,
+            timestamp: docTimestamp,
+            active: d.active !== false
+          });
+        }
+      }
+    }
+
+    if (options?.directSubscription && isValidPushSubscription(options.directSubscription)) {
+      const ep = options.directSubscription.endpoint;
+      endpointMap.set(ep, {
+        record: {
+          id: getStableDeviceId(ep),
+          userId: options.targetUserId || 'direct-test-user',
+          userName: options.directUserName || 'Usuário Atual',
+          userRole: options.directUserRole || 'USUARIO',
+          endpoint: ep,
+          subscription: options.directSubscription,
+          deviceInfo: {},
+          active: true,
+          updatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString()
+        },
+        timestamp: Date.now(),
+        active: true
+      });
+    }
+
+    const allConsolidated = Array.from(endpointMap.values());
+    const activeDevices = allConsolidated
+      .filter(item => item.active && item.record.active !== false)
+      .map(item => item.record)
+      .filter(d => {
+        if (!isValidPushSubscription(d.subscription)) return false;
+        if (options?.targetUserId && d.userId !== options.targetUserId) return false;
+        return true;
+      });
+
+    return {
+      activeDevices,
+      totalDevices: allConsolidated.length,
+      querySuccess: true,
+      source: 'FIRESTORE'
+    };
+  }
+
   async function deactivateEndpoint(endpoint: string) {
     // 1. Update local database
     let devices: any[] = serverDb['andradeagro_user_devices_v1'] || [];
@@ -383,56 +446,16 @@ async function startServer() {
 
     console.log(`[Push Notification] [1. Início] Preparando envio de ${eventType} (ID: ${eventId})`);
 
-    // Fetch all active devices (Firestore + Local DB)
-    const allDevices: any[] = [];
-
-    // If direct test subscription was passed and valid, register/ensure it with highest priority
-    if (directSubscription && isValidPushSubscription(directSubscription)) {
-      allDevices.push({
-        id: getStableDeviceId(directSubscription.endpoint),
-        userId: targetUserId || 'direct-test-user',
-        userName: directUserName || 'Usuário Atual',
-        userRole: directUserRole || 'USUARIO',
-        endpoint: directSubscription.endpoint,
-        subscription: directSubscription,
-        deviceInfo: {},
-        active: true,
-        updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString()
-      });
-    }
-
-    // Se for teste e já tiver subscrição direta do remetente, envia direto para ele sem esperar consulta externa
-    const isDirectTest = eventType === 'TEST' && allDevices.length > 0;
-    if (!isDirectTest) {
-      try {
-        const remoteDevices = await fetchRegisteredDevices();
-        for (const d of remoteDevices) {
-          if (!allDevices.some(existing => existing.endpoint === d.endpoint)) {
-            allDevices.push(d);
-          }
-        }
-      } catch (fErr: any) {
-        console.warn('[Push Notification] Warning fetching devices in server.ts:', fErr?.message || fErr);
-      }
-    } else {
-      console.log('[Push Notification] Teste direto identificado em server.ts. Envio imediato para o dispositivo remetente.');
-    }
-
-    // Step 2 & 3: Filter and validate target devices
-    const targetDevices = allDevices.filter(d => {
-      if (d.active === false) return false;
-      if (!d.subscription || !d.subscription.endpoint) return false;
-      if (!isValidPushSubscription(d.subscription)) {
-        console.warn(`[Push Notification] [3. Validação] Dispositivo ${d.userName} (${d.endpoint.slice(0, 30)}...) possui token/chave inválida. Desativando.`);
-        deactivateEndpoint(d.endpoint).catch(() => null);
-        return false;
-      }
-      if (eventType !== 'TEST' && targetUserId) return d.userId === targetUserId;
-      return true;
+    // Fetch active authorized devices using the unified function
+    const devicesResult = await getActiveAuthorizedDevices({
+      targetUserId: eventType !== 'TEST' ? targetUserId : undefined,
+      directSubscription,
+      directUserName,
+      directUserRole
     });
 
-    console.log(`[Push Notification] [2. Dispositivos] Encontrados ${targetDevices.length} dispositivo(s) válido(s) e ativo(s) para receber push.`);
+    const targetDevices = devicesResult.activeDevices;
+    console.log(`[Push Notification] [2. Dispositivos] Encontrados ${targetDevices.length} dispositivo(s) válido(s) e ativo(s) de ${devicesResult.totalDevices} totais.`);
 
     if (targetDevices.length === 0) {
       return {
@@ -690,21 +713,19 @@ async function startServer() {
 
   app.get(['/api/notifications/status', '/api/notificacoes/status'], async (req, res) => {
     try {
-      const devices = await fetchRegisteredDevices();
-      const activeDevices = devices.filter(d => 
-        d.active !== false && d.subscription && d.subscription.endpoint
-      );
+      const result = await getActiveAuthorizedDevices();
       res.json({
         vapidConfigured: true,
         vapidPublicKey: vapidKeys.publicKey,
-        totalDevices: devices.length,
-        activeAuthorizedCount: activeDevices.length,
-        authorizedDevices: activeDevices.map(d => ({
+        totalDevices: result.totalDevices,
+        activeAuthorizedCount: result.activeDevices.length,
+        authorizedDevices: result.activeDevices.map(d => ({
           userName: d.userName,
           userRole: d.userRole,
           platform: d.deviceInfo?.platform || 'desconhecido',
           updatedAt: d.updatedAt
-        }))
+        })),
+        source: result.source
       });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to get status' });

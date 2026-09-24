@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import webpushLib from 'web-push';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, collection, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
@@ -120,9 +121,34 @@ async function startServer() {
   loadDatabase();
 
   // Web Push / FCM VAPID Configuration Setup
-  const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
+  const OFFICIAL_VAPID_PUBLIC_KEY = 'BGk3AhmnXVavteh2WDsz5PLh4flo97VKKiLbTByKGeT7nSCgGrhm2LVdMgIpcYAt7Kih5zfOWJeJrev6h5mW6ig';
 
   const wp = (webpushLib as any).default || webpushLib;
+
+  function verifyVapidKeyPair(pubKey: string, privKey: string) {
+    const pubPrefix = pubKey ? `${pubKey.slice(0, 8)}...${pubKey.slice(-6)}` : 'AUSENTE';
+    if (!pubKey) return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave pública VAPID ausente.' };
+    if (!privKey) return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave privada VAPID ausente no ambiente (VAPID_PRIVATE_KEY não informada).' };
+    try {
+      const ecdh = crypto.createECDH('prime256v1');
+      ecdh.setPrivateKey(Buffer.from(privKey, 'base64url'));
+      const derivedPub = ecdh.getPublicKey('base64url');
+      const derivedPrefix = `${derivedPub.slice(0, 8)}...${derivedPub.slice(-6)}`;
+      if (derivedPub === pubKey) {
+        return { matches: true, publicKeyPrefix: pubPrefix, privateKeyConfigured: true, derivedPublicKeyPrefix: derivedPrefix };
+      } else {
+        return {
+          matches: false,
+          publicKeyPrefix: pubPrefix,
+          privateKeyConfigured: true,
+          derivedPublicKeyPrefix: derivedPrefix,
+          error: `Inconsistência de par VAPID: A chave pública configurada é a do Firebase (${pubPrefix}), porém a chave privada no backend pertence ao par anterior (${derivedPrefix}). Atualize a variável VAPID_PRIVATE_KEY no Vercel com a chave privada correspondente do Firebase.`
+        };
+      }
+    } catch (err: any) {
+      return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: true, error: 'Formato de chave privada VAPID inválido: ' + (err?.message || err) };
+    }
+  }
 
   // 1. Prioridade: Variáveis de ambiente (Vercel)
   // 2. Fallback: data/db.json (Google AI Studio)
@@ -137,11 +163,12 @@ async function startServer() {
 
   const vapidSubject = (process.env.VAPID_SUBJECT || dbVapidKeys.subject || 'mailto:suporte@andradeagro.com.br').trim().replace(/^["']|["']$/g, '');
   try {
-    if (vapidKeys.publicKey && vapidKeys.privateKey) {
+    const keyCheck = verifyVapidKeyPair(vapidKeys.publicKey, vapidKeys.privateKey);
+    if (keyCheck.matches) {
       wp.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
-      console.log('[Push Notification] Web Push VAPID setup successfully configured.');
+      console.log(`[Push Notification] Web Push VAPID setup successfully configured com chave do Firebase (${keyCheck.publicKeyPrefix}).`);
     } else {
-      console.warn('[Push Notification] Chaves VAPID incompletas no servidor.');
+      console.warn(`[Push Notification] Configuração VAPID pendente/divergente: ${keyCheck.error}`);
     }
   } catch (err) {
     console.error('[Push Notification] Error configuring VAPID:', err);
@@ -469,6 +496,23 @@ async function startServer() {
       };
     }
 
+    // Step 3.5: Validate VAPID key pair
+    const keyCheck = verifyVapidKeyPair(vapidKeys.publicKey, vapidKeys.privateKey);
+    if (!keyCheck.matches) {
+      const keyError = keyCheck.error || 'Configuração VAPID incompleta ou divergente';
+      console.warn(`[Push Notification] [Aviso VAPID] ${keyError}`);
+      return {
+        success: false,
+        duplicate: false,
+        sentCount: 0,
+        failedCount: 0,
+        recipientsCount: targetDevices.length,
+        stage: 'validacao_chaves',
+        errors: [keyError],
+        message: keyError
+      };
+    }
+
     let sentCount = 0;
     let failedCount = 0;
     const invalidEndpoints: string[] = [];
@@ -714,8 +758,13 @@ async function startServer() {
   app.get(['/api/notifications/status', '/api/notificacoes/status'], async (req, res) => {
     try {
       const result = await getActiveAuthorizedDevices();
+      const keyCheck = verifyVapidKeyPair(vapidKeys.publicKey, vapidKeys.privateKey);
       res.json({
-        vapidConfigured: true,
+        vapidConfigured: keyCheck.matches,
+        vapidKeyPairMatches: keyCheck.matches,
+        vapidPublicKeyPrefix: keyCheck.publicKeyPrefix,
+        vapidPrivateKeyConfigured: keyCheck.privateKeyConfigured,
+        vapidError: !keyCheck.matches ? keyCheck.error : undefined,
         vapidPublicKey: vapidKeys.publicKey,
         totalDevices: result.totalDevices,
         activeAuthorizedCount: result.activeDevices.length,

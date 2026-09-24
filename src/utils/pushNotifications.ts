@@ -4,10 +4,10 @@ import { doc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore'
 
 /**
  * Chave pública VAPID oficial do sistema AndradeAgro (RFC 8292).
+ * Sincronizada diretamente com o Firebase Console (Cloud Messaging -> Certificados de push da Web).
  * Chave pública padrão para validação e assinatura Web Push no navegador do dispositivo.
- * O par privado correspondente reside com segurança exclusiva no servidor backend.
  */
-export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
+export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGk3AhmnXVavteh2WDsz5PLh4flo97VKKiLbTByKGeT7nSCgGrhm2LVdMgIpcYAt7Kih5zfOWJeJrev6h5mW6ig';
 
 /**
  * Interface para respostas seguras de API com diagnóstico técnico completo.
@@ -298,9 +298,17 @@ async function getOrRenewSubscription(
     }
 
     if (keyMismatch) {
-      console.log('[Push Notification] Chave VAPID mudou ou expirou. Renovando inscrição no PushManager...');
+      console.log('[Push Notification] Chave VAPID mudou para a nova chave do Firebase. Renovando inscrição no PushManager...');
+      const oldEndpoint = sub.endpoint;
       await sub.unsubscribe().catch(() => {});
       sub = null;
+      if (oldEndpoint) {
+        safeApiFetch('/api/notifications/unsubscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: oldEndpoint })
+        }).catch(() => {});
+      }
     }
   }
 
@@ -1084,6 +1092,8 @@ export interface PushDiagnosticsInfo {
   pushManagerAvailable: boolean;
   hasLocalSubscription: boolean;
   localSubscriptionEndpoint?: string;
+  localSubscriptionKeySnippet?: string;
+  keyMismatchWithServer?: boolean;
   vapidPublicKeySnippet?: string;
   isPWA: boolean;
   isMobile: boolean;
@@ -1103,6 +1113,18 @@ export async function getPushDiagnosticsInfo(): Promise<PushDiagnosticsInfo> {
   let swAct = false;
   let hasSub = false;
   let endpoint = '';
+  let subKeySnippet = '';
+  let keyMismatch = false;
+
+  let vapidSnippet = '';
+  let activePublicKey = OFFICIAL_VAPID_PUBLIC_KEY;
+  try {
+    const key = await getVapidPublicKey().catch(() => OFFICIAL_VAPID_PUBLIC_KEY);
+    if (key && key.length > 16) {
+      activePublicKey = key;
+      vapidSnippet = `${key.slice(0, 8)}...${key.slice(-8)}`;
+    }
+  } catch {}
 
   if (supported && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
@@ -1114,20 +1136,30 @@ export async function getPushDiagnosticsInfo(): Promise<PushDiagnosticsInfo> {
         if (sub && sub.endpoint) {
           hasSub = true;
           endpoint = sub.endpoint;
+          if (sub.options?.applicationServerKey) {
+            try {
+              const rawKey = sub.options.applicationServerKey;
+              const subKeyBytes = new Uint8Array(rawKey);
+              const targetKeyBytes = urlBase64ToUint8Array(activePublicKey);
+              if (subKeyBytes.length !== targetKeyBytes.length || !subKeyBytes.every((b, i) => b === targetKeyBytes[i])) {
+                keyMismatch = true;
+              }
+              // Base64 snippet
+              let binary = '';
+              for (let i = 0; i < Math.min(10, subKeyBytes.length); i++) {
+                binary += String.fromCharCode(subKeyBytes[i]);
+              }
+              subKeySnippet = `${btoa(binary).slice(0, 8)}...`;
+            } catch {
+              keyMismatch = false;
+            }
+          }
         }
       }
     } catch (e) {
       console.warn('[Push Notification] Falha ao inspecionar SW:', e);
     }
   }
-
-  let vapidSnippet = '';
-  try {
-    const key = await getVapidPublicKey().catch(() => OFFICIAL_VAPID_PUBLIC_KEY);
-    if (key && key.length > 16) {
-      vapidSnippet = `${key.slice(0, 8)}...${key.slice(-8)}`;
-    }
-  } catch {}
 
   return {
     supported,
@@ -1137,6 +1169,8 @@ export async function getPushDiagnosticsInfo(): Promise<PushDiagnosticsInfo> {
     pushManagerAvailable: Boolean(typeof window !== 'undefined' && 'PushManager' in window),
     hasLocalSubscription: hasSub,
     localSubscriptionEndpoint: endpoint ? `${endpoint.slice(0, 40)}...` : undefined,
+    localSubscriptionKeySnippet: subKeySnippet || undefined,
+    keyMismatchWithServer: keyMismatch,
     vapidPublicKeySnippet: vapidSnippet,
     isPWA: dev.isPWA,
     isMobile: dev.isMobile,

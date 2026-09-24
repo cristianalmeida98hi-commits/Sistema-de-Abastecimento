@@ -337,6 +337,19 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
         </div>
       )}
 
+      {/* Alerta de chave renovada no Firebase */}
+      {diagnostics?.keyMismatchWithServer && (
+        <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-200 flex items-start gap-2.5">
+          <RefreshCw className="w-4 h-4 text-[#FACC15] shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <span className="font-bold text-amber-300">Atualização de Chaves VAPID do Firebase</span>
+            <p className="text-[11px] text-emerald-200/90">
+              O sistema migrou para a nova chave pública oficial do Firebase Console (<span className="font-mono text-emerald-300">{diagnostics.vapidPublicKeySnippet}</span>). Clique em <strong>"Sincronizar Dispositivo"</strong> para atualizar sua credencial local.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Diagnostic status strip */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
         {/* Permissão do Navegador */}
@@ -590,7 +603,7 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
             <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
               <span className="text-slate-400 block">Chave VAPID Pública Ativa:</span>
               <span className="font-mono text-emerald-300">
-                {diagnostics?.vapidPublicKeySnippet || 'BGidTH8J...V3H4s'}
+                {diagnostics?.vapidPublicKeySnippet || 'BGk3Ahmn...6ig'}
               </span>
             </div>
 

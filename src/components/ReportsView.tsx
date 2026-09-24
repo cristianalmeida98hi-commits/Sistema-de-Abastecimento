@@ -8,7 +8,7 @@ import {
 import { FuelLog, Vehicle, GasStation, User, SystemSettings } from '../types';
 import { 
   formatCurrency, formatDateTimeBR, formatDateBR, getFuelTypeName, getSectorName, 
-  exportFuelLogsPDF, exportExecutiveReportPDF, exportFuelLogsCSV, exportManagerialCSV,
+  exportFuelLogsPDF, exportExecutiveReportPDF, exportFuelLogsExcelWithCharts, exportFuelLogsCSV, exportManagerialCSV,
   getConsumptionByCategory, getConsumptionByActivity, getEffectiveActivityName,
   getEffectiveCategoryName, getOperationTypeName, getActivityTypeName 
 } from '../utils/calculations';
@@ -266,15 +266,36 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
   const categoryBreakdown = useMemo(() => getConsumptionByCategory(filteredLogs), [filteredLogs]);
   const activityBreakdown = useMemo(() => getConsumptionByActivity(filteredLogs), [filteredLogs]);
 
-  // Exportação 1: PDF Oficial Tradicional (Tabela com ou sem colunas financeiras)
+  // Exportação 1: PDF Oficial Tradicional (Tabela com Gráficos Dinâmicos no Final)
   const handleExportPDF = async () => {
     try {
       setIsExporting('pdf-oficial');
+      const dateRangeStr = `${startDate ? formatDateBR(startDate) : 'Início'} a ${endDate ? formatDateBR(endDate) : 'Hoje'}`;
+      let filterDesc = 'Todos os equipamentos e postos';
+      if (selectedCategory !== 'ALL') filterDesc = `Categoria: ${selectedCategory}`;
+      if (selectedEquipmentId !== 'ALL') {
+        const eq = vehicles.find(v => v.id === selectedEquipmentId);
+        filterDesc = `Equipamento: ${eq?.model || selectedEquipmentId}`;
+      }
+      if (selectedDriverId !== 'ALL') {
+        const op = users.find(u => u.id === selectedDriverId);
+        filterDesc += ` • Operador: ${op?.name || selectedDriverId}`;
+      }
+      if (selectedStationId !== 'ALL') {
+        const st = gasStations.find(s => s.id === selectedStationId);
+        filterDesc += ` • Posto: ${st?.name || selectedStationId}`;
+      }
+
       await exportFuelLogsPDF(
         filteredLogs,
         `Relatório Oficial de Abastecimentos (${startDate || 'Início'} a ${endDate || 'Hoje'})`,
         { name: settings.companyName, slogan: settings.slogan, cnpj: settings.cnpj },
-        canViewFinancial
+        canViewFinancial,
+        {
+          vehicles,
+          appliedFiltersDesc: filterDesc,
+          dateRangeStr
+        }
       );
     } catch (err) {
       console.error('Erro ao gerar PDF Oficial:', err);
@@ -283,7 +304,7 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
     }
   };
 
-  // Exportação 2: NOVO PDF Executivo Completo (Dashboard, Resumo Gerencial e Gráficos Vetoriais)
+  // Exportação 2: PDF Executivo Completo (Tabela Completa e Gráficos no Final)
   const handleExportExecutivePDF = async () => {
     try {
       setIsExporting('pdf-executivo');
@@ -293,6 +314,14 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
       if (selectedEquipmentId !== 'ALL') {
         const eq = vehicles.find(v => v.id === selectedEquipmentId);
         filterDesc = `Equipamento: ${eq?.model || selectedEquipmentId}`;
+      }
+      if (selectedDriverId !== 'ALL') {
+        const op = users.find(u => u.id === selectedDriverId);
+        filterDesc += ` • Operador: ${op?.name || selectedDriverId}`;
+      }
+      if (selectedStationId !== 'ALL') {
+        const st = gasStations.find(s => s.id === selectedStationId);
+        filterDesc += ` • Posto: ${st?.name || selectedStationId}`;
       }
 
       await exportExecutiveReportPDF({
@@ -305,6 +334,41 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
       });
     } catch (err) {
       console.error('Erro ao gerar PDF Executivo:', err);
+    } finally {
+      setIsExporting(null);
+    }
+  };
+
+  // Exportação 3: EXCEL (.xlsx) com Gráficos Analíticos Incorporados na Mesma Planilha
+  const handleExportExcel = async () => {
+    try {
+      setIsExporting('excel');
+      const dateRangeStr = `${startDate ? formatDateBR(startDate) : 'Início'} a ${endDate ? formatDateBR(endDate) : 'Hoje'}`;
+      let filterDesc = 'Todos os equipamentos e postos';
+      if (selectedCategory !== 'ALL') filterDesc = `Categoria: ${selectedCategory}`;
+      if (selectedEquipmentId !== 'ALL') {
+        const eq = vehicles.find(v => v.id === selectedEquipmentId);
+        filterDesc = `Equipamento: ${eq?.model || selectedEquipmentId}`;
+      }
+      if (selectedDriverId !== 'ALL') {
+        const op = users.find(u => u.id === selectedDriverId);
+        filterDesc += ` • Operador: ${op?.name || selectedDriverId}`;
+      }
+      if (selectedStationId !== 'ALL') {
+        const st = gasStations.find(s => s.id === selectedStationId);
+        filterDesc += ` • Posto: ${st?.name || selectedStationId}`;
+      }
+
+      await exportFuelLogsExcelWithCharts({
+        logs: filteredLogs,
+        vehicles,
+        companyInfo: { name: settings.companyName, slogan: settings.slogan, cnpj: settings.cnpj },
+        dateRangeStr,
+        canViewFinancial,
+        appliedFiltersDesc: filterDesc
+      });
+    } catch (err) {
+      console.error('Erro ao gerar Excel com Gráficos:', err);
     } finally {
       setIsExporting(null);
     }
@@ -348,36 +412,47 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Novo Botão: PDF Executivo Completo */}
+          {/* Botão: PDF Executivo Completo */}
           <button
             onClick={handleExportExecutivePDF}
             disabled={isExporting !== null}
             className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow-md flex items-center gap-2 transition active:scale-95 disabled:opacity-50"
-            title="Gera PDF completo com Resumo Gerencial, KPIs e Gráficos Vetoriais"
+            title="Gera PDF completo com cabeçalho, tabela completa e gráficos no final do documento"
           >
             <Award className="w-4 h-4 text-amber-300" />
-            <span>{isExporting === 'pdf-executivo' ? 'Gerando Executivo...' : 'PDF Executivo Completo'}</span>
+            <span>{isExporting === 'pdf-executivo' ? 'Gerando PDF...' : 'PDF com Gráficos'}</span>
           </button>
 
-          {/* Botão Mantido: PDF Oficial (Tabela) */}
+          {/* Botão: Excel (.xlsx com Gráficos) */}
+          <button
+            onClick={handleExportExcel}
+            disabled={isExporting !== null}
+            className="bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow-md flex items-center gap-2 transition active:scale-95 disabled:opacity-50"
+            title="Exporta planilha Excel (.xlsx) com tabela completa e gráficos incorporados na mesma planilha após a última linha"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-teal-200" />
+            <span>{isExporting === 'excel' ? 'Gerando Excel...' : 'Excel com Gráficos (.xlsx)'}</span>
+          </button>
+
+          {/* Botão: PDF Oficial (Tabela) */}
           <button
             onClick={handleExportPDF}
             disabled={isExporting !== null}
             className="bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow-md flex items-center gap-2 transition active:scale-95 disabled:opacity-50"
-            title="Gera relatório em PDF com a tabela oficial de lançamentos"
+            title="Gera relatório em PDF com a tabela oficial de lançamentos e resumo analítico"
           >
             <FileText className="w-4 h-4" />
             <span>{isExporting === 'pdf-oficial' ? 'Gerando Tabela...' : 'PDF Oficial (Tabela)'}</span>
           </button>
 
-          {/* Novo Botão: Exportar Relatório Gerencial */}
+          {/* Botão Mantido: Exportar Relatório Gerencial */}
           <button
             onClick={handleExportManagerialCSV}
             className="bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2.5 rounded-xl shadow-md flex items-center gap-2 transition active:scale-95"
             title="Exporta planilha estruturada com Resumo, Atividades, Equipamentos e Lançamentos"
           >
             <Download className="w-4 h-4 text-emerald-300" />
-            <span>Relatório Gerencial</span>
+            <span>Relatório Gerencial (CSV)</span>
           </button>
 
           {/* Botão Mantido: Exportar CSV (Lançamentos) */}

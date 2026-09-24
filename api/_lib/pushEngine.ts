@@ -1,6 +1,7 @@
 import webpushLib from 'web-push';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { initializeApp, getApps, cert, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 
@@ -29,11 +30,65 @@ export interface PushDeviceRecord {
   createdAt: string;
 }
 
-export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
+/**
+ * Chave pública VAPID oficial do Firebase Console (Cloud Messaging -> Certificados de push da Web)
+ */
+export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGk3AhmnXVavteh2WDsz5PLh4flo97VKKiLbTByKGeT7nSCgGrhm2LVdMgIpcYAt7Kih5zfOWJeJrev6h5mW6ig';
 
 function cleanKey(k?: string): string {
   if (!k) return '';
   return k.trim().replace(/^["']|["']$/g, '').replace(/\\n/g, '').replace(/\r?\n/g, '').trim();
+}
+
+export interface VapidKeyValidationResult {
+  matches: boolean;
+  publicKeyPrefix: string;
+  privateKeyConfigured: boolean;
+  derivedPublicKeyPrefix?: string;
+  error?: string;
+}
+
+/**
+ * Validação estrita do par criptográfico VAPID (RFC 8292) na curva P-256 (prime256v1).
+ * Garante que a chave privada realmente pertence à chave pública ativa sem derrubar a aplicação.
+ */
+export function verifyVapidKeyPair(pubKey: string, privKey: string): VapidKeyValidationResult {
+  const pubPrefix = pubKey ? `${pubKey.slice(0, 8)}...${pubKey.slice(-6)}` : 'AUSENTE';
+  if (!pubKey) {
+    return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave pública VAPID não informada.' };
+  }
+  if (!privKey) {
+    return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave privada VAPID ausente (variável VAPID_PRIVATE_KEY não configurada no ambiente).' };
+  }
+  try {
+    const ecdh = crypto.createECDH('prime256v1');
+    ecdh.setPrivateKey(Buffer.from(privKey, 'base64url'));
+    const derivedPub = ecdh.getPublicKey('base64url');
+    const derivedPrefix = `${derivedPub.slice(0, 8)}...${derivedPub.slice(-6)}`;
+    if (derivedPub === pubKey) {
+      return {
+        matches: true,
+        publicKeyPrefix: pubPrefix,
+        privateKeyConfigured: true,
+        derivedPublicKeyPrefix: derivedPrefix
+      };
+    } else {
+      return {
+        matches: false,
+        publicKeyPrefix: pubPrefix,
+        privateKeyConfigured: true,
+        derivedPublicKeyPrefix: derivedPrefix,
+        error: `Inconsistência de par VAPID: A chave pública configurada é a do Firebase (${pubPrefix}), porém a chave privada configurada no backend (VAPID_PRIVATE_KEY) pertence ao par anterior (${derivedPrefix}). Atualize a variável VAPID_PRIVATE_KEY no Vercel com a chave privada correspondente do Firebase.`
+      };
+    }
+  } catch (err: any) {
+    return {
+      matches: false,
+      publicKeyPrefix: pubPrefix,
+      privateKeyConfigured: true,
+      error: `Formato inválido na chave privada VAPID: ${err?.message || err}`
+    };
+  }
 }
 
 /**
@@ -57,7 +112,7 @@ function loadFallbackDbKeys(): { publicKey?: string; privateKey?: string; subjec
   } catch {}
   return {
     publicKey: OFFICIAL_VAPID_PUBLIC_KEY,
-    privateKey: 'jIzx37tfbmK5NxYiLQYbcze3XSBg9Il6kBLeDW6zQxA',
+    privateKey: '',
     subject: 'mailto:suporte@andradeagro.com.br'
   };
 }
@@ -66,43 +121,64 @@ const fallbackDbKeys = loadFallbackDbKeys();
 
 // 1. Prioridade: Variáveis de ambiente (Vercel)
 // 2. Fallback: data/db.json (Google AI Studio)
-const VAPID_SUBJECT = 
-  cleanKey(process.env.VAPID_SUBJECT) || 
-  cleanKey(fallbackDbKeys.subject) || 
-  'mailto:suporte@andradeagro.com.br';
+export function getVapidKeys(): { publicKey: string; privateKey: string; subject: string } {
+  const fallback = loadFallbackDbKeys();
+  const subject = cleanKey(process.env.VAPID_SUBJECT) || cleanKey(fallback.subject) || 'mailto:suporte@andradeagro.com.br';
+  const publicKey = cleanKey(process.env.VAPID_PUBLIC_KEY) || 
+                    cleanKey(process.env.VITE_VAPID_PUBLIC_KEY) || 
+                    cleanKey(fallback.publicKey) || 
+                    OFFICIAL_VAPID_PUBLIC_KEY;
 
-const VAPID_PUBLIC_KEY = 
-  cleanKey(process.env.VAPID_PUBLIC_KEY) || 
-  cleanKey(process.env.VITE_VAPID_PUBLIC_KEY) || 
-  cleanKey(fallbackDbKeys.publicKey) || 
-  OFFICIAL_VAPID_PUBLIC_KEY;
+  const envPrivate = cleanKey(process.env.VAPID_PRIVATE_KEY) || cleanKey(process.env.PRIVATE_VAPID_KEY);
+  const dbPrivate = cleanKey(fallback.privateKey);
 
-const VAPID_PRIVATE_KEY = 
-  cleanKey(process.env.VAPID_PRIVATE_KEY) || 
-  cleanKey(process.env.PRIVATE_VAPID_KEY) || 
-  cleanKey(fallbackDbKeys.privateKey);
+  let chosenPrivate = envPrivate || dbPrivate || '';
 
-export const OFFICIAL_VAPID_KEYS = {
-  publicKey: VAPID_PUBLIC_KEY,
-  privateKey: VAPID_PRIVATE_KEY
-};
+  // Se a chave privada do ambiente não confere com a pública do Firebase, mas a do db.json confere, utiliza a do db.json
+  if (envPrivate && dbPrivate) {
+    const envCheck = verifyVapidKeyPair(publicKey, envPrivate);
+    if (!envCheck.matches) {
+      const dbCheck = verifyVapidKeyPair(publicKey, dbPrivate);
+      if (dbCheck.matches) {
+        chosenPrivate = dbPrivate;
+      }
+    }
+  }
+
+  return { publicKey, privateKey: chosenPrivate, subject };
+}
 
 let vapidConfiguredSuccessfully = false;
 let vapidConfigError: string | null = null;
 
-try {
-  if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
-    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-    vapidConfiguredSuccessfully = true;
-    console.log('[AndradeAgro PushEngine] VAPID configurado com sucesso no servidor.');
+export function ensureVapidConfigured(): {
+  configured: boolean;
+  error?: string;
+  publicKeyPrefix: string;
+  privateKeyConfigured: boolean;
+} {
+  const { publicKey, privateKey, subject } = getVapidKeys();
+  const check = verifyVapidKeyPair(publicKey, privateKey);
+  if (check.matches) {
+    try {
+      webpush.setVapidDetails(subject, publicKey, privateKey);
+      vapidConfiguredSuccessfully = true;
+      vapidConfigError = null;
+      return { configured: true, publicKeyPrefix: check.publicKeyPrefix, privateKeyConfigured: true };
+    } catch (e: any) {
+      vapidConfiguredSuccessfully = false;
+      vapidConfigError = e?.message || String(e);
+      return { configured: false, error: vapidConfigError, publicKeyPrefix: check.publicKeyPrefix, privateKeyConfigured: true };
+    }
   } else {
-    vapidConfigError = 'Chaves VAPID incompletas (VAPID_PUBLIC_KEY ou VAPID_PRIVATE_KEY ausentes)';
-    console.warn('[AndradeAgro PushEngine] ' + vapidConfigError);
+    vapidConfiguredSuccessfully = false;
+    vapidConfigError = check.error || 'Par de chaves VAPID inválido';
+    return { configured: false, error: vapidConfigError, publicKeyPrefix: check.publicKeyPrefix, privateKeyConfigured: check.privateKeyConfigured };
   }
-} catch (e: any) {
-  vapidConfigError = e?.message || String(e);
-  console.error('[AndradeAgro PushEngine] Erro ao configurar VAPID:', vapidConfigError);
 }
+
+// Inicialização imediata com verificação defensiva
+ensureVapidConfigured();
 
 // Configurações gerais do Firebase
 const firebaseConfig = {
@@ -773,7 +849,7 @@ export function sendJson(res: any, statusCode: number, data: any) {
 }
 
 export function getVapidPublicKey(): string {
-  return VAPID_PUBLIC_KEY;
+  return getVapidKeys().publicKey;
 }
 
 export async function registerDevice(params: {
@@ -859,13 +935,19 @@ export async function getDevicesList(): Promise<any[]> {
 export async function getEngineStatus(): Promise<any> {
   const result = await getActiveAuthorizedDevices();
   const queryOk = result.querySuccess;
+  const vapidState = ensureVapidConfigured();
+  const { publicKey } = getVapidKeys();
 
   return {
     success: queryOk,
     querySuccess: queryOk,
     queryError: !queryOk && result.queryError ? result.queryError : undefined,
-    vapidConfigured: Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY),
-    vapidPublicKey: VAPID_PUBLIC_KEY,
+    vapidConfigured: vapidState.configured,
+    vapidKeyPairMatches: vapidState.configured,
+    vapidPublicKeyPrefix: vapidState.publicKeyPrefix,
+    vapidPrivateKeyConfigured: vapidState.privateKeyConfigured,
+    vapidError: !vapidState.configured ? vapidState.error : undefined,
+    vapidPublicKey: publicKey,
     firebaseAdmin: getFirebaseAdminDiagnostics(),
     totalDevices: result.totalDevices,
     activeAuthorizedCount: result.activeDevices.length,
@@ -1036,34 +1118,32 @@ export async function dispatchPushToAuthorizedUsers(event: {
     };
   }
 
-  // [ETAPA 6/10] VAPID carregado
-  const hasVapidPublic = Boolean(VAPID_PUBLIC_KEY && VAPID_PUBLIC_KEY.length > 20);
-  const hasVapidPrivate = Boolean(VAPID_PRIVATE_KEY && VAPID_PRIVATE_KEY.length > 20);
-  const hasVapidSubject = Boolean(VAPID_SUBJECT && VAPID_SUBJECT.length > 5);
+  // [ETAPA 6/10] VAPID carregado e verificado criptograficamente
+  const vapidState = ensureVapidConfigured();
+  const { publicKey, privateKey, subject } = getVapidKeys();
+  console.log(`[AndradeAgro PushEngine] [ETAPA 6/10] VAPID checado: Par confere=${vapidState.configured}, Chave Pública=${vapidState.publicKeyPrefix}, Privada presente=${vapidState.privateKeyConfigured}`);
 
-  console.log(`[AndradeAgro PushEngine] [ETAPA 6/10] VAPID carregado: Public=${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}, Private=${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'}, Subject=${VAPID_SUBJECT}`);
-
-  if (!hasVapidPrivate || !hasVapidPublic) {
-    const varError = `Configuração VAPID incompleta (VAPID_PUBLIC_KEY: ${hasVapidPublic ? 'PRESENTE' : 'AUSENTE'}, VAPID_PRIVATE_KEY: ${hasVapidPrivate ? 'PRESENTE' : 'AUSENTE'})`;
-    console.error(`[AndradeAgro PushEngine] [ETAPA 6/10] ERRO TÉCNICO: ${varError}`);
+  if (!vapidState.configured) {
+    const keyError = vapidState.error || 'Configuração VAPID incompleta ou divergente';
+    console.warn(`[AndradeAgro PushEngine] [ETAPA 6/10] AVISO TÉCNICO VAPID: ${keyError}`);
     return {
       success: false,
       duplicate: false,
       sentCount: 0,
       failedCount: 0,
       recipientsCount: targets.length,
-      stage: 'variaveis_ambiente',
-      errors: [varError],
-      message: `Erro na ETAPA 6: ${varError}`
+      stage: 'validacao_chaves',
+      errors: [keyError],
+      message: keyError
     };
   }
 
   // [ETAPA 7/10] web-push inicializado
   const vapidOptions = {
     vapidDetails: {
-      subject: VAPID_SUBJECT,
-      publicKey: VAPID_PUBLIC_KEY,
-      privateKey: VAPID_PRIVATE_KEY
+      subject,
+      publicKey,
+      privateKey
     },
     TTL: 86400
   };

@@ -929,10 +929,12 @@
     "test-1789862367619",
     "test-1789864185877",
     "test-1789864637878",
-    "verify-dry-1790206900355"
+    "verify-dry-1790206900355",
+    "test-1790208343564",
+    "test-1790209236588"
   ],
   "andradeagro_vapid_keys": {
-    "publicKey": "BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s",
-    "privateKey": "jIzx37tfbmK5NxYiLQYbcze3XSBg9Il6kBLeDW6zQxA"
+    "publicKey": "BGk3AhmnXVavteh2WDsz5PLh4flo97VKKiLbTByKGeT7nSCgGrhm2LVdMgIpcYAt7Kih5zfOWJeJrev6h5mW6ig",
+    "privateKey": ""
   }
 }

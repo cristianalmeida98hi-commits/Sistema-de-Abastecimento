@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { FuelLog, Vehicle, GasStation, User, UserRole, SystemSettings, OperationType, ActivityType, canEditSystemData } from '../types';
 import { 
-  formatCurrency, formatDateTimeBR, getFuelTypeName, exportFuelLogsPDF, exportFuelLogsCSV,
+  formatCurrency, formatDateTimeBR, getFuelTypeName, exportFuelLogsPDF, exportFuelLogsExcelWithCharts, exportFuelLogsCSV,
   getOperationTypeName, getActivityTypeName, OPERATION_OPTIONS, getActivitiesForOperation
 } from '../utils/calculations';
 import { EditFuelLogModal } from './EditFuelLogModal';
@@ -109,6 +109,8 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
     return currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO';
   };
 
+  const canViewFinancial = currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO';
+
   const handleOpenEdit = (log: FuelLog) => {
     if (!canEditLog(log)) {
       alert('Acesso negado: Somente perfis Administrador e Manutenção possuem autorização para editar registros de abastecimento.');
@@ -128,8 +130,25 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
     exportFuelLogsPDF(
       filteredLogs,
       'Relatório Geral de Abastecimentos AndradeAgro',
-      { name: settings.companyName, slogan: settings.slogan, cnpj: settings.cnpj }
+      { name: settings.companyName, slogan: settings.slogan, cnpj: settings.cnpj },
+      canViewFinancial,
+      {
+        vehicles,
+        appliedFiltersDesc: 'Registro Geral de Abastecimentos',
+        dateRangeStr: 'Período Completo'
+      }
     );
+  };
+
+  const handleExportExcel = () => {
+    exportFuelLogsExcelWithCharts({
+      logs: filteredLogs,
+      vehicles,
+      companyInfo: { name: settings.companyName, slogan: settings.slogan, cnpj: settings.cnpj },
+      dateRangeStr: 'Período Completo',
+      canViewFinancial,
+      appliedFiltersDesc: 'Registro Geral de Abastecimentos'
+    });
   };
 
   const handleExportCSV = () => {
@@ -164,19 +183,28 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
           </button>
           <button
             onClick={handleExportPDF}
-            className="bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5"
+            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition active:scale-95"
+            title="Exportar PDF com tabela e gráficos analíticos"
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>Exportar PDF</span>
+            <span>PDF com Gráficos</span>
+          </button>
+          <button
+            onClick={handleExportExcel}
+            className="bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition active:scale-95"
+            title="Exportar planilha Excel (.xlsx) com tabela e gráficos incorporados"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Excel com Gráficos</span>
           </button>
           <button
             onClick={handleExportCSV}
             className={`px-3 py-2 rounded-xl font-bold text-xs border flex items-center gap-1.5 ${
               darkMode ? 'bg-emerald-900/40 border-emerald-800 text-emerald-200' : 'bg-white border-gray-200 text-gray-700'
             }`}
+            title="Exportar CSV de dados"
           >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Excel / CSV</span>
+            <span>CSV</span>
           </button>
         </div>
       </div>

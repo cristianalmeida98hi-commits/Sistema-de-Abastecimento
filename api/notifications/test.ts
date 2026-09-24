@@ -32,8 +32,8 @@ export default async function handler(req: any, res: any) {
       directUserRole: userRole
     });
 
-    const httpCode = result.success ? 200 : (result.sentCount === 0 && result.recipientsCount === 0 ? 200 : 500);
-    console.log(`[API /api/notifications/test] [ETAPA 10/10] Resposta retornada: HTTP ${httpCode}, sentCount=${result.sentCount}, failedCount=${result.failedCount || 0}`);
+    const httpCode = 200;
+    console.log(`[API /api/notifications/test] [ETAPA 10/10] Resposta retornada: HTTP ${httpCode}, success=${result.success}, sentCount=${result.sentCount}, failedCount=${result.failedCount || 0}`);
     return sendJson(res, httpCode, result);
   } catch (err: any) {
     const errorMsg = err?.message || String(err || 'Erro interno ao disparar teste push');

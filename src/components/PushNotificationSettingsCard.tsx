@@ -9,7 +9,8 @@ import {
   isPushSupported, getNotificationPermission, isStoredPushActive, 
   isSubscriptionActive, enablePushNotifications, disablePushNotifications, 
   sendTestPushNotification, fetchServerNotificationStatus,
-  getPushDiagnosticsInfo, PushDiagnosticsInfo
+  getPushDiagnosticsInfo, PushDiagnosticsInfo,
+  getCustomApiUrl, setCustomApiUrl
 } from '../utils/pushNotifications';
 
 interface PushNotificationSettingsCardProps {
@@ -41,6 +42,8 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
   const [copiedDiag, setCopiedDiag] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [customBackendUrl, setCustomBackendUrl] = useState<string>(getCustomApiUrl());
+  const [backendSavedFeedback, setBackendSavedFeedback] = useState<string | null>(null);
 
   const checkStatus = async () => {
     setStatusLoading(true);
@@ -561,7 +564,7 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
         <div className="mt-3 p-4 rounded-2xl bg-emerald-950/80 border border-emerald-700/50 text-xs space-y-3">
           <div className="flex items-center justify-between border-b border-emerald-800/60 pb-2">
             <span className="font-bold text-amber-400 flex items-center gap-1.5">
-              <Terminal className="w-4 h-4" /> Relatório Técnico de Notificações
+              <Terminal className="w-4 h-4" /> Diagnóstico Obrigatório de Notificações Web Push
             </span>
             <button
               type="button"
@@ -573,53 +576,150 @@ export const PushNotificationSettingsCard: React.FC<PushNotificationSettingsCard
             </button>
           </div>
 
+          {/* Grid com as 10 Informações Seguras Obrigatórias */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
-            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
-              <span className="text-slate-400 block">Navegador / Permissão Nativa:</span>
-              <span className="font-bold text-slate-100">{permission}</span>
-            </div>
-
-            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
-              <span className="text-slate-400 block">Service Worker:</span>
-              <span className="font-bold text-slate-100">
-                {diagnostics?.serviceWorkerActive ? 'Ativo e Controlando' : diagnostics?.serviceWorkerRegistered ? 'Registrado (Iniciando)' : 'Não detectado'}
+            {/* 1. Permissão do Navegador */}
+            <div className="p-2.5 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block font-semibold">1. Permissão do Navegador:</span>
+              <span className={`font-bold ${permission === 'granted' ? 'text-emerald-400' : permission === 'denied' ? 'text-red-400' : 'text-amber-300'}`}>
+                {permission === 'granted' ? 'Concedida (Autorizado)' : permission === 'denied' ? 'Bloqueada pelo Usuário' : 'Não solicitada (Padrão)'}
               </span>
             </div>
 
-            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
-              <span className="text-slate-400 block">PushManager no Navegador:</span>
+            {/* 2. Status do Service Worker */}
+            <div className="p-2.5 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block font-semibold">2. Status do Service Worker:</span>
               <span className="font-bold text-slate-100">
-                {diagnostics?.pushManagerAvailable ? 'Disponível' : 'Indisponível (necessário HTTPS / Safari 16.4+)'}
+                {diagnostics?.serviceWorkerActive ? 'Ativo e Controlando (/sw.js)' : diagnostics?.serviceWorkerRegistered ? 'Registrado (Aguardando ativação)' : 'Não detectado'}
               </span>
             </div>
 
-            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
-              <span className="text-slate-400 block">Inscrição Push Local:</span>
-              <span className="font-bold text-slate-100 truncate">
+            {/* 3. Status do PushManager */}
+            <div className="p-2.5 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block font-semibold">3. Status do PushManager:</span>
+              <span className="font-bold text-slate-100">
+                {diagnostics?.pushManagerAvailable ? 'Disponível no Navegador' : 'Indisponível (necessário HTTPS / Safari 16.4+)'}
+              </span>
+            </div>
+
+            {/* 4. Existência de Inscrição Local */}
+            <div className="p-2.5 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block font-semibold">4. Existência de Inscrição Local:</span>
+              <span className={`font-bold truncate ${diagnostics?.hasLocalSubscription ? 'text-emerald-300' : 'text-slate-300'}`}>
                 {diagnostics?.hasLocalSubscription ? 'Presente no dispositivo' : 'Inexistente neste aparelho'}
               </span>
             </div>
 
-            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
-              <span className="text-slate-400 block">Chave VAPID Pública Ativa:</span>
-              <span className="font-mono text-emerald-300">
-                {diagnostics?.vapidPublicKeySnippet || 'BGk3Ahmn...6ig'}
+            {/* 5. Prefixo da Chave Pública Utilizada */}
+            <div className="p-2.5 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block font-semibold">5. Prefixo da Chave Pública:</span>
+              <span className="font-mono font-bold text-emerald-300">
+                {diagnostics?.vapidPublicKeySnippet || 'BGk3Ahmn...6ig'} (Oficial Firebase)
               </span>
             </div>
 
-            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40">
-              <span className="text-slate-400 block">Origem da Consulta de Dispositivos:</span>
-              <span className="font-bold text-amber-300">
-                {statusSource}
+            {/* 6. Domínio Atual */}
+            <div className="p-2.5 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block font-semibold">6. Domínio Atual:</span>
+              <span className="font-bold text-amber-300 break-all">
+                {diagnostics?.currentDomain || (typeof window !== 'undefined' ? window.location.host : 'localhost:3000')}
               </span>
             </div>
 
-            <div className="p-2 rounded-lg bg-black/30 border border-emerald-900/40 md:col-span-2">
-              <span className="text-slate-400 block">Plataforma & Modo:</span>
+            {/* 7. Quantidade de Dispositivos no Servidor */}
+            <div className="p-2.5 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block font-semibold">7. Dispositivos no Servidor:</span>
               <span className="font-bold text-slate-100">
-                {diagnostics?.platform || 'Desconhecida'} | {diagnostics?.isPWA ? 'PWA Instalado' : 'Navegador Web'} {diagnostics?.isMobile ? '(Mobile)' : '(Desktop)'}
+                {serverStatus ? `${serverStatus.activeAuthorizedCount} ativo(s) (${statusSource})` : 'Consultando...'}
               </span>
             </div>
+
+            {/* 8. Status da Consulta ao Firestore */}
+            <div className="p-2.5 rounded-lg bg-black/30 border border-emerald-900/40">
+              <span className="text-slate-400 block font-semibold">8. Consulta ao Firestore:</span>
+              <span className={`font-bold ${serverStatus?.querySuccess ? 'text-emerald-400' : statusError ? 'text-red-400' : 'text-amber-300'}`}>
+                {serverStatus?.querySuccess ? 'Conectado com sucesso (user_devices)' : statusError ? `Aviso: ${statusError}` : 'Conectando...'}
+              </span>
+            </div>
+
+            {/* 9. Status do Endpoint de Envio */}
+            <div className="p-2.5 rounded-lg bg-black/30 border border-emerald-900/40 md:col-span-2">
+              <span className="text-slate-400 block font-semibold">9. Status do Endpoint de Envio:</span>
+              <div className="flex flex-wrap items-center justify-between gap-1 mt-0.5">
+                <span className="font-mono text-emerald-300 break-all">
+                  {diagnostics?.targetApiUrl || '/api/notifications/test'}
+                </span>
+                <span className="px-2 py-0.5 rounded bg-emerald-800/40 text-emerald-300 font-bold text-[10px]">
+                  {diagnostics?.backendName || 'Ativo'}
+                </span>
+              </div>
+            </div>
+
+            {/* 10. Mensagem de Erro Técnico Resumida (se existir) */}
+            {(statusError || serverStatus?.error) && (
+              <div className="p-2.5 rounded-lg bg-red-950/40 border border-red-800/40 md:col-span-2">
+                <span className="text-red-400 block font-semibold">10. Erro Técnico Resumido:</span>
+                <span className="font-medium text-red-200">
+                  {statusError || serverStatus?.error}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Configuração de Backend de Envio (Vercel vs Local) */}
+          <div className="pt-2 border-t border-emerald-800/60 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-emerald-300 text-[11px]">
+                Configuração do Backend de Envio:
+              </span>
+              <span className="text-[10px] text-slate-400">
+                {customBackendUrl ? 'Apontando para URL personalizada' : 'Usando mesmo domínio'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={customBackendUrl}
+                onChange={(e) => setCustomBackendUrl(e.target.value)}
+                placeholder="Ex: https://andrade-agro.vercel.app (deixe vazio para automático)"
+                className="flex-1 px-3 py-1.5 rounded-lg bg-black/40 border border-emerald-800/60 text-emerald-100 text-[11px] placeholder-slate-500 focus:outline-none focus:border-amber-400"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomApiUrl(customBackendUrl);
+                  setBackendSavedFeedback('Salvo com sucesso!');
+                  setTimeout(() => setBackendSavedFeedback(null), 2500);
+                  checkStatus();
+                }}
+                className="px-3 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-[11px] transition-colors shrink-0"
+              >
+                Salvar
+              </button>
+              {customBackendUrl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomBackendUrl('');
+                    setCustomApiUrl('');
+                    setBackendSavedFeedback('Restaurado para padrão!');
+                    setTimeout(() => setBackendSavedFeedback(null), 2500);
+                    checkStatus();
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-[11px] transition-colors shrink-0"
+                >
+                  Padrão
+                </button>
+              )}
+            </div>
+            {backendSavedFeedback && (
+              <span className="text-[10px] text-amber-300 font-bold block">
+                {backendSavedFeedback}
+              </span>
+            )}
+            <p className="text-[10px] text-slate-400 leading-normal">
+              💡 <strong>Dica sobre a Vercel:</strong> Quando variáveis de ambiente como <code className="text-emerald-300">VAPID_PRIVATE_KEY</code> são salvas no painel da Vercel, é necessário clicar em <strong>"Redeploy"</strong> no painel de implantações da Vercel para que as Serverless Functions carreguem o novo valor.
+            </p>
           </div>
         </div>
       )}

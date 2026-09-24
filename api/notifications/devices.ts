@@ -7,6 +7,11 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 405, { success: false, error: 'Method Not Allowed' });
   }
 
-  const devices = await getDevicesList();
-  return sendJson(res, 200, { devices, total: devices.length });
+  try {
+    const devices = await getDevicesList();
+    return sendJson(res, 200, { devices, total: devices.length });
+  } catch (err: any) {
+    console.error('[API /api/notifications/devices] Error:', err);
+    return sendJson(res, 200, { devices: [], total: 0, error: 'Erro ao listar dispositivos: ' + (err?.message || err) });
+  }
 }

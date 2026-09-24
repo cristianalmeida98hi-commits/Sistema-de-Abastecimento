@@ -26,6 +26,6 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 200, { success: true, device });
   } catch (err: any) {
     console.error('[API /api/notifications/subscribe] Error:', err);
-    return sendJson(res, 500, { success: false, error: 'Falha ao registrar dispositivo: ' + (err?.message || err) });
+    return sendJson(res, 200, { success: false, error: 'Falha ao registrar dispositivo: ' + (err?.message || err) });
   }
 }

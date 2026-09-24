@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -125,16 +126,37 @@ async function startServer() {
 
   const wp = (webpushLib as any).default || webpushLib;
 
+  function cleanKey(k?: string): string {
+    if (!k) return '';
+    return k.trim().replace(/^["']|["']$/g, '').replace(/\\n/g, '').replace(/\r?\n/g, '').trim();
+  }
+
+  function normalizeBase64Url(str: string): string {
+    return str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function parsePrivKeyBuf(priv: string): Buffer {
+    const clean = cleanKey(priv);
+    try {
+      const b = Buffer.from(clean.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+      if (b.length === 32) return b;
+    } catch {}
+    return Buffer.from(clean, 'base64url');
+  }
+
   function verifyVapidKeyPair(pubKey: string, privKey: string) {
-    const pubPrefix = pubKey ? `${pubKey.slice(0, 8)}...${pubKey.slice(-6)}` : 'AUSENTE';
-    if (!pubKey) return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave pública VAPID ausente.' };
-    if (!privKey) return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave privada VAPID ausente no ambiente (VAPID_PRIVATE_KEY não informada).' };
+    const cleanPub = cleanKey(pubKey);
+    const cleanPriv = cleanKey(privKey);
+    const pubPrefix = cleanPub ? `${cleanPub.slice(0, 8)}...${cleanPub.slice(-6)}` : 'AUSENTE';
+
+    if (!cleanPub) return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave pública VAPID ausente.' };
+    if (!cleanPriv) return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave privada VAPID ausente no ambiente (VAPID_PRIVATE_KEY não informada).' };
     try {
       const ecdh = crypto.createECDH('prime256v1');
-      ecdh.setPrivateKey(Buffer.from(privKey, 'base64url'));
+      ecdh.setPrivateKey(parsePrivKeyBuf(cleanPriv));
       const derivedPub = ecdh.getPublicKey('base64url');
       const derivedPrefix = `${derivedPub.slice(0, 8)}...${derivedPub.slice(-6)}`;
-      if (derivedPub === pubKey) {
+      if (normalizeBase64Url(derivedPub) === normalizeBase64Url(cleanPub)) {
         return { matches: true, publicKeyPrefix: pubPrefix, privateKeyConfigured: true, derivedPublicKeyPrefix: derivedPrefix };
       } else {
         return {
@@ -142,7 +164,7 @@ async function startServer() {
           publicKeyPrefix: pubPrefix,
           privateKeyConfigured: true,
           derivedPublicKeyPrefix: derivedPrefix,
-          error: `Inconsistência de par VAPID: A chave pública configurada é a do Firebase (${pubPrefix}), porém a chave privada no backend pertence ao par anterior (${derivedPrefix}). Atualize a variável VAPID_PRIVATE_KEY no Vercel com a chave privada correspondente do Firebase.`
+          error: `Inconsistência de par VAPID: A chave pública configurada é a do Firebase (${pubPrefix}), porém a chave privada em execução no backend (VAPID_PRIVATE_KEY) deriva para (${derivedPrefix}). Se a variável VAPID_PRIVATE_KEY já foi salva no painel da Vercel, realize um 'Redeploy' no painel da Vercel para que as Serverless Functions recarreguem a nova chave.`
         };
       }
     } catch (err: any) {
@@ -150,22 +172,36 @@ async function startServer() {
     }
   }
 
-  // 1. Prioridade: Variáveis de ambiente (Vercel)
-  // 2. Fallback: data/db.json (Google AI Studio)
-  const envVapidPublic = (process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY || '').trim().replace(/^["']|["']$/g, '');
-  const envVapidPrivate = (process.env.VAPID_PRIVATE_KEY || process.env.PRIVATE_VAPID_KEY || '').trim().replace(/^["']|["']$/g, '');
-  const dbVapidKeys = serverDb['andradeagro_vapid_keys'] || {};
+  function getCurrentVapidKeys() {
+    loadDatabase();
+    const envVapidPublic = cleanKey(process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY);
+    const envVapidPrivate = cleanKey(process.env.VAPID_PRIVATE_KEY || process.env.PRIVATE_VAPID_KEY);
+    const dbVapidKeys = serverDb['andradeagro_vapid_keys'] || {};
+    const dbVapidPrivate = cleanKey(dbVapidKeys.privateKey);
 
-  const vapidKeys = {
-    publicKey: envVapidPublic || dbVapidKeys.publicKey || OFFICIAL_VAPID_PUBLIC_KEY,
-    privateKey: envVapidPrivate || dbVapidKeys.privateKey || ''
-  };
+    const publicKey = envVapidPublic || cleanKey(dbVapidKeys.publicKey) || OFFICIAL_VAPID_PUBLIC_KEY;
+    let chosenPrivate = envVapidPrivate || dbVapidPrivate || '';
 
-  const vapidSubject = (process.env.VAPID_SUBJECT || dbVapidKeys.subject || 'mailto:suporte@andradeagro.com.br').trim().replace(/^["']|["']$/g, '');
+    // Se o ambiente possui chave conflitante mas o banco persistente possui a chave correta pareada com o Firebase
+    if (envVapidPrivate && dbVapidPrivate) {
+      const envCheck = verifyVapidKeyPair(publicKey, envVapidPrivate);
+      if (!envCheck.matches) {
+        const dbCheck = verifyVapidKeyPair(publicKey, dbVapidPrivate);
+        if (dbCheck.matches) {
+          chosenPrivate = dbVapidPrivate;
+        }
+      }
+    }
+
+    const subject = cleanKey(process.env.VAPID_SUBJECT || dbVapidKeys.subject || 'mailto:suporte@andradeagro.com.br');
+    return { publicKey, privateKey: chosenPrivate, subject };
+  }
+
   try {
-    const keyCheck = verifyVapidKeyPair(vapidKeys.publicKey, vapidKeys.privateKey);
+    const keys = getCurrentVapidKeys();
+    const keyCheck = verifyVapidKeyPair(keys.publicKey, keys.privateKey);
     if (keyCheck.matches) {
-      wp.setVapidDetails(vapidSubject, vapidKeys.publicKey, vapidKeys.privateKey);
+      wp.setVapidDetails(keys.subject, keys.publicKey, keys.privateKey);
       console.log(`[Push Notification] Web Push VAPID setup successfully configured com chave do Firebase (${keyCheck.publicKeyPrefix}).`);
     } else {
       console.warn(`[Push Notification] Configuração VAPID pendente/divergente: ${keyCheck.error}`);
@@ -496,8 +532,9 @@ async function startServer() {
       };
     }
 
-    // Step 3.5: Validate VAPID key pair
-    const keyCheck = verifyVapidKeyPair(vapidKeys.publicKey, vapidKeys.privateKey);
+    // Step 3.5: Validate VAPID key pair dynamically
+    const currentKeys = getCurrentVapidKeys();
+    const keyCheck = verifyVapidKeyPair(currentKeys.publicKey, currentKeys.privateKey);
     if (!keyCheck.matches) {
       const keyError = keyCheck.error || 'Configuração VAPID incompleta ou divergente';
       console.warn(`[Push Notification] [Aviso VAPID] ${keyError}`);
@@ -520,9 +557,9 @@ async function startServer() {
 
     const serverVapidOptions = {
       vapidDetails: {
-        subject: vapidSubject,
-        publicKey: vapidKeys.publicKey,
-        privateKey: vapidKeys.privateKey
+        subject: currentKeys.subject,
+        publicKey: currentKeys.publicKey,
+        privateKey: currentKeys.privateKey
       },
       TTL: 86400
     };
@@ -577,7 +614,7 @@ async function startServer() {
 
   // PUSH NOTIFICATIONS API
   app.get(['/api/notifications/vapid-public-key', '/api/notificacoes/vapid-public-key'], (req, res) => {
-    const key = vapidKeys?.publicKey || OFFICIAL_VAPID_PUBLIC_KEY;
+    const key = getCurrentVapidKeys().publicKey || OFFICIAL_VAPID_PUBLIC_KEY;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -751,21 +788,22 @@ async function startServer() {
       }));
       res.json({ devices: sanitized, total: sanitized.length });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to list devices' });
+      res.json({ devices: [], total: 0, error: 'Falha ao listar dispositivos: ' + (err?.message || err) });
     }
   });
 
   app.get(['/api/notifications/status', '/api/notificacoes/status'], async (req, res) => {
     try {
       const result = await getActiveAuthorizedDevices();
-      const keyCheck = verifyVapidKeyPair(vapidKeys.publicKey, vapidKeys.privateKey);
+      const currentKeys = getCurrentVapidKeys();
+      const keyCheck = verifyVapidKeyPair(currentKeys.publicKey, currentKeys.privateKey);
       res.json({
         vapidConfigured: keyCheck.matches,
         vapidKeyPairMatches: keyCheck.matches,
         vapidPublicKeyPrefix: keyCheck.publicKeyPrefix,
         vapidPrivateKeyConfigured: keyCheck.privateKeyConfigured,
         vapidError: !keyCheck.matches ? keyCheck.error : undefined,
-        vapidPublicKey: vapidKeys.publicKey,
+        vapidPublicKey: currentKeys.publicKey,
         totalDevices: result.totalDevices,
         activeAuthorizedCount: result.activeDevices.length,
         authorizedDevices: result.activeDevices.map(d => ({
@@ -777,7 +815,13 @@ async function startServer() {
         source: result.source
       });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to get status' });
+      res.json({
+        vapidConfigured: false,
+        error: 'Falha ao consultar status: ' + (err?.message || err),
+        totalDevices: 0,
+        activeAuthorizedCount: 0,
+        authorizedDevices: []
+      });
     }
   });
 

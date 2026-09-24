@@ -40,6 +40,19 @@ function cleanKey(k?: string): string {
   return k.trim().replace(/^["']|["']$/g, '').replace(/\\n/g, '').replace(/\r?\n/g, '').trim();
 }
 
+function normalizeBase64Url(str: string): string {
+  return str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function parsePrivKeyBuf(priv: string): Buffer {
+  const clean = cleanKey(priv);
+  try {
+    const b = Buffer.from(clean.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    if (b.length === 32) return b;
+  } catch {}
+  return Buffer.from(clean, 'base64url');
+}
+
 export interface VapidKeyValidationResult {
   matches: boolean;
   publicKeyPrefix: string;
@@ -53,19 +66,23 @@ export interface VapidKeyValidationResult {
  * Garante que a chave privada realmente pertence à chave pública ativa sem derrubar a aplicação.
  */
 export function verifyVapidKeyPair(pubKey: string, privKey: string): VapidKeyValidationResult {
-  const pubPrefix = pubKey ? `${pubKey.slice(0, 8)}...${pubKey.slice(-6)}` : 'AUSENTE';
-  if (!pubKey) {
+  const cleanPub = cleanKey(pubKey);
+  const cleanPriv = cleanKey(privKey);
+  const pubPrefix = cleanPub ? `${cleanPub.slice(0, 8)}...${cleanPub.slice(-6)}` : 'AUSENTE';
+
+  if (!cleanPub) {
     return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave pública VAPID não informada.' };
   }
-  if (!privKey) {
+  if (!cleanPriv) {
     return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave privada VAPID ausente (variável VAPID_PRIVATE_KEY não configurada no ambiente).' };
   }
   try {
     const ecdh = crypto.createECDH('prime256v1');
-    ecdh.setPrivateKey(Buffer.from(privKey, 'base64url'));
+    ecdh.setPrivateKey(parsePrivKeyBuf(cleanPriv));
     const derivedPub = ecdh.getPublicKey('base64url');
     const derivedPrefix = `${derivedPub.slice(0, 8)}...${derivedPub.slice(-6)}`;
-    if (derivedPub === pubKey) {
+    
+    if (normalizeBase64Url(derivedPub) === normalizeBase64Url(cleanPub)) {
       return {
         matches: true,
         publicKeyPrefix: pubPrefix,
@@ -78,7 +95,7 @@ export function verifyVapidKeyPair(pubKey: string, privKey: string): VapidKeyVal
         publicKeyPrefix: pubPrefix,
         privateKeyConfigured: true,
         derivedPublicKeyPrefix: derivedPrefix,
-        error: `Inconsistência de par VAPID: A chave pública configurada é a do Firebase (${pubPrefix}), porém a chave privada configurada no backend (VAPID_PRIVATE_KEY) pertence ao par anterior (${derivedPrefix}). Atualize a variável VAPID_PRIVATE_KEY no Vercel com a chave privada correspondente do Firebase.`
+        error: `Inconsistência de par VAPID: A chave pública configurada é a do Firebase (${pubPrefix}), porém a chave privada em execução no backend (VAPID_PRIVATE_KEY) deriva para (${derivedPrefix}). Se a variável VAPID_PRIVATE_KEY já foi salva no painel da Vercel, realize um 'Redeploy' no painel da Vercel para que as Serverless Functions recarreguem a nova chave.`
       };
     }
   } catch (err: any) {

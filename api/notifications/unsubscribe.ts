@@ -14,6 +14,6 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 200, { success: true });
   } catch (err: any) {
     console.error('[API /api/notifications/unsubscribe] Error:', err);
-    return sendJson(res, 500, { success: false, error: 'Falha ao desinscrever dispositivo: ' + (err?.message || err) });
+    return sendJson(res, 200, { success: false, error: 'Falha ao desinscrever dispositivo: ' + (err?.message || err) });
   }
 }

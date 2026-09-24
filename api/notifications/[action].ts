@@ -92,6 +92,6 @@ export default async function handler(req: any, res: any) {
     });
   } catch (err: any) {
     console.error(`[API /api/notifications/${action}] Error:`, err);
-    return sendJson(res, 500, { success: false, error: 'Erro interno: ' + (err?.message || err) });
+    return sendJson(res, 200, { success: false, error: 'Erro interno: ' + (err?.message || err) });
   }
 }

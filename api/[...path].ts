@@ -54,7 +54,7 @@ export default async function handler(req: any, res: any) {
           directUserName: body.userName,
           directUserRole: body.userRole
         });
-        const code = result.success ? 200 : (result.sentCount === 0 && result.recipientsCount === 0 ? 200 : 500);
+        const code = 200;
         return sendJson(res, code, result);
       }
 
@@ -83,7 +83,7 @@ export default async function handler(req: any, res: any) {
       }
     } catch (err: any) {
       console.error(`[API catch-all /api/notifications/${action}] Erro:`, err);
-      return sendJson(res, 500, { success: false, error: err?.message || String(err) });
+      return sendJson(res, 200, { success: false, error: err?.message || String(err) });
     }
   }
 

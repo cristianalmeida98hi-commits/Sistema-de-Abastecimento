@@ -16,9 +16,10 @@ export default async function handler(req: any, res: any) {
   } catch (err: any) {
     const errorMsg = err?.message || String(err || 'Erro interno ao consultar status');
     console.error('[API /api/notifications/status] [ETAPA 10/10] ERRO TÉCNICO AO CONSULTAR STATUS:', errorMsg);
-    return sendJson(res, 500, {
+    return sendJson(res, 200, {
       success: false,
-      vapidConfigured: true,
+      querySuccess: false,
+      vapidConfigured: false,
       error: 'Erro técnico ao consultar status: ' + errorMsg,
       totalDevices: 0,
       activeAuthorizedCount: 0,

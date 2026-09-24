@@ -40,7 +40,7 @@ export default async function handler(req: any, res: any) {
     const errorStack = err?.stack || '';
     console.error('[API /api/notifications/test] [ETAPA 10/10] ERRO TÉCNICO:', errorMsg, errorStack);
 
-    return sendJson(res, 500, {
+    return sendJson(res, 200, {
       success: false,
       stage: 'erro_execucao',
       error: 'Falha técnica no servidor: ' + errorMsg,

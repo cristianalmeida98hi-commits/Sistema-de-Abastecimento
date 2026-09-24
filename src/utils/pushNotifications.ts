@@ -25,14 +25,47 @@ export interface SafeApiResponse<T = any> {
 }
 
 /**
+ * Obtém a URL personalizada de backend configurada pelo usuário (ex: https://andrade-agro.vercel.app).
+ */
+export function getCustomApiUrl(): string {
+  try {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('andradeagro_custom_api_url');
+      if (stored && typeof stored === 'string' && stored.trim().length > 0) {
+        return stored.trim().replace(/\/+$/, '');
+      }
+    }
+  } catch {}
+  return '';
+}
+
+/**
+ * Define ou remove a URL personalizada de backend.
+ */
+export function setCustomApiUrl(url: string): void {
+  try {
+    if (typeof window !== 'undefined') {
+      if (url && url.trim().length > 0) {
+        localStorage.setItem('andradeagro_custom_api_url', url.trim().replace(/\/+$/, ''));
+      } else {
+        localStorage.removeItem('andradeagro_custom_api_url');
+      }
+      window.dispatchEvent(new CustomEvent('andradeagro_push_status_changed'));
+    }
+  } catch {}
+}
+
+/**
  * Resolve a URL final para requisições de API.
- * Suporta a variável de ambiente VITE_API_URL para deploys com backend desacoplado.
+ * Suporta configuração local do usuário ou a variável de ambiente VITE_API_URL.
  */
 export function resolveApiUrl(path: string): string {
   try {
-    const customBase = (import.meta as any).env?.VITE_API_URL;
-    if (customBase && typeof customBase === 'string' && customBase.trim().length > 0) {
-      const cleanBase = customBase.trim().replace(/\/+$/, '');
+    const customStored = getCustomApiUrl();
+    const envBase = (import.meta as any).env?.VITE_API_URL;
+    const base = customStored || (typeof envBase === 'string' && envBase.trim().length > 0 ? envBase.trim() : '');
+    if (base && base.length > 0) {
+      const cleanBase = base.replace(/\/+$/, '');
       const cleanPath = path.startsWith('/') ? path : `/${path}`;
       return `${cleanBase}${cleanPath}`;
     }
@@ -1099,6 +1132,11 @@ export interface PushDiagnosticsInfo {
   isMobile: boolean;
   platform: string;
   userAgent: string;
+  currentDomain: string;
+  currentOrigin: string;
+  targetApiUrl: string;
+  customApiUrl: string;
+  backendName: string;
 }
 
 /**
@@ -1161,6 +1199,16 @@ export async function getPushDiagnosticsInfo(): Promise<PushDiagnosticsInfo> {
     }
   }
 
+  const currentDomain = typeof window !== 'undefined' ? window.location.host : 'localhost:3000';
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  const targetApiUrl = resolveApiUrl('/api/notifications/test');
+  const customApi = getCustomApiUrl();
+  const backendName = customApi 
+    ? `Vercel / Personalizado (${customApi})` 
+    : currentOrigin.includes('vercel.app') 
+      ? 'Vercel (Produção)' 
+      : 'Servidor Local (AI Studio / Dev)';
+
   return {
     supported,
     permission: perm,
@@ -1175,6 +1223,11 @@ export async function getPushDiagnosticsInfo(): Promise<PushDiagnosticsInfo> {
     isPWA: dev.isPWA,
     isMobile: dev.isMobile,
     platform: dev.platform,
-    userAgent: dev.userAgent
+    userAgent: dev.userAgent,
+    currentDomain,
+    currentOrigin,
+    targetApiUrl,
+    customApiUrl: customApi,
+    backendName
   };
 }

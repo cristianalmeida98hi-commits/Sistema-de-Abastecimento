@@ -1,5 +1,6 @@
 import { 
-  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch 
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch,
+  query, orderBy, limit
 } from 'firebase/firestore';
 import { db, safeSetDoc, safeUpdateDoc, ensureFirebaseAuth } from '../lib/firebase';
 import { 
@@ -319,16 +320,25 @@ function setupFirestoreListeners() {
     }, (err) => console.warn('[Firestore Alerts Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubAlerts);
 
-    // 9. Audit Logs Subscription
-    const unsubAudit = onSnapshot(collection(db, 'audit_logs'), (snapshot) => {
+    // 9. Audit Logs Subscription (Otimizado: limita aos 150 registros mais recentes em tempo real, economizando banda e memória)
+    const auditQuery = query(collection(db, 'audit_logs'), orderBy('dateTime', 'desc'), limit(150));
+    const unsubAudit = onSnapshot(auditQuery, (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
-      items.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
       if (items.length > 0 || cache.auditLogs.length === 0) {
         cache.auditLogs = items;
       }
       loadedCollections.add('audit_logs');
       notifyDataUpdated(false);
-    }, (err) => console.warn('[Firestore AuditLogs Connection]', err?.message || err));
+    }, (err) => {
+      console.warn('[Firestore AuditLogs Connection]', err?.message || err);
+      onSnapshot(collection(db, 'audit_logs'), (snap) => {
+        const fallbackItems = snap.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
+        fallbackItems.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+        cache.auditLogs = fallbackItems.slice(0, 150);
+        loadedCollections.add('audit_logs');
+        notifyDataUpdated(false);
+      });
+    });
     activeFirestoreUnsubscribers.push(unsubAudit);
 
     // 10. System Settings Subscription

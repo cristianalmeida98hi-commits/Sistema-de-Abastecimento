@@ -3,6 +3,66 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    
+    <!-- Supressão segura de erros de conexão Vite HMR WebSocket em ambiente de iframe / cloud -->
+    <script>
+      (function() {
+        if (typeof window === 'undefined') return;
+        
+        // Silencia avisos e erros conhecidos de WebSocket do Vite no console
+        var origWarn = console.warn;
+        var origError = console.error;
+        console.warn = function() {
+          var msg = Array.prototype.join.call(arguments, ' ');
+          if (msg.indexOf('failed to connect to websocket') !== -1 || 
+              msg.indexOf('websocket closed without opening') !== -1 || 
+              msg.indexOf('[vite] connecting...') !== -1) {
+            return;
+          }
+          return origWarn.apply(console, arguments);
+        };
+        console.error = function() {
+          var msg = Array.prototype.join.call(arguments, ' ');
+          if (msg.indexOf('failed to connect to websocket') !== -1 || 
+              msg.indexOf('websocket closed without opening') !== -1) {
+            return;
+          }
+          return origError.apply(console, arguments);
+        };
+
+        // Intercepta e neutraliza erros de fechamento do WebSocket do Vite
+        if (window.WebSocket) {
+          var NativeWebSocket = window.WebSocket;
+          window.WebSocket = function(url, protocols) {
+            var isViteHmr = typeof url === 'string' && (url.indexOf('vite') !== -1 || protocols === 'vite-hmr');
+            try {
+              var ws = new NativeWebSocket(url, protocols);
+              if (isViteHmr) {
+                ws.addEventListener('error', function(e) {
+                  if (e && e.stopImmediatePropagation) e.stopImmediatePropagation();
+                }, true);
+              }
+              return ws;
+            } catch (err) {
+              if (isViteHmr) {
+                return {
+                  addEventListener: function() {},
+                  removeEventListener: function() {},
+                  send: function() {},
+                  close: function() {}
+                };
+              }
+              throw err;
+            }
+          };
+          window.WebSocket.prototype = NativeWebSocket.prototype;
+          window.WebSocket.CONNECTING = NativeWebSocket.CONNECTING;
+          window.WebSocket.OPEN = NativeWebSocket.OPEN;
+          window.WebSocket.CLOSING = NativeWebSocket.CLOSING;
+          window.WebSocket.CLOSED = NativeWebSocket.CLOSED;
+        }
+      })();
+    </script>
     <title>AndradeAgro</title>
     <meta name="description" content="Sistema de gestão inteligente do agronegócio para controle de abastecimentos, frotas, máquinas agrícolas, manutenções e consumo de combustível." />
     <meta property="og:title" content="AndradeAgro" />

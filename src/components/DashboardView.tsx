@@ -14,7 +14,9 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, 
   PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar, CartesianGrid, Legend 
 } from 'recharts';
-import { EditCentralTankModal } from './EditCentralTankModal';
+const EditCentralTankModal = React.lazy(() => 
+  import('./EditCentralTankModal').then(m => ({ default: m.EditCentralTankModal }))
+);
 
 interface DashboardViewProps {
   fuelLogs: FuelLog[];
@@ -1060,16 +1062,18 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
 
       {/* Edit Central Tank Modal when clicked from Dashboard */}
       {selectedTankForConfig && (
-        <EditCentralTankModal
-          isOpen={!!selectedTankForConfig}
-          tank={selectedTankForConfig}
-          currentUser={currentUser}
-          onClose={() => setSelectedTankForConfig(null)}
-          onSave={async (tankId, updates, reason) => {
-            await updateCentralTank(tankId, updates, reason);
-          }}
-          darkMode={darkMode}
-        />
+        <React.Suspense fallback={null}>
+          <EditCentralTankModal
+            isOpen={!!selectedTankForConfig}
+            tank={selectedTankForConfig}
+            currentUser={currentUser}
+            onClose={() => setSelectedTankForConfig(null)}
+            onSave={async (tankId, updates, reason) => {
+              await updateCentralTank(tankId, updates, reason);
+            }}
+            darkMode={darkMode}
+          />
+        </React.Suspense>
       )}
 
     </div>

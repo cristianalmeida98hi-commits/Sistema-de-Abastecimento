@@ -2,8 +2,11 @@ import webpushLib from 'web-push';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { initializeApp, getApps, cert, type App } from 'firebase-admin/app';
-import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { createRequire } from 'module';
+
+const nodeRequire = createRequire(import.meta.url);
+type Firestore = any;
+type App = any;
 
 const webpush = (webpushLib as any).default || webpushLib;
 
@@ -257,6 +260,20 @@ export function getFirebaseAdminDb(): Firestore | null {
   adminInitAttempted = true;
 
   try {
+    const projectId = (process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId || '').trim();
+    const saEnv = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_SERVICE_ACCOUNT || process.env.FIREBASE_CREDENTIALS;
+    const clientEmail = (process.env.FIREBASE_CLIENT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL || '').trim();
+    const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY || process.env.GOOGLE_PRIVATE_KEY || '';
+
+    // Se NÃO houver credenciais explícitas de conta de serviço, NUNCA tenta carregar firebase-admin (evita crash na Vercel)
+    if (!saEnv && (!clientEmail || !rawPrivateKey)) {
+      console.log('[AndradeAgro PushEngine] Firebase Admin: Nenhuma credencial explícita de Service Account fornecida. Utilizando fallback direto.');
+      return null;
+    }
+
+    const { initializeApp, getApps, cert } = nodeRequire('firebase-admin/app');
+    const { getFirestore } = nodeRequire('firebase-admin/firestore');
+
     const existingApps = getApps();
     if (existingApps && existingApps.length > 0 && existingApps[0]) {
       adminDbInstance = getFirestore(existingApps[0]);
@@ -264,10 +281,7 @@ export function getFirebaseAdminDb(): Firestore | null {
       return adminDbInstance;
     }
 
-    const projectId = (process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId || '').trim();
-
     // 1. Verificar se existe JSON de conta de serviço completo (JSON puro ou Base64)
-    const saEnv = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_SERVICE_ACCOUNT || process.env.FIREBASE_CREDENTIALS;
     if (saEnv && typeof saEnv === 'string' && saEnv.trim().length > 10) {
       try {
         let cleanSa = saEnv.trim();
@@ -290,8 +304,6 @@ export function getFirebaseAdminDb(): Firestore | null {
     }
 
     // 2. Verificar se existem credenciais individuais explícitas (Client Email + Private Key)
-    const clientEmail = (process.env.FIREBASE_CLIENT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL || '').trim();
-    const rawPrivateKey = process.env.FIREBASE_PRIVATE_KEY || process.env.GOOGLE_PRIVATE_KEY || '';
     if (clientEmail && rawPrivateKey && rawPrivateKey.trim().length > 20) {
       try {
         let privateKey = rawPrivateKey.trim();

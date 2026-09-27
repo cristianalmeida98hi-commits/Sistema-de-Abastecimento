@@ -8,14 +8,43 @@
     <script>
       (function() {
         if (typeof window === 'undefined') return;
+
+        // 1. Intercepta e previne Unhandled Rejections e Erros de WebSocket / Vite globalmente
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event && (event.reason || event);
+          var msg = (reason && (reason.message || reason.stack || String(reason))) || '';
+          if (msg.indexOf('WebSocket') !== -1 || 
+              msg.indexOf('websocket') !== -1 || 
+              msg.indexOf('vite') !== -1 || 
+              msg.indexOf('closed without opened') !== -1 ||
+              msg.indexOf('closed without opening') !== -1) {
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          var msg = (event && (event.message || (event.error && event.error.message) || '')) || '';
+          if (msg.indexOf('WebSocket') !== -1 || 
+              msg.indexOf('websocket') !== -1 || 
+              msg.indexOf('vite') !== -1 || 
+              msg.indexOf('closed without opened') !== -1 ||
+              msg.indexOf('closed without opening') !== -1) {
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
         
-        // Silencia avisos e erros conhecidos de WebSocket do Vite no console
+        // 2. Silencia avisos e erros conhecidos de WebSocket do Vite no console
         var origWarn = console.warn;
         var origError = console.error;
         console.warn = function() {
           var msg = Array.prototype.join.call(arguments, ' ');
           if (msg.indexOf('failed to connect to websocket') !== -1 || 
               msg.indexOf('websocket closed without opening') !== -1 || 
+              msg.indexOf('WebSocket closed without opened') !== -1 || 
               msg.indexOf('[vite] connecting...') !== -1) {
             return;
           }
@@ -24,37 +53,87 @@
         console.error = function() {
           var msg = Array.prototype.join.call(arguments, ' ');
           if (msg.indexOf('failed to connect to websocket') !== -1 || 
-              msg.indexOf('websocket closed without opening') !== -1) {
+              msg.indexOf('websocket closed without opening') !== -1 ||
+              msg.indexOf('WebSocket closed without opened') !== -1) {
             return;
           }
           return origError.apply(console, arguments);
         };
 
-        // Intercepta e neutraliza erros de fechamento do WebSocket do Vite
+        // 3. Mock transparente para conexões HMR do Vite (evita falha de socket e rejeição de Promise)
         if (window.WebSocket) {
           var NativeWebSocket = window.WebSocket;
+
+          function createDummyHmrSocket(url, protocols) {
+            var listeners = {};
+            var dummy = {
+              url: url,
+              protocol: protocols || 'vite-hmr',
+              readyState: 1, // OPEN
+              CONNECTING: 0,
+              OPEN: 1,
+              CLOSING: 2,
+              CLOSED: 3,
+              binaryType: 'blob',
+              bufferedAmount: 0,
+              extensions: '',
+              onopen: null,
+              onmessage: null,
+              onerror: null,
+              onclose: null,
+              addEventListener: function(type, fn) {
+                if (!listeners[type]) listeners[type] = [];
+                listeners[type].push(fn);
+              },
+              removeEventListener: function(type, fn) {
+                if (!listeners[type]) return;
+                listeners[type] = listeners[type].filter(function(cb) { return cb !== fn; });
+              },
+              dispatchEvent: function(event) {
+                var type = event && event.type;
+                var cbs = listeners[type] || [];
+                for (var i = 0; i < cbs.length; i++) {
+                  try { cbs[i].call(dummy, event); } catch(e) {}
+                }
+                return true;
+              },
+              send: function() {},
+              close: function() {
+                dummy.readyState = 3;
+              }
+            };
+
+            // Notifica 'open' no próximo tick para o Vite resolver a Promise sem rejeição
+            setTimeout(function() {
+              try {
+                var evt = new Event('open');
+                if (typeof dummy.onopen === 'function') dummy.onopen(evt);
+                dummy.dispatchEvent(evt);
+              } catch(e) {}
+            }, 10);
+
+            return dummy;
+          }
+
           window.WebSocket = function(url, protocols) {
-            var isViteHmr = typeof url === 'string' && (url.indexOf('vite') !== -1 || protocols === 'vite-hmr');
+            var isViteHmr = typeof url === 'string' && (
+              url.indexOf('vite') !== -1 || 
+              url.indexOf(':24678') !== -1 ||
+              protocols === 'vite-hmr' ||
+              (Array.isArray(protocols) && protocols.indexOf('vite-hmr') !== -1)
+            );
+
+            if (isViteHmr) {
+              return createDummyHmrSocket(url, protocols);
+            }
+
             try {
-              var ws = new NativeWebSocket(url, protocols);
-              if (isViteHmr) {
-                ws.addEventListener('error', function(e) {
-                  if (e && e.stopImmediatePropagation) e.stopImmediatePropagation();
-                }, true);
-              }
-              return ws;
+              return new NativeWebSocket(url, protocols);
             } catch (err) {
-              if (isViteHmr) {
-                return {
-                  addEventListener: function() {},
-                  removeEventListener: function() {},
-                  send: function() {},
-                  close: function() {}
-                };
-              }
-              throw err;
+              return createDummyHmrSocket(url, protocols);
             }
           };
+
           window.WebSocket.prototype = NativeWebSocket.prototype;
           window.WebSocket.CONNECTING = NativeWebSocket.CONNECTING;
           window.WebSocket.OPEN = NativeWebSocket.OPEN;

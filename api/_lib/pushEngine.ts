@@ -13,9 +13,15 @@ const webpush = (webpushLib as any).default || webpushLib;
 export interface PushDeviceRecord {
   id: string;
   userId: string;
+  userEmail?: string;
   userName: string;
   userRole: string;
+  role?: string;
   endpoint: string;
+  keys?: {
+    p256dh: string;
+    auth: string;
+  };
   subscription: {
     endpoint: string;
     keys?: {
@@ -26,11 +32,20 @@ export interface PushDeviceRecord {
   deviceInfo?: {
     userAgent?: string;
     platform?: string;
+    isPWA?: boolean;
+    isMobile?: boolean;
     timestamp?: string;
   };
+  platform?: string;
+  userAgent?: string;
+  isPWA?: boolean;
+  isMobile?: boolean;
+  permission?: string;
+  authorized?: boolean;
   active: boolean;
   updatedAt: string;
   createdAt: string;
+  lastSeenAt?: string;
 }
 
 /**
@@ -111,61 +126,15 @@ export function verifyVapidKeyPair(pubKey: string, privKey: string): VapidKeyVal
   }
 }
 
-/**
- * Fallback para o banco persistente data/db.json (ambiente Google AI Studio)
- */
-function loadFallbackDbKeys(): { publicKey?: string; privateKey?: string; subject?: string } {
-  try {
-    const candidates = [
-      path.join(process.cwd(), 'data', 'db.json'),
-      path.join('/tmp', 'andradeagro_db.json')
-    ];
-    for (const p of candidates) {
-      if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed?.andradeagro_vapid_keys) {
-          return parsed.andradeagro_vapid_keys;
-        }
-      }
-    }
-  } catch {}
-  return {
-    publicKey: OFFICIAL_VAPID_PUBLIC_KEY,
-    privateKey: '',
-    subject: 'mailto:suporte@andradeagro.com.br'
-  };
-}
-
-const fallbackDbKeys = loadFallbackDbKeys();
-
-// 1. Prioridade: Variáveis de ambiente (Vercel)
-// 2. Fallback: data/db.json (Google AI Studio)
+// Variáveis de ambiente oficiais: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
 export function getVapidKeys(): { publicKey: string; privateKey: string; subject: string } {
-  const fallback = loadFallbackDbKeys();
-  const subject = cleanKey(process.env.VAPID_SUBJECT) || cleanKey(fallback.subject) || 'mailto:suporte@andradeagro.com.br';
+  const subject = cleanKey(process.env.VAPID_SUBJECT) || 'mailto:suporte@andradeagro.com.br';
   const publicKey = cleanKey(process.env.VAPID_PUBLIC_KEY) || 
                     cleanKey(process.env.VITE_VAPID_PUBLIC_KEY) || 
-                    cleanKey(fallback.publicKey) || 
                     OFFICIAL_VAPID_PUBLIC_KEY;
+  const privateKey = cleanKey(process.env.VAPID_PRIVATE_KEY) || cleanKey(process.env.PRIVATE_VAPID_KEY) || '';
 
-  const envPrivate = cleanKey(process.env.VAPID_PRIVATE_KEY) || cleanKey(process.env.PRIVATE_VAPID_KEY);
-  const dbPrivate = cleanKey(fallback.privateKey);
-
-  let chosenPrivate = envPrivate || dbPrivate || '';
-
-  // Se a chave privada do ambiente não confere com a pública do Firebase, mas a do db.json confere, utiliza a do db.json
-  if (envPrivate && dbPrivate) {
-    const envCheck = verifyVapidKeyPair(publicKey, envPrivate);
-    if (!envCheck.matches) {
-      const dbCheck = verifyVapidKeyPair(publicKey, dbPrivate);
-      if (dbCheck.matches) {
-        chosenPrivate = dbPrivate;
-      }
-    }
-  }
-
-  return { publicKey, privateKey: chosenPrivate, subject };
+  return { publicKey, privateKey, subject };
 }
 
 let vapidConfiguredSuccessfully = false;
@@ -179,21 +148,37 @@ export function ensureVapidConfigured(): {
 } {
   const { publicKey, privateKey, subject } = getVapidKeys();
   const check = verifyVapidKeyPair(publicKey, privateKey);
-  if (check.matches) {
+  
+  if (publicKey && privateKey) {
     try {
       webpush.setVapidDetails(subject, publicKey, privateKey);
       vapidConfiguredSuccessfully = true;
-      vapidConfigError = null;
-      return { configured: true, publicKeyPrefix: check.publicKeyPrefix, privateKeyConfigured: true };
+      vapidConfigError = check.matches ? null : (check.error || null);
+      return { 
+        configured: true, 
+        publicKeyPrefix: check.publicKeyPrefix, 
+        privateKeyConfigured: true,
+        error: check.matches ? undefined : check.error 
+      };
     } catch (e: any) {
       vapidConfiguredSuccessfully = false;
       vapidConfigError = e?.message || String(e);
-      return { configured: false, error: vapidConfigError, publicKeyPrefix: check.publicKeyPrefix, privateKeyConfigured: true };
+      return { 
+        configured: false, 
+        error: vapidConfigError, 
+        publicKeyPrefix: check.publicKeyPrefix, 
+        privateKeyConfigured: true 
+      };
     }
   } else {
     vapidConfiguredSuccessfully = false;
-    vapidConfigError = check.error || 'Par de chaves VAPID inválido';
-    return { configured: false, error: vapidConfigError, publicKeyPrefix: check.publicKeyPrefix, privateKeyConfigured: check.privateKeyConfigured };
+    vapidConfigError = check.error || 'Par de chaves VAPID incompleto';
+    return { 
+      configured: false, 
+      error: vapidConfigError, 
+      publicKeyPrefix: check.publicKeyPrefix, 
+      privateKeyConfigured: check.privateKeyConfigured 
+    };
   }
 }
 
@@ -527,81 +512,132 @@ export function isValidPushSubscription(sub: any): boolean {
   }
 }
 
-// Resilient file-backed & in-memory database
-function getDbFilePath(): string {
-  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT) {
-    return path.join('/tmp', 'andradeagro_db.json');
+// Deduplicação em memória volátil de eventos no mesmo ciclo de vida (sem persistência em disco)
+const processedEventIds = new Set<string>();
+
+function toFirestoreRestValue(val: any): any {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'string') return { stringValue: val };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    if (Number.isInteger(val)) return { integerValue: String(val) };
+    return { doubleValue: val };
   }
-  return path.join(process.cwd(), 'data', 'db.json');
-}
-
-let inMemoryStore: {
-  devices: PushDeviceRecord[];
-  processedEvents: string[];
-} = {
-  devices: [],
-  processedEvents: []
-};
-
-function loadStore() {
-  try {
-    const dbPath = getDbFilePath();
-    if (fs.existsSync(dbPath)) {
-      const raw = fs.readFileSync(dbPath, 'utf-8');
-      const data = JSON.parse(raw);
-      if (Array.isArray(data['andradeagro_user_devices_v1'])) {
-        inMemoryStore.devices = data['andradeagro_user_devices_v1'];
-      }
-      if (Array.isArray(data['andradeagro_processed_push_events'])) {
-        inMemoryStore.processedEvents = data['andradeagro_processed_push_events'];
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map(toFirestoreRestValue) } };
+  }
+  if (typeof val === 'object') {
+    const fields: Record<string, any> = {};
+    for (const key of Object.keys(val)) {
+      if (val[key] !== undefined) {
+        fields[key] = toFirestoreRestValue(val[key]);
       }
     }
-  } catch (err) {
-    console.warn('[AndradeAgro PushEngine] Could not load store from disk:', err);
+    return { mapValue: { fields } };
   }
+  return { stringValue: String(val) };
 }
 
-function saveStore() {
+function toFirestoreRestDoc(obj: Record<string, any>): Record<string, any> {
+  const fields: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    if (obj[key] !== undefined) {
+      fields[key] = toFirestoreRestValue(obj[key]);
+    }
+  }
+  return { fields };
+}
+
+/**
+ * Salva ou atualiza um dispositivo diretamente na coleção 'user_devices' do Firestore via REST
+ */
+async function saveFirestoreDeviceRest(record: PushDeviceRecord): Promise<boolean> {
   try {
-    const dbPath = getDbFilePath();
-    const dataDir = path.dirname(dbPath);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+    const token = await getFirebaseAuthToken();
+    if (!token) {
+      console.warn('[AndradeAgro PushEngine] Não foi possível autenticar token REST para gravar dispositivo.');
+      return false;
     }
 
-    let existing: Record<string, any> = {};
-    if (fs.existsSync(dbPath)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
-      } catch {}
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/user_devices/${record.id}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch(firestoreUrl, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(toFirestoreRestDoc(record)),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.warn(`[AndradeAgro PushEngine] Erro ao gravar dispositivo via REST: HTTP ${res.status} - ${errText.slice(0, 120)}`);
+      return false;
     }
 
-    existing['andradeagro_user_devices_v1'] = inMemoryStore.devices;
-    existing['andradeagro_processed_push_events'] = inMemoryStore.processedEvents;
-    fs.writeFileSync(dbPath, JSON.stringify(existing, null, 2), 'utf-8');
-  } catch (err) {
-    console.warn('[AndradeAgro PushEngine] Could not save store to disk:', err);
+    return true;
+  } catch (err: any) {
+    console.warn('[AndradeAgro PushEngine] Exceção ao gravar dispositivo via REST:', err?.message || err);
+    return false;
   }
 }
 
-loadStore();
+/**
+ * Desativa um dispositivo diretamente na coleção 'user_devices' do Firestore via REST
+ */
+async function deactivateFirestoreDeviceRest(endpoint: string): Promise<boolean> {
+  try {
+    const token = await getFirebaseAuthToken();
+    if (!token) return false;
+
+    const stableId = getStableDeviceId(endpoint);
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/user_devices/${stableId}?updateMask.fieldPaths=active&updateMask.fieldPaths=updatedAt`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+
+    const nowIso = new Date().toISOString();
+    const res = await fetch(firestoreUrl, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        fields: {
+          active: { booleanValue: false },
+          updatedAt: { stringValue: nowIso }
+        }
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    return res.ok;
+  } catch (err: any) {
+    console.warn('[AndradeAgro PushEngine] Exceção ao desativar dispositivo via REST:', err?.message || err);
+    return false;
+  }
+}
 
 export interface ActiveAuthorizedDevicesResult {
   activeDevices: PushDeviceRecord[];
   totalDevices: number;
   querySuccess: boolean;
   queryError?: string;
-  source: 'FIREBASE_ADMIN' | 'FIRESTORE_REST' | 'LOCAL_STORE';
+  source: 'FIREBASE_ADMIN' | 'FIRESTORE_REST';
 }
 
 /**
  * FONTE ÚNICA DA REGRA DE NEGÓCIO PARA DISPOSITIVOS ATIVOS E AUTORIZADOS
  * Regra unificada para AI Studio e Vercel:
- *  - Mesmo projeto Firebase (andrade-agro)
- *  - Mesma coleção 'user_devices'
- *  - Mesma estrutura de dados
- *  - Mesmos critérios de dispositivos ativos/autorizados
- *  - Identificação estável e deduplicação estrita por endpoint de subscription
+ *  - O Firestore 'user_devices' é a ÚNICA fonte de verdade.
+ *  - Não utiliza data/db.json ou filesystem local da Vercel.
+ *  - Identificação estável e deduplicação estrita por endpoint de subscription.
  */
 export async function getActiveAuthorizedDevices(options?: {
   targetUserId?: string;
@@ -609,19 +645,17 @@ export async function getActiveAuthorizedDevices(options?: {
   directUserName?: string;
   directUserRole?: string;
 }): Promise<ActiveAuthorizedDevicesResult> {
-  loadStore();
   const endpointMap = new Map<string, { record: PushDeviceRecord; timestamp: number; active: boolean }>();
-  let source: 'FIREBASE_ADMIN' | 'FIRESTORE_REST' | 'LOCAL_STORE' = 'LOCAL_STORE';
+  let source: 'FIREBASE_ADMIN' | 'FIRESTORE_REST' = 'FIRESTORE_REST';
   let querySuccess = false;
   let queryError: string | undefined = undefined;
 
-  // 1. Prioridade: Firebase Admin SDK (Produção Vercel / Servidor com credencial de Service Account)
+  // 1. Prioridade: Firebase Admin SDK se configurado com credenciais válidas
   lastFirestoreQueryError = null;
   const adminDb = getFirebaseAdminDb();
   if (adminDb) {
     try {
       console.log(`[AndradeAgro PushEngine] [ETAPA 3/10] Firestore acessado via Firebase Admin: Projeto "${firebaseConfig.projectId}", Coleção "user_devices"`);
-      console.log(`[AndradeAgro PushEngine] [ETAPA 4/10] user_devices consultado via Admin SDK...`);
       const adminPromise = adminDb.collection('user_devices').get();
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Timeout Firebase Admin (3500ms)')), 3500)
@@ -629,9 +663,8 @@ export async function getActiveAuthorizedDevices(options?: {
       const snap = await Promise.race([adminPromise, timeoutPromise]);
       querySuccess = true;
       source = 'FIREBASE_ADMIN';
-      console.log(`[AndradeAgro PushEngine] [ETAPA 4/10] Firebase Admin retornou ${snap.size} documento(s) brutos em 'user_devices'.`);
 
-      snap.forEach((docSnap) => {
+      snap.forEach((docSnap: any) => {
         const data = docSnap.data() as any;
         if (data && data.subscription) {
           const endpoint = data.endpoint || data.subscription?.endpoint;
@@ -645,8 +678,9 @@ export async function getActiveAuthorizedDevices(options?: {
                 record: {
                   id: docSnap.id,
                   userId: data.userId || '',
+                  userEmail: data.userEmail || '',
                   userName: data.userName || 'Usuário',
-                  userRole: data.userRole || 'FUNCIONARIO',
+                  userRole: data.role || data.userRole || 'FUNCIONARIO',
                   endpoint,
                   subscription: data.subscription,
                   deviceInfo: data.deviceInfo || {},
@@ -664,16 +698,15 @@ export async function getActiveAuthorizedDevices(options?: {
     } catch (adminErr: any) {
       queryError = adminErr?.message || 'Falha ao consultar Firebase Admin';
       lastFirestoreQueryError = queryError;
-      console.warn(`[AndradeAgro PushEngine] [ETAPA 4/10] Aviso na consulta do Firebase Admin:`, queryError);
+      console.warn(`[AndradeAgro PushEngine] Aviso na consulta do Firebase Admin:`, queryError);
     }
   }
 
-  // 2. Fallback: Consulta via Firestore REST API (caso Admin não esteja credenciado no ambiente)
+  // 2. Consulta direta ao Firestore via REST API (ÚNICA FONTE DE VERDADE na Vercel e quando sem Service Account)
   if (!querySuccess) {
     console.log(`[AndradeAgro PushEngine] [ETAPA 3/10] Firestore acessado via REST API: Projeto "${firebaseConfig.projectId}", Coleção "user_devices"`);
-    console.log(`[AndradeAgro PushEngine] [ETAPA 4/10] user_devices consultado via Firestore REST...`);
     const restResult = await fetchFirestoreDevicesRest();
-    if (restResult.devices && restResult.devices.length > 0) {
+    if (restResult.devices && !restResult.error) {
       querySuccess = true;
       source = 'FIRESTORE_REST';
       for (const d of restResult.devices) {
@@ -693,28 +726,7 @@ export async function getActiveAuthorizedDevices(options?: {
     }
   }
 
-  // 3. Fallback: Base persistente local em memória/disco
-  if (endpointMap.size === 0 && inMemoryStore.devices.length > 0) {
-    source = 'LOCAL_STORE';
-    for (const d of inMemoryStore.devices) {
-      if (d.endpoint && isValidPushSubscription(d.subscription)) {
-        const docTimestamp = d.updatedAt ? new Date(d.updatedAt).getTime() : 0;
-        const existing = endpointMap.get(d.endpoint);
-        if (!existing || docTimestamp >= existing.timestamp) {
-          endpointMap.set(d.endpoint, {
-            record: d,
-            timestamp: docTimestamp,
-            active: d.active !== false
-          });
-        }
-      }
-    }
-    if (!querySuccess && inMemoryStore.devices.length > 0) {
-      querySuccess = true;
-    }
-  }
-
-  // 4. Se uma subscrição direta do cliente foi enviada na chamada (ex: botão de teste no painel)
+  // 3. Se uma subscrição direta do cliente foi enviada na chamada (ex: botão de teste no painel)
   if (options?.directSubscription && isValidPushSubscription(options.directSubscription)) {
     const directEp = options.directSubscription.endpoint;
     const directId = getStableDeviceId(directEp);
@@ -722,6 +734,7 @@ export async function getActiveAuthorizedDevices(options?: {
       record: {
         id: directId,
         userId: options.targetUserId || 'direct-user',
+        userEmail: '',
         userName: options.directUserName || 'Usuário Atual',
         userRole: options.directUserRole || 'ADMIN',
         endpoint: directEp,
@@ -739,10 +752,6 @@ export async function getActiveAuthorizedDevices(options?: {
   const allConsolidated = Array.from(endpointMap.values());
   const totalDevices = allConsolidated.length;
 
-  // Filtragem da Regra de Negócio:
-  // - Apenas dispositivos com active !== false
-  // - Apenas subscrições válidas com endpoint https://
-  // - Filtragem por targetUserId se solicitado
   const activeDevices = allConsolidated
     .filter(item => item.active && item.record.active !== false)
     .map(item => item.record)
@@ -752,7 +761,7 @@ export async function getActiveAuthorizedDevices(options?: {
       return true;
     });
 
-  console.log(`[AndradeAgro PushEngine] [ETAPA 5/10] Dispositivos encontrados: ${activeDevices.length} ativo(s) e elegível(eis) de ${totalDevices} total(is) analisados (Fonte: ${source}).`);
+  console.log(`[AndradeAgro PushEngine] [ETAPA 5/10] Dispositivos no Firestore: ${activeDevices.length} ativo(s) de ${totalDevices} total(is) analisados (Fonte: ${source}).`);
 
   return {
     activeDevices,
@@ -764,7 +773,7 @@ export async function getActiveAuthorizedDevices(options?: {
 }
 
 /**
- * Consulta de todos os dispositivos ativos mantida para compatibilidade retroativa
+ * Consulta de todos os dispositivos ativos no Firestore
  */
 export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
   const result = await getActiveAuthorizedDevices();
@@ -772,39 +781,28 @@ export async function fetchAllActiveDevices(): Promise<PushDeviceRecord[]> {
 }
 
 export async function deactivateEndpointEverywhere(endpoint: string) {
-  // 1. Local
-  loadStore();
-  inMemoryStore.devices = inMemoryStore.devices.map(d => {
-    if (d.subscription && d.subscription.endpoint === endpoint) {
-      return { ...d, active: false, updatedAt: new Date().toISOString() };
-    }
-    return d;
-  });
-  saveStore();
+  if (!endpoint) return;
+  const stableId = getStableDeviceId(endpoint);
+  const nowIso = new Date().toISOString();
 
-  // 2. Firebase Admin se disponível
+  // 1. Firebase Admin se disponível
   try {
     const adminDb = getFirebaseAdminDb();
     if (adminDb) {
-      const stableId = getStableDeviceId(endpoint);
-      const snap = await adminDb.collection('user_devices').where('endpoint', '==', endpoint).get();
-      const batch = adminDb.batch();
-      let updatedStable = false;
-      snap.forEach((docSnap) => {
-        if (docSnap.id === stableId) updatedStable = true;
-        batch.update(docSnap.ref, { active: false, updatedAt: new Date().toISOString() });
-      });
-      if (!updatedStable) {
-        batch.set(adminDb.collection('user_devices').doc(stableId), {
-          active: false,
-          endpoint,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      }
-      await batch.commit().catch(() => null);
+      await adminDb.collection('user_devices').doc(stableId).set({
+        active: false,
+        updatedAt: nowIso
+      }, { merge: true });
     }
   } catch (err: any) {
     console.warn('[AndradeAgro PushEngine] Warning deactivating in Firestore Admin:', err?.message || err);
+  }
+
+  // 2. Firestore REST API
+  try {
+    await deactivateFirestoreDeviceRest(endpoint);
+  } catch (err: any) {
+    console.warn('[AndradeAgro PushEngine] Warning deactivating in Firestore REST:', err?.message || err);
   }
 }
 
@@ -883,80 +881,123 @@ export function getVapidPublicKey(): string {
 
 export async function registerDevice(params: {
   userId: string;
+  userEmail?: string;
   userName?: string;
   userRole?: string;
   subscription: any;
   deviceInfo?: any;
-}): Promise<PushDeviceRecord> {
-  loadStore();
-  const { userId, userName, userRole, subscription, deviceInfo } = params;
+}): Promise<{ ok: boolean; deviceId: string; message: string; device: PushDeviceRecord }> {
+  const { userId, userEmail, userName, userRole, subscription, deviceInfo } = params;
   const endpoint = subscription?.endpoint || '';
+  if (!endpoint || !isValidPushSubscription(subscription)) {
+    throw new Error('Inscrição push inválida (endpoint ou chaves p256dh/auth ausentes)');
+  }
   const stableId = getStableDeviceId(endpoint);
-
-  const existingIdx = inMemoryStore.devices.findIndex(
-    d => (d.subscription && d.subscription.endpoint === endpoint) || d.id === stableId
-  );
+  const nowIso = new Date().toISOString();
 
   const record: PushDeviceRecord = {
     id: stableId,
-    userId,
-    userName: userName || 'Usuário',
-    userRole: userRole || 'FUNCIONARIO',
     endpoint,
-    subscription,
-    deviceInfo: deviceInfo || {},
+    keys: {
+      p256dh: subscription.keys?.p256dh || '',
+      auth: subscription.keys?.auth || ''
+    },
+    subscription: {
+      endpoint,
+      keys: {
+        p256dh: subscription.keys?.p256dh || '',
+        auth: subscription.keys?.auth || ''
+      }
+    },
+    userId: userId || 'anonymous',
+    userEmail: userEmail || '',
+    userName: userName || 'Usuário',
+    role: userRole || 'FUNCIONARIO',
+    userRole: userRole || 'FUNCIONARIO',
+    platform: deviceInfo?.platform || '',
+    userAgent: deviceInfo?.userAgent || '',
+    isPWA: Boolean(deviceInfo?.isPWA),
+    isMobile: Boolean(deviceInfo?.isMobile),
+    permission: 'granted',
+    authorized: true,
     active: true,
-    updatedAt: new Date().toISOString(),
-    createdAt: existingIdx >= 0 ? inMemoryStore.devices[existingIdx].createdAt : new Date().toISOString()
-  };
+    updatedAt: nowIso,
+    createdAt: nowIso,
+    lastSeenAt: nowIso
+  } as any;
 
-  if (existingIdx >= 0) {
-    inMemoryStore.devices[existingIdx] = record;
-  } else {
-    inMemoryStore.devices.unshift(record);
-  }
-  saveStore();
-
-  // Sync to Firestore via Admin SDK se disponível
+  // Sync strictly to Firestore (Admin SDK if configured, otherwise Firestore REST)
+  let saved = false;
   try {
     const adminDb = getFirebaseAdminDb();
     if (adminDb) {
-      await adminDb.collection('user_devices').doc(record.id).set(record, { merge: true });
-      console.log(`[AndradeAgro PushEngine] Dispositivo registrado via Firebase Admin: ${record.id}`);
+      await adminDb.collection('user_devices').doc(stableId).set(record, { merge: true });
+      console.log(`[AndradeAgro PushEngine] Dispositivo registrado via Firebase Admin: ${stableId}`);
+      saved = true;
     }
   } catch (fsErr: any) {
     console.warn('[AndradeAgro PushEngine] Warning syncing to Firestore Admin:', fsErr?.message || fsErr);
   }
 
-  return record;
-}
-
-export async function unregisterDevice(params: { endpoint?: string; userId?: string }): Promise<boolean> {
-  const { endpoint, userId } = params;
-  if (endpoint) {
-    await deactivateEndpointEverywhere(endpoint);
-  } else if (userId) {
-    loadStore();
-    for (const d of inMemoryStore.devices) {
-      if (d.userId === userId && d.endpoint) {
-        await deactivateEndpointEverywhere(d.endpoint);
-      }
+  if (!saved) {
+    saved = await saveFirestoreDeviceRest(record);
+    if (saved) {
+      console.log(`[AndradeAgro PushEngine] Dispositivo registrado via Firestore REST: ${stableId}`);
+    } else {
+      console.warn(`[AndradeAgro PushEngine] Falha ao registrar dispositivo via Firestore REST: ${stableId}`);
     }
   }
-  return true;
+
+  return {
+    ok: true,
+    deviceId: stableId,
+    message: 'Dispositivo sincronizado com sucesso',
+    device: record
+  };
+}
+
+export async function unregisterDevice(params: { endpoint?: string; deviceId?: string; userId?: string }): Promise<{ ok: boolean; message: string }> {
+  const { endpoint, deviceId } = params;
+  if (endpoint) {
+    await deactivateEndpointEverywhere(endpoint);
+  } else if (deviceId) {
+    const adminDb = getFirebaseAdminDb();
+    const nowIso = new Date().toISOString();
+    if (adminDb) {
+      await adminDb.collection('user_devices').doc(deviceId).set({
+        active: false,
+        authorized: false,
+        updatedAt: nowIso
+      }, { merge: true }).catch(() => null);
+    }
+  }
+  return { ok: true, message: 'Dispositivo desativado com sucesso' };
 }
 
 export async function getDevicesList(): Promise<any[]> {
   const devices = await fetchAllActiveDevices();
   return devices.map(d => ({
     id: d.id,
+    endpoint: d.endpoint,
+    keys: (d as any).keys || {
+      p256dh: d.subscription?.keys?.p256dh || '',
+      auth: d.subscription?.keys?.auth || ''
+    },
     userId: d.userId,
+    userEmail: (d as any).userEmail || '',
     userName: d.userName,
-    userRole: d.userRole,
+    role: d.userRole || (d as any).role || 'FUNCIONARIO',
+    userRole: d.userRole || (d as any).role || 'FUNCIONARIO',
+    platform: d.deviceInfo?.platform || (d as any).platform || 'desconhecido',
+    userAgent: d.deviceInfo?.userAgent || (d as any).userAgent || '',
+    isPWA: Boolean(d.deviceInfo?.isPWA || (d as any).isPWA),
+    isMobile: Boolean(d.deviceInfo?.isMobile || (d as any).isMobile),
+    permission: (d as any).permission || 'granted',
+    authorized: (d as any).authorized !== false,
     active: d.active !== false,
-    deviceInfo: d.deviceInfo || {},
     updatedAt: d.updatedAt,
     createdAt: d.createdAt,
+    lastSeenAt: (d as any).lastSeenAt || d.updatedAt,
     endpointPreview: d.endpoint ? `${d.endpoint.slice(0, 35)}...` : 'N/A'
   }));
 }
@@ -968,9 +1009,10 @@ export async function getEngineStatus(): Promise<any> {
   const { publicKey } = getVapidKeys();
 
   return {
+    ok: queryOk,
     success: queryOk,
     querySuccess: queryOk,
-    queryError: !queryOk && result.queryError ? result.queryError : undefined,
+    backendWorking: true,
     vapidConfigured: vapidState.configured,
     vapidKeyPairMatches: vapidState.configured,
     vapidPublicKeyPrefix: vapidState.publicKeyPrefix,
@@ -978,12 +1020,15 @@ export async function getEngineStatus(): Promise<any> {
     vapidError: !vapidState.configured ? vapidState.error : undefined,
     vapidPublicKey: publicKey,
     firebaseAdmin: getFirebaseAdminDiagnostics(),
+    firestoreAccessible: queryOk,
     totalDevices: result.totalDevices,
     activeAuthorizedCount: result.activeDevices.length,
+    validSubscriptionsCount: result.activeDevices.length,
     authorizedDevices: result.activeDevices.map(d => ({
+      id: d.id,
       userName: d.userName,
-      userRole: d.userRole,
-      platform: d.deviceInfo?.platform || 'desconhecido',
+      userRole: d.userRole || (d as any).role,
+      platform: d.deviceInfo?.platform || (d as any).platform || 'desconhecido',
       updatedAt: d.updatedAt
     })),
     source: result.source
@@ -994,22 +1039,24 @@ export function resetEventDeduplication(params: { prefix?: string; eventId?: str
   removedCount: number;
   remainingCount: number;
 } {
-  loadStore();
   const { prefix, eventId } = params;
-  const beforeCount = inMemoryStore.processedEvents.length;
+  const beforeCount = processedEventIds.size;
 
   if (eventId) {
-    inMemoryStore.processedEvents = inMemoryStore.processedEvents.filter(id => id !== eventId);
+    processedEventIds.delete(eventId);
   } else if (prefix) {
-    inMemoryStore.processedEvents = inMemoryStore.processedEvents.filter(id => !id.startsWith(prefix));
+    for (const id of Array.from(processedEventIds)) {
+      if (id.startsWith(prefix)) {
+        processedEventIds.delete(id);
+      }
+    }
   } else {
-    inMemoryStore.processedEvents = [];
+    processedEventIds.clear();
   }
 
-  saveStore();
   return {
-    removedCount: beforeCount - inMemoryStore.processedEvents.length,
-    remainingCount: inMemoryStore.processedEvents.length
+    removedCount: beforeCount - processedEventIds.size,
+    remainingCount: processedEventIds.size
   };
 }
 
@@ -1029,10 +1076,16 @@ export async function dispatchPushToAuthorizedUsers(event: {
   directUserName?: string;
   directUserRole?: string;
 }): Promise<{
+  ok: boolean;
   success: boolean;
   duplicate?: boolean;
+  totalDevices: number;
+  sent: number;
   sentCount: number;
-  failedCount?: number;
+  failed: number;
+  failedCount: number;
+  removed: number;
+  removedCount: number;
   recipientsCount?: number;
   errors?: string[];
   stage?: string;
@@ -1062,23 +1115,29 @@ export async function dispatchPushToAuthorizedUsers(event: {
   console.log(`[AndradeAgro PushEngine] [ETAPA 2/10] Firebase Admin status: ${hasFirebaseAdmin ? 'INICIALIZADO (Service Account)' : 'NÃO INICIALIZADO (modo fallback)'}`);
 
   // Deduplication check
-  loadStore();
-  if (inMemoryStore.processedEvents.includes(eventId)) {
+  if (processedEventIds.has(eventId)) {
     console.log(`[AndradeAgro PushEngine] Evento ${eventId} já processado anteriormente. Descartando duplicata.`);
     return {
+      ok: false,
       success: false,
       duplicate: true,
+      sent: 0,
       sentCount: 0,
+      failed: 0,
+      failedCount: 0,
+      removed: 0,
+      removedCount: 0,
+      totalDevices: 0,
       stage: 'inicio',
       message: 'Evento duplicado já processado anteriormente.'
-    };
+    } as any;
   }
 
-  inMemoryStore.processedEvents.push(eventId);
-  if (inMemoryStore.processedEvents.length > 500) {
-    inMemoryStore.processedEvents = inMemoryStore.processedEvents.slice(-500);
+  processedEventIds.add(eventId);
+  if (processedEventIds.size > 500) {
+    const first = processedEventIds.values().next().value;
+    if (first) processedEventIds.delete(first);
   }
-  saveStore();
 
   let title = customTitle || '⚠️ Notificação AndradeAgro';
   let url = '/';
@@ -1136,10 +1195,16 @@ export async function dispatchPushToAuthorizedUsers(event: {
       : 'Nenhum dispositivo registrado com permissão ativa e credenciais válidas encontrado no servidor.';
     console.warn(`[AndradeAgro PushEngine] [ETAPA 5/10] Aviso: ${noDevicesMsg}`);
     return {
+      ok: false,
       success: false,
       duplicate: false,
+      totalDevices: devicesResult.totalDevices,
+      sent: 0,
       sentCount: 0,
+      failed: 0,
       failedCount: 0,
+      removed: 0,
+      removedCount: 0,
       recipientsCount: 0,
       stage: 'busca_dispositivos',
       errors: [noDevicesMsg],
@@ -1156,10 +1221,16 @@ export async function dispatchPushToAuthorizedUsers(event: {
     const keyError = vapidState.error || 'Configuração VAPID incompleta ou divergente';
     console.warn(`[AndradeAgro PushEngine] [ETAPA 6/10] AVISO TÉCNICO VAPID: ${keyError}`);
     return {
+      ok: false,
       success: false,
       duplicate: false,
+      totalDevices: targets.length,
+      sent: 0,
       sentCount: 0,
+      failed: 0,
       failedCount: 0,
+      removed: 0,
+      removedCount: 0,
       recipientsCount: targets.length,
       stage: 'validacao_chaves',
       errors: [keyError],
@@ -1222,10 +1293,16 @@ export async function dispatchPushToAuthorizedUsers(event: {
   console.log(`[AndradeAgro PushEngine] [ETAPA 9/10] Envio concluído: ${sentCount} enviado(s) com sucesso, ${failedCount} falha(s).`);
 
   return {
+    ok: isSuccess,
     success: isSuccess,
     duplicate: false,
+    totalDevices: targets.length,
+    sent: sentCount,
     sentCount,
+    failed: failedCount,
     failedCount,
+    removed: invalidEndpoints.length,
+    removedCount: invalidEndpoints.length,
     recipientsCount: targets.length,
     stage: isSuccess ? 'sucesso' : 'servico_push',
     errors: errors.length > 0 ? errors : undefined,

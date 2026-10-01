@@ -9,15 +9,21 @@
       (function() {
         if (typeof window === 'undefined') return;
 
+        function isIgnorableWebSocketError(msg) {
+          if (!msg || typeof msg !== 'string') return false;
+          var lower = msg.toLowerCase();
+          return lower.indexOf('websocket') !== -1 ||
+                 lower.indexOf('vite') !== -1 ||
+                 lower.indexOf('closed without opened') !== -1 ||
+                 lower.indexOf('closed without opening') !== -1 ||
+                 lower.indexOf('failed to connect to websocket') !== -1;
+        }
+
         // 1. Intercepta e previne Unhandled Rejections e Erros de WebSocket / Vite globalmente
         window.addEventListener('unhandledrejection', function(event) {
           var reason = event && (event.reason || event);
           var msg = (reason && (reason.message || reason.stack || String(reason))) || '';
-          if (msg.indexOf('WebSocket') !== -1 || 
-              msg.indexOf('websocket') !== -1 || 
-              msg.indexOf('vite') !== -1 || 
-              msg.indexOf('closed without opened') !== -1 ||
-              msg.indexOf('closed without opening') !== -1) {
+          if (isIgnorableWebSocketError(msg)) {
             if (event.preventDefault) event.preventDefault();
             if (event.stopImmediatePropagation) event.stopImmediatePropagation();
             return true;
@@ -25,12 +31,8 @@
         }, true);
 
         window.addEventListener('error', function(event) {
-          var msg = (event && (event.message || (event.error && event.error.message) || '')) || '';
-          if (msg.indexOf('WebSocket') !== -1 || 
-              msg.indexOf('websocket') !== -1 || 
-              msg.indexOf('vite') !== -1 || 
-              msg.indexOf('closed without opened') !== -1 ||
-              msg.indexOf('closed without opening') !== -1) {
+          var msg = (event && (event.message || (event.error && (event.error.message || event.error.stack)))) || '';
+          if (isIgnorableWebSocketError(msg)) {
             if (event.preventDefault) event.preventDefault();
             if (event.stopImmediatePropagation) event.stopImmediatePropagation();
             return true;
@@ -42,19 +44,14 @@
         var origError = console.error;
         console.warn = function() {
           var msg = Array.prototype.join.call(arguments, ' ');
-          if (msg.indexOf('failed to connect to websocket') !== -1 || 
-              msg.indexOf('websocket closed without opening') !== -1 || 
-              msg.indexOf('WebSocket closed without opened') !== -1 || 
-              msg.indexOf('[vite] connecting...') !== -1) {
+          if (isIgnorableWebSocketError(msg) || msg.indexOf('[vite] connecting...') !== -1) {
             return;
           }
           return origWarn.apply(console, arguments);
         };
         console.error = function() {
           var msg = Array.prototype.join.call(arguments, ' ');
-          if (msg.indexOf('failed to connect to websocket') !== -1 || 
-              msg.indexOf('websocket closed without opening') !== -1 ||
-              msg.indexOf('WebSocket closed without opened') !== -1) {
+          if (isIgnorableWebSocketError(msg)) {
             return;
           }
           return origError.apply(console, arguments);
@@ -103,7 +100,6 @@
               }
             };
 
-            // Notifica 'open' no próximo tick para o Vite resolver a Promise sem rejeição
             setTimeout(function() {
               try {
                 var evt = new Event('open');
@@ -116,21 +112,23 @@
           }
 
           window.WebSocket = function(url, protocols) {
-            var isViteHmr = typeof url === 'string' && (
-              url.indexOf('vite') !== -1 || 
-              url.indexOf(':24678') !== -1 ||
+            var urlStr = String(url || '');
+            var isViteHmr = (
+              urlStr.indexOf('vite') !== -1 || 
+              urlStr.indexOf(':24678') !== -1 ||
+              urlStr.indexOf(window.location.host) !== -1 ||
               protocols === 'vite-hmr' ||
               (Array.isArray(protocols) && protocols.indexOf('vite-hmr') !== -1)
             );
 
             if (isViteHmr) {
-              return createDummyHmrSocket(url, protocols);
+              return createDummyHmrSocket(urlStr, protocols);
             }
 
             try {
               return new NativeWebSocket(url, protocols);
             } catch (err) {
-              return createDummyHmrSocket(url, protocols);
+              return createDummyHmrSocket(urlStr, protocols);
             }
           };
 

@@ -8,17 +8,15 @@ import {
 export default async function handler(req: any, res: any) {
   if (handleCors(req, res)) return;
 
-  console.log(`[API /api/notifications/test] [ETAPA 1/10] Requisição POST recebida em /api/notifications/test`);
+  console.log(`[API /api/notifications/test] Requisição POST recebida em /api/notifications/test`);
 
   if (req.method !== 'POST') {
-    return sendJson(res, 405, { success: false, error: 'Method Not Allowed' });
+    return sendJson(res, 405, { ok: false, error: 'Method Not Allowed', stage: 'http' });
   }
 
   try {
     const body = await parseRequestBody(req);
     const { userId, userName, userRole, title, description, subscription } = body;
-
-    console.log(`[API /api/notifications/test] [ETAPA 1/10] Payload do teste: usuário="${userName || userId || 'N/A'}", perfil="${userRole || 'N/A'}", possuiSubscriçãoDireta=${Boolean(subscription)}`);
 
     const result = await dispatchPushToAuthorizedUsers({
       eventType: 'TEST',
@@ -32,21 +30,39 @@ export default async function handler(req: any, res: any) {
       directUserRole: userRole
     });
 
-    const httpCode = 200;
-    console.log(`[API /api/notifications/test] [ETAPA 10/10] Resposta retornada: HTTP ${httpCode}, success=${result.success}, sentCount=${result.sentCount}, failedCount=${result.failedCount || 0}`);
-    return sendJson(res, httpCode, result);
+    const isOk = result.ok || result.success;
+    return sendJson(res, 200, {
+      ok: isOk,
+      success: isOk,
+      totalDevices: result.totalDevices,
+      sent: result.sent !== undefined ? result.sent : result.sentCount,
+      sentCount: result.sentCount,
+      failed: result.failed !== undefined ? result.failed : result.failedCount,
+      failedCount: result.failedCount,
+      removed: result.removed !== undefined ? result.removed : (result.removedCount || 0),
+      removedCount: result.removedCount || 0,
+      recipientsCount: result.recipientsCount,
+      stage: result.stage,
+      errors: result.errors,
+      message: result.message
+    });
   } catch (err: any) {
     const errorMsg = err?.message || String(err || 'Erro interno ao disparar teste push');
-    const errorStack = err?.stack || '';
-    console.error('[API /api/notifications/test] [ETAPA 10/10] ERRO TÉCNICO:', errorMsg, errorStack);
+    console.error('[API /api/notifications/test] ERRO TÉCNICO:', errorMsg);
 
-    return sendJson(res, 200, {
+    return sendJson(res, 500, {
+      ok: false,
       success: false,
       stage: 'erro_execucao',
       error: 'Falha técnica no servidor: ' + errorMsg,
       message: 'Falha técnica no servidor: ' + errorMsg,
+      totalDevices: 0,
+      sent: 0,
       sentCount: 0,
+      failed: 1,
       failedCount: 1,
+      removed: 0,
+      removedCount: 0,
       errors: [errorMsg]
     });
   }

@@ -708,12 +708,12 @@ export async function sendTestPushNotification(currentUser: User): Promise<{
     }
 
     const data = result.data || {};
-    const count = Number(data.sentCount) || 0;
-    const recipients = Number(data.recipientsCount) || count;
-    const failed = Number(data.failedCount) || (recipients > count ? recipients - count : 0);
+    const count = Number(data.sentCount !== undefined ? data.sentCount : data.sent) || 0;
+    const recipients = Number(data.recipientsCount || data.totalDevices) || count;
+    const failed = Number(data.failedCount !== undefined ? data.failedCount : data.failed) || (recipients > count ? recipients - count : 0);
 
     // CRITICAL: Nunca mostrar sucesso se nenhum envio real ocorreu (count === 0)
-    if (data.success && count > 0) {
+    if ((data.ok || data.success) && count > 0) {
       const summaryMsg = failed === 0
         ? `Notificação de teste entregue com sucesso para todos os ${count} dispositivo(s) válido(s) registrado(s)!`
         : `Notificação entregue com sucesso para ${count} de ${recipients} dispositivo(s) encontrado(s) (${failed} falha(s)).`;
@@ -1022,7 +1022,7 @@ export async function fetchServerNotificationStatus(): Promise<{
 
   try {
     const result = await safeApiFetch('/api/notifications/status');
-    if (result.ok && result.data && (result.data.querySuccess !== false || (result.data.activeAuthorizedCount || 0) > 0)) {
+    if (result.ok && result.data && (result.data.ok === true || result.data.success === true || result.data.querySuccess !== false || (result.data.activeAuthorizedCount || 0) > 0)) {
       return {
         ...result.data,
         source: 'backend_api'

@@ -1,2 +1,2 @@
-import handler from '../notifications/status';
+import handler from '../notifications/status.js';
 export default handler;

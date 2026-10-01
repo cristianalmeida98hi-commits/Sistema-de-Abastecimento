@@ -1,4 +1,4 @@
-import { handleCors, sendJson, parseRequestBody, registerDevice, isValidPushSubscription } from '../_lib/pushEngine';
+import { handleCors, sendJson, parseRequestBody, registerDevice, isValidPushSubscription } from '../_lib/pushEngine.js';
 
 export default async function handler(req: any, res: any) {
   if (handleCors(req, res)) return;
@@ -35,6 +35,16 @@ export default async function handler(req: any, res: any) {
       subscription,
       deviceInfo
     });
+
+    if (!result.ok) {
+      return sendJson(res, 500, {
+        ok: false,
+        deviceId: result.deviceId,
+        error: result.error || 'Falha ao persistir dispositivo no Firestore',
+        message: result.message || 'Falha ao persistir dispositivo no Firestore',
+        stage: 'firestore'
+      });
+    }
 
     return sendJson(res, 200, {
       ok: true,

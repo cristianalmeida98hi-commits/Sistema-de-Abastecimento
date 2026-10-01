@@ -551,12 +551,13 @@ function toFirestoreRestDoc(obj: Record<string, any>): Record<string, any> {
 /**
  * Salva ou atualiza um dispositivo diretamente na coleção 'user_devices' do Firestore via REST
  */
-async function saveFirestoreDeviceRest(record: PushDeviceRecord): Promise<boolean> {
+async function saveFirestoreDeviceRest(record: PushDeviceRecord): Promise<{ success: boolean; error?: string }> {
   try {
     const token = await getFirebaseAuthToken();
     if (!token) {
-      console.warn('[AndradeAgro PushEngine] Não foi possível autenticar token REST para gravar dispositivo.');
-      return false;
+      const err = 'Não foi possível autenticar token REST para gravar dispositivo.';
+      console.warn('[AndradeAgro PushEngine] ' + err);
+      return { success: false, error: err };
     }
 
     const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/user_devices/${record.id}`;
@@ -576,14 +577,16 @@ async function saveFirestoreDeviceRest(record: PushDeviceRecord): Promise<boolea
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      console.warn(`[AndradeAgro PushEngine] Erro ao gravar dispositivo via REST: HTTP ${res.status} - ${errText.slice(0, 120)}`);
-      return false;
+      const err = `HTTP ${res.status} - ${errText.slice(0, 120)}`;
+      console.warn(`[AndradeAgro PushEngine] Erro ao gravar dispositivo via REST: ${err}`);
+      return { success: false, error: err };
     }
 
-    return true;
+    return { success: true };
   } catch (err: any) {
-    console.warn('[AndradeAgro PushEngine] Exceção ao gravar dispositivo via REST:', err?.message || err);
-    return false;
+    const errorMsg = err?.message || String(err);
+    console.warn('[AndradeAgro PushEngine] Exceção ao gravar dispositivo via REST:', errorMsg);
+    return { success: false, error: errorMsg };
   }
 }
 
@@ -886,7 +889,7 @@ export async function registerDevice(params: {
   userRole?: string;
   subscription: any;
   deviceInfo?: any;
-}): Promise<{ ok: boolean; deviceId: string; message: string; device: PushDeviceRecord }> {
+}): Promise<{ ok: boolean; deviceId: string; message: string; device: PushDeviceRecord; error?: string }> {
   const { userId, userEmail, userName, userRole, subscription, deviceInfo } = params;
   const endpoint = subscription?.endpoint || '';
   if (!endpoint || !isValidPushSubscription(subscription)) {
@@ -928,6 +931,9 @@ export async function registerDevice(params: {
 
   // Sync strictly to Firestore (Admin SDK if configured, otherwise Firestore REST)
   let saved = false;
+  let adminError: string | undefined = undefined;
+  let restError: string | undefined = undefined;
+
   try {
     const adminDb = getFirebaseAdminDb();
     if (adminDb) {
@@ -936,16 +942,36 @@ export async function registerDevice(params: {
       saved = true;
     }
   } catch (fsErr: any) {
-    console.warn('[AndradeAgro PushEngine] Warning syncing to Firestore Admin:', fsErr?.message || fsErr);
+    adminError = fsErr?.message || String(fsErr);
+    console.warn('[AndradeAgro PushEngine] Warning syncing to Firestore Admin:', adminError);
   }
 
   if (!saved) {
-    saved = await saveFirestoreDeviceRest(record);
-    if (saved) {
+    const restRes = await saveFirestoreDeviceRest(record);
+    if (restRes.success) {
       console.log(`[AndradeAgro PushEngine] Dispositivo registrado via Firestore REST: ${stableId}`);
+      saved = true;
     } else {
-      console.warn(`[AndradeAgro PushEngine] Falha ao registrar dispositivo via Firestore REST: ${stableId}`);
+      restError = restRes.error || 'Falha ao gravar no Firestore REST';
+      console.warn(`[AndradeAgro PushEngine] Falha ao registrar dispositivo via Firestore REST: ${stableId} - ${restError}`);
     }
+  }
+
+  if (!saved) {
+    const errorDetails = [
+      adminError ? `Admin: ${adminError}` : null,
+      restError ? `REST: ${restError}` : null
+    ].filter(Boolean).join(' | ');
+
+    const errorMsg = `Falha ao persistir dispositivo no Firestore (user_devices): ${errorDetails || 'Gravação rejeitada no Admin e REST'}`;
+    console.error(`[AndradeAgro PushEngine] ${errorMsg} (${stableId})`);
+    return {
+      ok: false,
+      deviceId: stableId,
+      error: errorMsg,
+      message: errorMsg,
+      device: record
+    };
   }
 
   return {

@@ -149,16 +149,15 @@ export function ensureVapidConfigured(): {
   const { publicKey, privateKey, subject } = getVapidKeys();
   const check = verifyVapidKeyPair(publicKey, privateKey);
   
-  if (publicKey && privateKey) {
+  if (check.matches === true) {
     try {
       webpush.setVapidDetails(subject, publicKey, privateKey);
       vapidConfiguredSuccessfully = true;
-      vapidConfigError = check.matches ? null : (check.error || null);
+      vapidConfigError = null;
       return { 
         configured: true, 
         publicKeyPrefix: check.publicKeyPrefix, 
-        privateKeyConfigured: true,
-        error: check.matches ? undefined : check.error 
+        privateKeyConfigured: true 
       };
     } catch (e: any) {
       vapidConfiguredSuccessfully = false;
@@ -172,7 +171,7 @@ export function ensureVapidConfigured(): {
     }
   } else {
     vapidConfiguredSuccessfully = false;
-    vapidConfigError = check.error || 'Par de chaves VAPID incompleto';
+    vapidConfigError = check.error || 'Par de chaves VAPID incompatível ou incompleto';
     return { 
       configured: false, 
       error: vapidConfigError, 
@@ -659,11 +658,14 @@ export async function getActiveAuthorizedDevices(options?: {
   if (adminDb) {
     try {
       console.log(`[AndradeAgro PushEngine] [ETAPA 3/10] Firestore acessado via Firebase Admin: Projeto "${firebaseConfig.projectId}", Coleção "user_devices"`);
+      let adminTimer: any;
       const adminPromise = adminDb.collection('user_devices').get();
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout Firebase Admin (3500ms)')), 3500)
-      );
+      adminPromise.catch(() => {}); // Previne unhandled rejection em caso de timeout
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        adminTimer = setTimeout(() => reject(new Error('Timeout Firebase Admin (3500ms)')), 3500);
+      });
       const snap = await Promise.race([adminPromise, timeoutPromise]);
+      clearTimeout(adminTimer);
       querySuccess = true;
       source = 'FIREBASE_ADMIN';
 
@@ -1285,15 +1287,20 @@ export async function dispatchPushToAuthorizedUsers(event: {
 
   await Promise.all(
     targets.map(async (device) => {
+      let sendTimer: any;
       try {
         const sendPromise = webpush.sendNotification(device.subscription as any, payload, vapidOptions);
-        const timeoutSend = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout de 3500ms no envio push')), 3500)
-        );
+        sendPromise.catch(() => {}); // Previne unhandled rejection caso o timeout dispare antes
+
+        const timeoutSend = new Promise<never>((_, reject) => {
+          sendTimer = setTimeout(() => reject(new Error('Timeout de 3500ms no envio push')), 3500);
+        });
         const pushRes = await Promise.race([sendPromise, timeoutSend]);
+        clearTimeout(sendTimer);
         sentCount++;
         console.log(`[AndradeAgro PushEngine] [ETAPA 8/10] Sucesso no envio para ${device.userName} (${device.deviceInfo?.platform || 'dispositivo'}) - HTTP ${pushRes?.statusCode || 201}`);
       } catch (err: any) {
+        clearTimeout(sendTimer);
         failedCount++;
         const statusCode = err?.statusCode || 'ERR';
         const msg = err?.body || err?.message || 'Falha de comunicação com serviço push';

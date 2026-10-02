@@ -118,7 +118,7 @@ async function startServer() {
   loadDatabase();
 
   // Web Push / FCM VAPID Configuration Setup
-  const OFFICIAL_VAPID_PUBLIC_KEY = 'BGk3AhmnXVavteh2WDsz5PLh4flo97VKKiLbTByKGeT7nSCgGrhm2LVdMgIpcYAt7Kih5zfOWJeJrev6h5mW6ig';
+  const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
 
   const wp = (webpushLib as any).default || webpushLib;
 
@@ -140,6 +140,18 @@ async function startServer() {
     return Buffer.from(clean, 'base64url');
   }
 
+  function derivePublicKeyFromPrivate(priv: string): string | null {
+    const clean = cleanKey(priv);
+    if (!clean) return null;
+    try {
+      const ecdh = crypto.createECDH('prime256v1');
+      ecdh.setPrivateKey(parsePrivKeyBuf(clean));
+      return ecdh.getPublicKey('base64url');
+    } catch {
+      return null;
+    }
+  }
+
   function verifyVapidKeyPair(pubKey: string, privKey: string) {
     const cleanPub = cleanKey(pubKey);
     const cleanPriv = cleanKey(privKey);
@@ -148,9 +160,10 @@ async function startServer() {
     if (!cleanPub) return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave pública VAPID ausente.' };
     if (!cleanPriv) return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave privada VAPID ausente no ambiente (VAPID_PRIVATE_KEY não informada).' };
     try {
-      const ecdh = crypto.createECDH('prime256v1');
-      ecdh.setPrivateKey(parsePrivKeyBuf(cleanPriv));
-      const derivedPub = ecdh.getPublicKey('base64url');
+      const derivedPub = derivePublicKeyFromPrivate(cleanPriv);
+      if (!derivedPub) {
+        return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: true, error: 'Formato de chave privada VAPID inválido.' };
+      }
       const derivedPrefix = `${derivedPub.slice(0, 8)}...${derivedPub.slice(-6)}`;
       if (normalizeBase64Url(derivedPub) === normalizeBase64Url(cleanPub)) {
         return { matches: true, publicKeyPrefix: pubPrefix, privateKeyConfigured: true, derivedPublicKeyPrefix: derivedPrefix };
@@ -160,7 +173,7 @@ async function startServer() {
           publicKeyPrefix: pubPrefix,
           privateKeyConfigured: true,
           derivedPublicKeyPrefix: derivedPrefix,
-          error: `Inconsistência de par VAPID: A chave pública configurada é a do Firebase (${pubPrefix}), porém a chave privada em execução no backend (VAPID_PRIVATE_KEY) deriva para (${derivedPrefix}). Se a variável VAPID_PRIVATE_KEY já foi salva no painel da Vercel, realize um 'Redeploy' no painel da Vercel para que as Serverless Functions recarreguem a nova chave.`
+          error: `Inconsistência de par VAPID: A chave pública informada (${pubPrefix}) difere da chave pública derivada da chave privada ativa (${derivedPrefix}).`
         };
       }
     } catch (err: any) {
@@ -170,25 +183,15 @@ async function startServer() {
 
   function getCurrentVapidKeys() {
     loadDatabase();
-    const envVapidPublic = cleanKey(process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY);
     const envVapidPrivate = cleanKey(process.env.VAPID_PRIVATE_KEY || process.env.PRIVATE_VAPID_KEY);
     const dbVapidKeys = serverDb['andradeagro_vapid_keys'] || {};
     const dbVapidPrivate = cleanKey(dbVapidKeys.privateKey);
 
-    const publicKey = envVapidPublic || cleanKey(dbVapidKeys.publicKey) || OFFICIAL_VAPID_PUBLIC_KEY;
-    let chosenPrivate = envVapidPrivate || dbVapidPrivate || '';
+    const chosenPrivate = envVapidPrivate || dbVapidPrivate || '';
+    const derivedPub = derivePublicKeyFromPrivate(chosenPrivate);
+    const envVapidPublic = cleanKey(process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY);
 
-    // Se o ambiente possui chave conflitante mas o banco persistente possui a chave correta pareada com o Firebase
-    if (envVapidPrivate && dbVapidPrivate) {
-      const envCheck = verifyVapidKeyPair(publicKey, envVapidPrivate);
-      if (!envCheck.matches) {
-        const dbCheck = verifyVapidKeyPair(publicKey, dbVapidPrivate);
-        if (dbCheck.matches) {
-          chosenPrivate = dbVapidPrivate;
-        }
-      }
-    }
-
+    const publicKey = derivedPub || envVapidPublic || cleanKey(dbVapidKeys.publicKey) || OFFICIAL_VAPID_PUBLIC_KEY;
     const subject = cleanKey(process.env.VAPID_SUBJECT || dbVapidKeys.subject || 'mailto:suporte@andradeagro.com.br');
     return { publicKey, privateKey: chosenPrivate, subject };
   }
@@ -198,7 +201,7 @@ async function startServer() {
     const keyCheck = verifyVapidKeyPair(keys.publicKey, keys.privateKey);
     if (keyCheck.matches) {
       wp.setVapidDetails(keys.subject, keys.publicKey, keys.privateKey);
-      console.log(`[Push Notification] Web Push VAPID setup successfully configured com chave do Firebase (${keyCheck.publicKeyPrefix}).`);
+      console.log(`[Push Notification] Web Push VAPID configurado com sucesso (${keyCheck.publicKeyPrefix}).`);
     } else {
       console.warn(`[Push Notification] Configuração VAPID pendente/divergente: ${keyCheck.error}`);
     }

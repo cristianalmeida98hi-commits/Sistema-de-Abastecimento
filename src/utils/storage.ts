@@ -1458,17 +1458,52 @@ export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<Mai
   logAuditEvent('CRIAR', 'Manutenção', `Agendou/Registrou manutenção "${m.title}" em ${m.equipmentName}.`);
   checkAutomatedAlerts();
 
-  // Dispatch real push notification to authorized users (ADMIN and MANUTENCAO)
-  const equipName = targetVehicle ? `${targetVehicle.model} (${targetVehicle.licensePlate || targetVehicle.patrimonyCode || targetVehicle.id})` : (m.equipmentName || m.equipmentId);
-  const shortDesc = m.description || (m.type === 'TROCA_OLEO' ? 'Troca de óleo realizada.' : (m.type === 'REVISAO' ? 'Manutenção preventiva/revisão realizada.' : 'Manutenção realizada.'));
+  // 3A. Notificação Push para nova manutenção registrada com sucesso no Firestore
+  // Título: "Nova manutenção registrada"
+  // Corpo: "{Equipamento} • {Tipo/Descrição da manutenção}" (ex: "Trator John Deere 6155J • Troca de óleo")
+  // Deduplicação: maintenance-{maintenanceId}
+  const equipName = (
+    targetVehicle?.model ||
+    m.equipmentName ||
+    m.equipmentPlateOrCode ||
+    'Equipamento'
+  ).trim();
+
+  let serviceDetail = '';
+  if (m.type === 'TROCA_OLEO') {
+    serviceDetail = 'Troca de óleo';
+  } else if (m.type === 'SERVICO_CORRETIVO') {
+    serviceDetail = 'Manutenção corretiva';
+  } else if (m.type === 'REVISAO') {
+    serviceDetail = 'Revisão preventiva';
+  } else if (m.type === 'TROCA_FILTROS') {
+    serviceDetail = 'Troca de filtros';
+  } else if (m.type === 'PNEUS') {
+    serviceDetail = 'Pneus / Esteiras';
+  } else if (m.type === 'PECAS') {
+    serviceDetail = 'Substituição de peças';
+  } else if (m.title && m.title.trim().length > 0) {
+    serviceDetail = m.title.trim();
+  } else if (m.description && m.description.trim().length > 0) {
+    serviceDetail = m.description.trim();
+  } else {
+    serviceDetail = 'Manutenção';
+  }
+
+  const pushBody = `${equipName} • ${serviceDetail}`;
+  const pushEventId = `maintenance-${cleaned.id}`;
+
   dispatchPushNotificationEvent({
     eventType: 'NEW_MAINTENANCE',
-    eventId: cleaned.id,
+    eventId: pushEventId,
     equipmentName: equipName,
     equipmentId: cleaned.equipmentId,
-    customTitle: `🔧 Nova manutenção: ${equipName}`,
-    description: shortDesc
-  }).catch(() => {});
+    customTitle: 'Nova manutenção registrada',
+    description: pushBody
+  }).catch((pushErr) => {
+    // Falha do Push não compromete o registro nem desfaz a gravação já confirmada no Firestore
+    console.warn('[Push Notification] Aviso ao enviar push de manutenção:', pushErr?.message || pushErr);
+  });
 
   return cleaned;
 }

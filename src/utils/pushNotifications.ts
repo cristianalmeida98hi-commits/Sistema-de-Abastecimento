@@ -4,10 +4,10 @@ import { doc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore'
 
 /**
  * Chave pública VAPID oficial do sistema AndradeAgro (RFC 8292).
- * Sincronizada diretamente com o Firebase Console (Cloud Messaging -> Certificados de push da Web).
+ * Sincronizada com o par de chaves VAPID do backend.
  * Chave pública padrão para validação e assinatura Web Push no navegador do dispositivo.
  */
-export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGk3AhmnXVavteh2WDsz5PLh4flo97VKKiLbTByKGeT7nSCgGrhm2LVdMgIpcYAt7Kih5zfOWJeJrev6h5mW6ig';
+export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
 
 /**
  * Interface para respostas seguras de API com diagnóstico técnico completo.
@@ -331,7 +331,7 @@ async function getOrRenewSubscription(
     }
 
     if (keyMismatch) {
-      console.log('[Push Notification] Chave VAPID mudou para a nova chave do Firebase. Renovando inscrição no PushManager...');
+      console.log('[Push Notification] Chave VAPID atualizada no servidor. Renovando inscrição no PushManager...');
       const oldEndpoint = sub.endpoint;
       await sub.unsubscribe().catch(() => {});
       sub = null;

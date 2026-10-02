@@ -1,4 +1,4 @@
-import { handleCors, sendJson, getVapidPublicKey } from '../_lib/pushEngine.js';
+import { handleCors, sendJson, getVapidPublicKey, OFFICIAL_VAPID_PUBLIC_KEY } from '../_lib/pushEngine.js';
 
 export default async function handler(req: any, res: any) {
   if (handleCors(req, res)) return;
@@ -12,6 +12,6 @@ export default async function handler(req: any, res: any) {
     return sendJson(res, 200, { publicKey });
   } catch (err: any) {
     console.error('[API /api/notificacoes/vapid-public-key] Error:', err);
-    return sendJson(res, 200, { publicKey: 'BGk3AhmnXVavteh2WDsz5PLh4flo97VKKiLbTByKGeT7nSCgGrhm2LVdMgIpcYAt7Kih5zfOWJeJrev6h5mW6ig' });
+    return sendJson(res, 200, { publicKey: OFFICIAL_VAPID_PUBLIC_KEY });
   }
 }

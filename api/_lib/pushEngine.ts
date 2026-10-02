@@ -49,9 +49,9 @@ export interface PushDeviceRecord {
 }
 
 /**
- * Chave pública VAPID oficial do Firebase Console (Cloud Messaging -> Certificados de push da Web)
+ * Chave pública VAPID oficial pareada com a chave privada VAPID_PRIVATE_KEY do backend (RFC 8292).
  */
-export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGk3AhmnXVavteh2WDsz5PLh4flo97VKKiLbTByKGeT7nSCgGrhm2LVdMgIpcYAt7Kih5zfOWJeJrev6h5mW6ig';
+export const OFFICIAL_VAPID_PUBLIC_KEY = 'BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s';
 
 function cleanKey(k?: string): string {
   if (!k) return '';
@@ -69,6 +69,21 @@ function parsePrivKeyBuf(priv: string): Buffer {
     if (b.length === 32) return b;
   } catch {}
   return Buffer.from(clean, 'base64url');
+}
+
+/**
+ * Derivação matemática segura da chave pública P-256 a partir da chave privada VAPID.
+ */
+export function derivePublicKeyFromPrivate(priv: string): string | null {
+  const clean = cleanKey(priv);
+  if (!clean) return null;
+  try {
+    const ecdh = crypto.createECDH('prime256v1');
+    ecdh.setPrivateKey(parsePrivKeyBuf(clean));
+    return ecdh.getPublicKey('base64url');
+  } catch {
+    return null;
+  }
 }
 
 export interface VapidKeyValidationResult {
@@ -95,9 +110,10 @@ export function verifyVapidKeyPair(pubKey: string, privKey: string): VapidKeyVal
     return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: false, error: 'Chave privada VAPID ausente (variável VAPID_PRIVATE_KEY não configurada no ambiente).' };
   }
   try {
-    const ecdh = crypto.createECDH('prime256v1');
-    ecdh.setPrivateKey(parsePrivKeyBuf(cleanPriv));
-    const derivedPub = ecdh.getPublicKey('base64url');
+    const derivedPub = derivePublicKeyFromPrivate(cleanPriv);
+    if (!derivedPub) {
+      return { matches: false, publicKeyPrefix: pubPrefix, privateKeyConfigured: true, error: 'Formato inválido na chave privada VAPID.' };
+    }
     const derivedPrefix = `${derivedPub.slice(0, 8)}...${derivedPub.slice(-6)}`;
     
     if (normalizeBase64Url(derivedPub) === normalizeBase64Url(cleanPub)) {
@@ -113,7 +129,7 @@ export function verifyVapidKeyPair(pubKey: string, privKey: string): VapidKeyVal
         publicKeyPrefix: pubPrefix,
         privateKeyConfigured: true,
         derivedPublicKeyPrefix: derivedPrefix,
-        error: `Inconsistência de par VAPID: A chave pública configurada é a do Firebase (${pubPrefix}), porém a chave privada em execução no backend (VAPID_PRIVATE_KEY) deriva para (${derivedPrefix}). Se a variável VAPID_PRIVATE_KEY já foi salva no painel da Vercel, realize um 'Redeploy' no painel da Vercel para que as Serverless Functions recarreguem a nova chave.`
+        error: `Inconsistência de par VAPID: A chave pública informada (${pubPrefix}) difere da chave pública derivada da chave privada ativa (${derivedPrefix}).`
       };
     }
   } catch (err: any) {
@@ -129,10 +145,15 @@ export function verifyVapidKeyPair(pubKey: string, privKey: string): VapidKeyVal
 // Variáveis de ambiente oficiais: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
 export function getVapidKeys(): { publicKey: string; privateKey: string; subject: string } {
   const subject = cleanKey(process.env.VAPID_SUBJECT) || 'mailto:suporte@andradeagro.com.br';
-  const publicKey = cleanKey(process.env.VAPID_PUBLIC_KEY) || 
-                    cleanKey(process.env.VITE_VAPID_PUBLIC_KEY) || 
-                    OFFICIAL_VAPID_PUBLIC_KEY;
   const privateKey = cleanKey(process.env.VAPID_PRIVATE_KEY) || cleanKey(process.env.PRIVATE_VAPID_KEY) || '';
+
+  // 1. Derivação automática da chave pública a partir da chave privada configurada no backend
+  const derivedPub = derivePublicKeyFromPrivate(privateKey);
+  const envPublicKey = cleanKey(process.env.VAPID_PUBLIC_KEY) || cleanKey(process.env.VITE_VAPID_PUBLIC_KEY);
+
+  // 2. Se a chave privada do backend deriva uma chave pública válida, essa é SEMPRE a chave oficial
+  // do par criptográfico (garante que Frontend Public Key == Public Key derivada da Private Key do backend)
+  const publicKey = derivedPub || envPublicKey || OFFICIAL_VAPID_PUBLIC_KEY;
 
   return { publicKey, privateKey, subject };
 }
@@ -145,10 +166,14 @@ export function ensureVapidConfigured(): {
   error?: string;
   publicKeyPrefix: string;
   privateKeyConfigured: boolean;
+  derivedPublicKeyPrefix?: string;
 } {
   const { publicKey, privateKey, subject } = getVapidKeys();
   const check = verifyVapidKeyPair(publicKey, privateKey);
   
+  // Diagnóstico seguro: compara identificadores parciais sem expor a chave privada
+  console.log(`[AndradeAgro VAPID Check] hasPrivateKey=${Boolean(privateKey)}, hasSubject=${Boolean(subject)}, publicKeyFromPrivate=${check.derivedPublicKeyPrefix || 'N/A'}, configuredPublicKey=${check.publicKeyPrefix}, matches=${check.matches}`);
+
   if (check.matches === true) {
     try {
       webpush.setVapidDetails(subject, publicKey, privateKey);
@@ -157,7 +182,8 @@ export function ensureVapidConfigured(): {
       return { 
         configured: true, 
         publicKeyPrefix: check.publicKeyPrefix, 
-        privateKeyConfigured: true 
+        privateKeyConfigured: true,
+        derivedPublicKeyPrefix: check.derivedPublicKeyPrefix
       };
     } catch (e: any) {
       vapidConfiguredSuccessfully = false;
@@ -166,7 +192,8 @@ export function ensureVapidConfigured(): {
         configured: false, 
         error: vapidConfigError, 
         publicKeyPrefix: check.publicKeyPrefix, 
-        privateKeyConfigured: true 
+        privateKeyConfigured: true,
+        derivedPublicKeyPrefix: check.derivedPublicKeyPrefix
       };
     }
   } else {
@@ -176,7 +203,8 @@ export function ensureVapidConfigured(): {
       configured: false, 
       error: vapidConfigError, 
       publicKeyPrefix: check.publicKeyPrefix, 
-      privateKeyConfigured: check.privateKeyConfigured 
+      privateKeyConfigured: check.privateKeyConfigured,
+      derivedPublicKeyPrefix: check.derivedPublicKeyPrefix
     };
   }
 }
@@ -1047,6 +1075,13 @@ export async function getEngineStatus(): Promise<any> {
     vapidPrivateKeyConfigured: vapidState.privateKeyConfigured,
     vapidError: !vapidState.configured ? vapidState.error : undefined,
     vapidPublicKey: publicKey,
+    vapidDiagnostics: {
+      hasPrivateKey: vapidState.privateKeyConfigured,
+      hasSubject: Boolean(getVapidKeys().subject),
+      publicKeyFromPrivate: vapidState.derivedPublicKeyPrefix || vapidState.publicKeyPrefix,
+      configuredPublicKey: vapidState.publicKeyPrefix,
+      matches: vapidState.configured
+    },
     firebaseAdmin: getFirebaseAdminDiagnostics(),
     firestoreAccessible: queryOk,
     totalDevices: result.totalDevices,
@@ -1173,8 +1208,11 @@ export async function dispatchPushToAuthorizedUsers(event: {
   if (eventType === 'NEW_ISSUE' || eventType === 'MACHINE_ISSUE') {
     title = customTitle || '⚠️ Novo problema registrado';
     url = `/?tab=alerts&issueId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
-  } else if (eventType === 'NEW_MAINTENANCE' || eventType === 'MAINTENANCE_DUE' || eventType === 'PREVENTIVE_MAINTENANCE') {
-    title = customTitle || '🔧 Nova manutenção registrada';
+  } else if (eventType === 'NEW_MAINTENANCE') {
+    title = customTitle || 'Nova manutenção registrada';
+    url = `/?tab=maintenance&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+  } else if (eventType === 'MAINTENANCE_DUE' || eventType === 'PREVENTIVE_MAINTENANCE') {
+    title = customTitle || '🔧 Manutenção preventiva pendente';
     url = `/?tab=maintenance&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
   } else if (eventType === 'OIL_CHANGE_DUE') {
     title = customTitle || '⚠️ Troca de óleo pendente';
@@ -1197,9 +1235,11 @@ export async function dispatchPushToAuthorizedUsers(event: {
     ? (description || 'Notificações Push funcionando.')
     : eventType === 'OIL_CHANGE_DUE'
       ? (description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`)
-      : (equipmentName && equipmentName !== 'Equipamento Agrícola' && equipmentName !== 'Tanque' && !description.toLowerCase().startsWith(equipmentName.toLowerCase()))
-        ? `${equipmentName}\n${description}`.trim()
-        : (description || 'Novo alerta registrado no sistema.').trim();
+      : eventType === 'NEW_MAINTENANCE'
+        ? (description || `${equipmentName} • Manutenção registrada`).trim()
+        : (equipmentName && equipmentName !== 'Equipamento Agrícola' && equipmentName !== 'Tanque' && !description.toLowerCase().startsWith(equipmentName.toLowerCase()))
+          ? `${equipmentName}\n${description}`.trim()
+          : (description || 'Novo alerta registrado no sistema.').trim();
 
   const payload = JSON.stringify({
     title,

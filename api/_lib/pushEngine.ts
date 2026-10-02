@@ -1093,7 +1093,7 @@ export function resetEventDeduplication(params: { prefix?: string; eventId?: str
  * Protegido contra bloqueios de runtime, com timeouts estritos e tratamento de erros.
  */
 export async function dispatchPushToAuthorizedUsers(event: {
-  eventType: 'NEW_ISSUE' | 'NEW_MAINTENANCE' | 'OIL_CHANGE_DUE' | 'TEST';
+  eventType: 'NEW_ISSUE' | 'NEW_MAINTENANCE' | 'OIL_CHANGE_DUE' | 'TEST' | string;
   eventId: string;
   equipmentName: string;
   description: string;
@@ -1170,25 +1170,36 @@ export async function dispatchPushToAuthorizedUsers(event: {
   let title = customTitle || '⚠️ Notificação AndradeAgro';
   let url = '/';
 
-  if (eventType === 'NEW_ISSUE') {
+  if (eventType === 'NEW_ISSUE' || eventType === 'MACHINE_ISSUE') {
     title = customTitle || '⚠️ Novo problema registrado';
     url = `/?tab=alerts&issueId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
-  } else if (eventType === 'NEW_MAINTENANCE') {
+  } else if (eventType === 'NEW_MAINTENANCE' || eventType === 'MAINTENANCE_DUE' || eventType === 'PREVENTIVE_MAINTENANCE') {
     title = customTitle || '🔧 Nova manutenção registrada';
     url = `/?tab=maintenance&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
   } else if (eventType === 'OIL_CHANGE_DUE') {
     title = customTitle || '⚠️ Troca de óleo pendente';
     url = `/?tab=maintenance&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+  } else if (eventType === 'LOW_TANK_LEVEL') {
+    title = customTitle || '⚠️ Nível de Combustível Baixo';
+    url = '/?tab=alerts';
+  } else if (eventType === 'SUSPICIOUS_FUEL') {
+    title = customTitle || '⚠️ Consumo Anômalo Detectado';
+    url = '/?tab=alerts';
   } else if (eventType === 'TEST') {
     title = customTitle || 'Teste AndradeAgro';
     url = '/?tab=settings';
+  } else {
+    title = customTitle || '⚠️ Alerta AndradeAgro';
+    url = '/?tab=alerts';
   }
 
   const notificationBody = eventType === 'TEST'
     ? (description || 'Notificações Push funcionando.')
     : eventType === 'OIL_CHANGE_DUE'
       ? (description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`)
-      : `${equipmentName}\n${description}`.trim();
+      : (equipmentName && equipmentName !== 'Equipamento Agrícola' && equipmentName !== 'Tanque' && !description.toLowerCase().startsWith(equipmentName.toLowerCase()))
+        ? `${equipmentName}\n${description}`.trim()
+        : (description || 'Novo alerta registrado no sistema.').trim();
 
   const payload = JSON.stringify({
     title,

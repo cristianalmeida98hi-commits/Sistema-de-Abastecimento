@@ -432,14 +432,15 @@ export interface UserDevice {
   updatedAt: string;
 }
 
-export type PushEventType = 'NEW_ISSUE' | 'NEW_MAINTENANCE' | 'OIL_CHANGE_DUE' | 'TEST';
+export type PushEventType = 'NEW_ISSUE' | 'NEW_MAINTENANCE' | 'OIL_CHANGE_DUE' | 'TEST' | AlertType;
 
 export interface PushNotificationPayload {
-  eventType: PushEventType;
+  eventType: PushEventType | string;
   eventId: string;
-  equipmentName: string;
+  equipmentName?: string;
   description: string;
   equipmentId?: string;
+  customTitle?: string;
   url?: string;
 }
 

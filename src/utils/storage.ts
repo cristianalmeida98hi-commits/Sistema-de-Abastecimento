@@ -1107,20 +1107,35 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
 
     // If flagged suspicious, create automated Alert in Firestore
     if (log.flaggedSuspicious) {
+      const alertId = `alt-susp-${Date.now()}`;
+      const alertTitle = 'Consumo Anômalo no Abastecimento';
+      const alertDesc = `${log.equipmentName} (${log.equipmentPlateOrCode}): ${log.suspiciousReason || 'Consumo fora do padrão registrado.'}`;
       const newAlert: SmartAlert = cleanUndefined({
-        id: `alt-${Date.now()}`,
+        id: alertId,
         type: 'SUSPICIOUS_FUEL',
         severity: 'ALTA',
-        title: 'Consumo Anômalo no Abastecimento',
-        description: `${log.equipmentName} (${log.equipmentPlateOrCode}): ${log.suspiciousReason || 'Consumo fora do padrão registrado.'}`,
+        title: alertTitle,
+        description: alertDesc,
         equipmentId: log.equipmentId,
         equipmentName: log.equipmentName,
         fuelLogId: newLog.id,
         date: log.dateTime.slice(0, 10),
-        resolved: false
+        resolved: false,
+        pushNotified: true,
+        pushNotifiedAt: new Date().toISOString()
       });
       cache.alerts = [newAlert, ...cache.alerts];
       await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
+
+      // Conectar alerta interno de consumo anômalo ao mecanismo Web Push
+      dispatchPushNotificationEvent({
+        eventType: 'SUSPICIOUS_FUEL',
+        eventId: newAlert.id,
+        equipmentName: log.equipmentName,
+        equipmentId: log.equipmentId,
+        customTitle: `⚠️ ${alertTitle}`,
+        description: alertDesc
+      }).catch(() => {});
     }
 
     logAuditEvent('CRIAR', 'Abastecimento', `Registrou ${newLog.liters}L em ${newLog.equipmentName} (${newLog.equipmentPlateOrCode}) via ${newLog.gasStationName}.`);
@@ -1451,6 +1466,7 @@ export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<Mai
     eventId: cleaned.id,
     equipmentName: equipName,
     equipmentId: cleaned.equipmentId,
+    customTitle: `🔧 Nova manutenção: ${equipName}`,
     description: shortDesc
   }).catch(() => {});
 
@@ -1502,7 +1518,9 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
     equipmentId: newIssue.equipmentId,
     equipmentName: newIssue.equipmentName,
     date: currentDateBR,
-    resolved: false
+    resolved: false,
+    pushNotified: true,
+    pushNotifiedAt: new Date().toISOString()
   });
   cache.alerts = [newAlert, ...cache.alerts];
   notifyDataUpdated();
@@ -1530,7 +1548,8 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
     eventId: cleaned.id,
     equipmentName: newIssue.equipmentName,
     equipmentId: newIssue.equipmentId,
-    description: newIssue.description || 'Problema informado pelo operador.'
+    customTitle: `⚠️ Problema Relatado: ${newIssue.equipmentName}`,
+    description: `Operador ${newIssue.reportedByUserName} relatou: "${newIssue.description || 'Problema informado pelo operador.'}"`
   }).catch(() => {});
 
   return cleaned;
@@ -1765,6 +1784,14 @@ export async function resolveAlert(id: string, resolvedByName?: string): Promise
     targetAlert.title?.toLowerCase().includes('oleo')
   )) {
     clearPushEventDeduplication(`oil-alert-${targetAlert.equipmentId}`).catch(() => {});
+    clearPushEventDeduplication(`oil-warning-${targetAlert.equipmentId}`).catch(() => {});
+  }
+  if (targetAlert?.id?.startsWith('alt-low-tank-') || targetAlert?.type === 'LOW_TANK_LEVEL') {
+    const tankId = targetAlert.equipmentId || targetAlert.id.replace('alt-low-tank-', '');
+    clearPushEventDeduplication(`tank-${tankId}`).catch(() => {});
+  }
+  if (targetAlert?.type === 'SUSPICIOUS_FUEL' && targetAlert?.id) {
+    clearPushEventDeduplication(targetAlert.id).catch(() => {});
   }
 
   cache.alerts = cache.alerts.map(a => a.id === id ? { ...a, ...fields } as SmartAlert : a);
@@ -2087,11 +2114,25 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
             title,
             description: desc,
             date: new Date().toISOString().slice(0, 10),
-            resolved: false
+            resolved: false,
+            pushNotified: true,
+            pushNotifiedAt: new Date().toISOString()
           });
           cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== lowTankAlertId)];
           setDoc(doc(db, 'alerts', lowTankAlertId), alertObj).catch(console.error);
+
+          // Disparo de Web Push para nível de tanque baixo
+          const tankEventId = `tank-${tank.id}-${isCritical ? 'crit' : 'low'}-${new Date().toISOString().slice(0, 10)}`;
+          dispatchPushNotificationEvent({
+            eventType: 'LOW_TANK_LEVEL',
+            eventId: tankEventId,
+            equipmentName: tank.name,
+            equipmentId: tank.id,
+            customTitle: title,
+            description: desc
+          }).catch(() => {});
         } else if (!existingLowTank.resolved || existingLowTank.description !== desc) {
+          const transitionToCritical = isCritical && existingLowTank.severity !== 'ALTA';
           const updated: SmartAlert = cleanUndefined({
             ...existingLowTank,
             title,
@@ -2099,10 +2140,24 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
             severity: isCritical ? 'ALTA' : 'MEDIA',
             resolved: false,
             resolvedAt: undefined,
-            resolvedBy: undefined
+            resolvedBy: undefined,
+            pushNotified: transitionToCritical ? true : existingLowTank.pushNotified,
+            pushNotifiedAt: transitionToCritical ? new Date().toISOString() : existingLowTank.pushNotifiedAt
           });
           cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? updated : a);
           setDoc(doc(db, 'alerts', lowTankAlertId), updated).catch(console.error);
+
+          if (transitionToCritical) {
+            const tankCritEventId = `tank-${tank.id}-crit-${new Date().toISOString().slice(0, 10)}`;
+            dispatchPushNotificationEvent({
+              eventType: 'LOW_TANK_LEVEL',
+              eventId: tankCritEventId,
+              equipmentName: tank.name,
+              equipmentId: tank.id,
+              customTitle: title,
+              description: desc
+            }).catch(() => {});
+          }
         }
       } else if (existingLowTank && !existingLowTank.resolved) {
         // Tank level returned to above minimum limit -> auto-resolve the alert
@@ -2114,6 +2169,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
         });
         cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? resolvedAlert : a);
         setDoc(doc(db, 'alerts', lowTankAlertId), resolvedAlert).catch(console.error);
+        clearPushEventDeduplication(`tank-${tank.id}`).catch(() => {});
       }
     });
 
@@ -2201,6 +2257,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 eventId: cycleEventId,
                 equipmentName: v.model,
                 equipmentId: v.id,
+                customTitle: title,
                 description: `O equipamento ${v.model} atingiu ${curHour}h e está com troca de óleo vencida (programada para ${nextMnt}h).`
               }).catch(() => {});
 
@@ -2224,6 +2281,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 eventId: cycleEventId,
                 equipmentName: v.model,
                 equipmentId: v.id,
+                customTitle: title,
                 description: `O equipamento ${v.model} atingiu ${curHour}h e está com troca de óleo vencida (programada para ${nextMnt}h).`
               }).catch(() => {});
 
@@ -2240,6 +2298,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 eventId: cycleEventId,
                 equipmentName: v.model,
                 equipmentId: v.id,
+                customTitle: title,
                 description: `O equipamento ${v.model} atingiu ${curHour}h e está com troca de óleo vencida (programada para ${nextMnt}h).`
               }).catch(() => {});
 
@@ -2271,10 +2330,24 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 resolved: false,
                 cycleTargetHourmeter: nextMnt,
                 lastOilChangeHourmeter: lastMnt,
-                cycleId
+                cycleId,
+                pushNotified: true,
+                pushNotifiedForCycle: nextMnt,
+                pushNotifiedAt: new Date().toISOString()
               });
               cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== mntAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE' && !a.resolved))];
               setDoc(doc(db, 'alerts', mntAlertId), alertObj).catch(console.error);
+
+              // Disparo de Web Push para aviso de troca de óleo próxima
+              const warningEventId = `oil-warning-${v.id}-${nextMnt}`;
+              dispatchPushNotificationEvent({
+                eventType: 'OIL_CHANGE_DUE',
+                eventId: warningEventId,
+                equipmentName: v.model,
+                equipmentId: v.id,
+                customTitle: title,
+                description: `O equipamento ${v.model} está próximo da troca de óleo (${curHour}h / ${nextMnt}h). Faltam ${diff}h.`
+              }).catch(() => {});
             } else if (openAlert.description !== desc) {
               const updated = cleanUndefined({
                 ...openAlert,
@@ -2379,6 +2452,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 eventId: cycleEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
                 equipmentId: v.id,
+                customTitle: title,
                 description: `O veículo ${v.model} atingiu ${curKm.toLocaleString('pt-BR')} km e está com troca de óleo vencida (programada para ${nextKm.toLocaleString('pt-BR')} km).`
               }).catch(() => {});
 
@@ -2402,6 +2476,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 eventId: cycleEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
                 equipmentId: v.id,
+                customTitle: title,
                 description: `O veículo ${v.model} atingiu ${curKm.toLocaleString('pt-BR')} km e está com troca de óleo vencida (programada para ${nextKm.toLocaleString('pt-BR')} km).`
               }).catch(() => {});
 
@@ -2417,6 +2492,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 eventId: cycleEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
                 equipmentId: v.id,
+                customTitle: title,
                 description: `O veículo ${v.model} atingiu ${curKm.toLocaleString('pt-BR')} km e está com troca de óleo vencida (programada para ${nextKm.toLocaleString('pt-BR')} km).`
               }).catch(() => {});
 
@@ -2447,10 +2523,24 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
                 resolved: false,
                 cycleTargetKm: nextKm,
                 lastOilChangeKm: lastKm,
-                cycleId
+                cycleId,
+                pushNotified: true,
+                pushNotifiedForCycle: nextKm,
+                pushNotifiedAt: new Date().toISOString()
               });
               cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== kmAlertId && !(a.equipmentId === v.id && a.type === 'OIL_CHANGE_DUE' && !a.resolved))];
               setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
+
+              // Disparo de Web Push para aviso de troca de óleo próxima em km
+              const warningEventId = `oil-warning-${v.id}-${nextKm}`;
+              dispatchPushNotificationEvent({
+                eventType: 'OIL_CHANGE_DUE',
+                eventId: warningEventId,
+                equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
+                equipmentId: v.id,
+                customTitle: title,
+                description: `O veículo ${v.model} está próximo da troca de óleo (${curKm.toLocaleString('pt-BR')} km / ${nextKm.toLocaleString('pt-BR')} km). Faltam ${diffKm.toLocaleString('pt-BR')} km.`
+              }).catch(() => {});
             } else if (openKmAlert.description !== desc) {
               const updated = cleanUndefined({
                 ...openKmAlert,

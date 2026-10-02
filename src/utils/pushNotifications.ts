@@ -847,7 +847,8 @@ export async function flushPendingPushEvents(): Promise<void> {
           eventId: item.eventId,
           equipmentName: item.equipmentName,
           description: item.description,
-          equipmentId: item.equipmentId
+          equipmentId: item.equipmentId,
+          customTitle: item.customTitle
         })
       });
       if (!result.ok) {
@@ -873,7 +874,7 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Dispatch an event to push notification subscribers (New Problem, New Maintenance or Oil Change Due)
+ * Dispatch an event to push notification subscribers (Problems, Maintenances, Oil Changes, Low Tank, Suspicious Consumption)
  * Protected with deduplication at both client and server layers.
  * Queued automatically if offline or connection drops.
  */
@@ -884,8 +885,19 @@ export async function dispatchPushNotificationEvent(payload: PushNotificationPay
   recipientsCount?: number;
   message?: string;
 }> {
-  // Only trigger for authorized system events
-  if (payload.eventType !== 'NEW_ISSUE' && payload.eventType !== 'NEW_MAINTENANCE' && payload.eventType !== 'OIL_CHANGE_DUE') {
+  // Authorized system events: issues, maintenance, oil changes, tank level, suspicious fuel, and general alerts
+  const allowedEvents = [
+    'NEW_ISSUE',
+    'NEW_MAINTENANCE',
+    'OIL_CHANGE_DUE',
+    'LOW_TANK_LEVEL',
+    'SUSPICIOUS_FUEL',
+    'PREVENTIVE_MAINTENANCE',
+    'MAINTENANCE_DUE',
+    'MACHINE_ISSUE',
+    'TEST'
+  ];
+  if (!allowedEvents.includes(payload.eventType as string)) {
     return { success: false, message: 'Tipo de evento não suportado.' };
   }
 
@@ -909,7 +921,8 @@ export async function dispatchPushNotificationEvent(payload: PushNotificationPay
         eventId: payload.eventId,
         equipmentName: payload.equipmentName,
         description: payload.description,
-        equipmentId: payload.equipmentId
+        equipmentId: payload.equipmentId,
+        customTitle: payload.customTitle
       })
     });
 

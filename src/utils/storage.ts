@@ -1262,6 +1262,11 @@ export async function updateCentralTank(id: string, fields: Partial<CentralTank>
     logAuditEvent('EDITAR', 'Tanque Central', `Atualizou dados e configurações de ${updatedObj.name} (${updatedObj.location}).`);
   }
 
+  // 3B. Se o estoque foi alterado, limpa deduplicação anterior para permitir push imediato se atingir limite
+  if (stockChanged) {
+    clearPushEventDeduplication(`tank-alert-${id}`).catch(() => {});
+  }
+
   checkAutomatedAlerts();
 }
 
@@ -1580,7 +1585,7 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
   // Dispatch real push notification to authorized users (ADMIN and MANUTENCAO)
   dispatchPushNotificationEvent({
     eventType: 'NEW_ISSUE',
-    eventId: cleaned.id,
+    eventId: `issue-${cleaned.id}`,
     equipmentName: newIssue.equipmentName,
     equipmentId: newIssue.equipmentId,
     customTitle: `⚠️ Problema Relatado: ${newIssue.equipmentName}`,
@@ -1823,7 +1828,7 @@ export async function resolveAlert(id: string, resolvedByName?: string): Promise
   }
   if (targetAlert?.id?.startsWith('alt-low-tank-') || targetAlert?.type === 'LOW_TANK_LEVEL') {
     const tankId = targetAlert.equipmentId || targetAlert.id.replace('alt-low-tank-', '');
-    clearPushEventDeduplication(`tank-${tankId}`).catch(() => {});
+    clearPushEventDeduplication(`tank-alert-${tankId}`).catch(() => {});
   }
   if (targetAlert?.type === 'SUSPICIOUS_FUEL' && targetAlert?.id) {
     clearPushEventDeduplication(targetAlert.id).catch(() => {});
@@ -2157,7 +2162,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
           setDoc(doc(db, 'alerts', lowTankAlertId), alertObj).catch(console.error);
 
           // Disparo de Web Push para nível de tanque baixo
-          const tankEventId = `tank-${tank.id}-${isCritical ? 'crit' : 'low'}-${new Date().toISOString().slice(0, 10)}`;
+          const tankEventId = `tank-alert-${tank.id}-${isCritical ? 'crit' : 'low'}-${Math.round(tankStatus.currentStock)}`;
           dispatchPushNotificationEvent({
             eventType: 'LOW_TANK_LEVEL',
             eventId: tankEventId,
@@ -2183,7 +2188,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
           setDoc(doc(db, 'alerts', lowTankAlertId), updated).catch(console.error);
 
           if (transitionToCritical) {
-            const tankCritEventId = `tank-${tank.id}-crit-${new Date().toISOString().slice(0, 10)}`;
+            const tankCritEventId = `tank-alert-${tank.id}-crit-${Math.round(tankStatus.currentStock)}`;
             dispatchPushNotificationEvent({
               eventType: 'LOW_TANK_LEVEL',
               eventId: tankCritEventId,
@@ -2204,7 +2209,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
         });
         cache.alerts = cache.alerts.map(a => a.id === lowTankAlertId ? resolvedAlert : a);
         setDoc(doc(db, 'alerts', lowTankAlertId), resolvedAlert).catch(console.error);
-        clearPushEventDeduplication(`tank-${tank.id}`).catch(() => {});
+        clearPushEventDeduplication(`tank-alert-${tank.id}`).catch(() => {});
       }
     });
 

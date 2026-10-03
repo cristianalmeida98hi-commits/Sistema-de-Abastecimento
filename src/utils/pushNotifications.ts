@@ -871,6 +871,17 @@ if (typeof window !== 'undefined') {
     console.log('[Network] Connection restored. Flushing pending push events...');
     flushPendingPushEvents();
   });
+
+  // 3B. Recebimento de Web Push com aplicativo aberto em primeiro plano (foreground)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'ANDRADEAGRO_PUSH_EVENT') {
+        console.log('[Push Notification] Foreground Web Push recebido no app aberto:', event.data);
+        window.dispatchEvent(new CustomEvent('andradeagro_push_received', { detail: event.data }));
+        window.dispatchEvent(new CustomEvent('andradeagro_data_updated'));
+      }
+    });
+  }
 }
 
 /**

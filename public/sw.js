@@ -154,15 +154,28 @@ self.addEventListener('push', (event) => {
     requireInteraction: false
   };
 
-  event.waitUntil(
-    self.registration.showNotification(notificationTitle, notificationOptions).catch((err) => {
-      console.warn('[SW] Rich notification failed, trying basic notification:', err);
-      return self.registration.showNotification(notificationTitle, {
+  // Exibe a notificação do sistema operacional em foreground e background
+  const notifyPromise = self.registration.showNotification(notificationTitle, notificationOptions).catch((err) => {
+    console.warn('[SW] Rich notification failed, trying basic notification:', err);
+    return self.registration.showNotification(notificationTitle, {
+      body: notificationBody,
+      icon: '/icon-192.png'
+    });
+  });
+
+  // Notifica também abas/janelas do Andrade Agro que estejam abertas em primeiro plano
+  const broadcastPromise = clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    for (const client of clientList) {
+      client.postMessage({
+        type: 'ANDRADEAGRO_PUSH_EVENT',
+        title: notificationTitle,
         body: notificationBody,
-        icon: '/icon-192.png'
+        data: notificationOptions.data
       });
-    })
-  );
+    }
+  }).catch(() => {});
+
+  event.waitUntil(Promise.all([notifyPromise, broadcastPromise]));
 });
 
 self.addEventListener('notificationclick', (event) => {

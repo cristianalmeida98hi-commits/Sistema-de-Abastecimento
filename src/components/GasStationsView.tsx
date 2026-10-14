@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Fuel, Plus, Edit3, CheckCircle2, DollarSign, MapPin, Building, X, Trash2, Settings } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Fuel, Plus, Edit3, CheckCircle2, DollarSign, MapPin, Building, X, Trash2, Settings, AlertTriangle } from 'lucide-react';
 import { GasStation, FuelType, CentralTank, User, canEditSystemData } from '../types';
 import { formatCurrency, getFuelTypeName } from '../utils/calculations';
 import { getCentralTanks, updateCentralTank, getCurrentUser, getTankStatus } from '../utils/storage';
@@ -11,6 +11,8 @@ interface GasStationsViewProps {
   onUpdateStation: (id: string, fields: Partial<GasStation>) => void;
   onDeleteStation?: (id: string) => void;
   darkMode: boolean;
+  highlightedTankId?: string | null;
+  onClearHighlightTank?: () => void;
 }
 
 export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
@@ -18,14 +20,35 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
   onAddStation,
   onUpdateStation,
   onDeleteStation,
-  darkMode
+  darkMode,
+  highlightedTankId,
+  onClearHighlightTank
 }) => {
   const [showModal, setShowModal] = useState(false);
   const [editingStation, setEditingStation] = useState<GasStation | null>(null);
   const [selectedTankForModal, setSelectedTankForModal] = useState<CentralTank | null>(null);
+  const [activeHighlight, setActiveHighlight] = useState<string | null>(highlightedTankId || null);
+  const highlightedRef = useRef<HTMLDivElement | null>(null);
   const currentUser = getCurrentUser() || { id: 'usr-admin', name: 'Administrador', role: 'ADMIN' } as User;
   const canEdit = canEditSystemData(currentUser.role);
   const centralTanks = getCentralTanks();
+
+  useEffect(() => {
+    if (highlightedTankId) {
+      setActiveHighlight(highlightedTankId);
+      setTimeout(() => {
+        if (highlightedRef.current) {
+          highlightedRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 200);
+
+      const timer = setTimeout(() => {
+        setActiveHighlight(null);
+        if (onClearHighlightTank) onClearHighlightTank();
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedTankId, onClearHighlightTank]);
 
   // Helpers to handle price input with comma (,) or dot (.) decimal separators
   const parseFuelPrice = (val: string | number | undefined | null): number => {
@@ -151,13 +174,33 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
 
       {/* Gas Stations Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {gasStations.map(stn => (
-          <div
-            key={stn.id}
-            className={`p-5 rounded-2xl border space-y-4 transition-all ${
-              darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100 shadow-sm'
-            }`}
-          >
+        {gasStations.map(stn => {
+          const isHighlighted = !!activeHighlight && (
+            stn.id === activeHighlight ||
+            stn.tankId === activeHighlight ||
+            (activeHighlight === 'tank-quadra' && (stn.id === 'tank-quadra' || stn.name.toLowerCase().includes('quadra'))) ||
+            (activeHighlight === 'tank-itapeva' && (stn.id === 'tank-itapeva' || stn.name.toLowerCase().includes('itapeva')))
+          );
+
+          return (
+            <div
+              key={stn.id}
+              ref={isHighlighted ? highlightedRef : undefined}
+              className={`p-5 rounded-2xl border space-y-4 transition-all duration-300 ${
+                isHighlighted
+                  ? 'ring-2 ring-[#FACC15] shadow-[0_0_25px_rgba(250,204,21,0.35)] bg-emerald-950/90 border-[#FACC15]'
+                  : darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100 shadow-sm'
+              }`}
+            >
+              {isHighlighted && (
+                <div className="p-2.5 rounded-xl bg-amber-500/20 border border-amber-500/50 flex items-center justify-between text-xs text-amber-300 font-bold animate-pulse">
+                  <span className="flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-[#FACC15]" />
+                    Tanque Indicado na Notificação Push
+                  </span>
+                  <span className="text-[10px] text-amber-200">Verifique o Estoque</span>
+                </div>
+              )}
             <div className="flex items-start justify-between gap-2">
               <div>
                 <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
@@ -272,7 +315,8 @@ export const GasStationsViewComponent: React.FC<GasStationsViewProps> = ({
               Fornecedor: <strong>{stn.supplierName}</strong>
             </p>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* New/Edit Station Modal */}

@@ -16,6 +16,10 @@ interface MaintenanceViewProps {
   onUpdateMaintenance: (id: string, fields: Partial<MaintenanceLog>) => void;
   onDeleteMaintenance?: (id: string) => void;
   darkMode: boolean;
+  highlightedMaintenanceId?: string | null;
+  initialEquipmentId?: string | null;
+  onOpenDigitalSheet?: (vehicle: Vehicle) => void;
+  onClearHighlight?: () => void;
 }
 
 export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
@@ -26,14 +30,43 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
   onAddMaintenance,
   onUpdateMaintenance,
   onDeleteMaintenance,
-  darkMode
+  darkMode,
+  highlightedMaintenanceId,
+  initialEquipmentId,
+  onOpenDigitalSheet,
+  onClearHighlight
 }) => {
   const canEdit = canEditSystemData(currentUser.role);
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => {
+    if (initialEquipmentId) {
+      const eq = vehicles.find(v => v.id === initialEquipmentId || v.licensePlate === initialEquipmentId || v.patrimonyCode === initialEquipmentId);
+      return eq ? (eq.patrimonyCode || eq.licensePlate || eq.model) : '';
+    }
+    return '';
+  });
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(highlightedMaintenanceId || null);
+  const highlightedRef = React.useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (highlightedMaintenanceId) {
+      setActiveHighlightId(highlightedMaintenanceId);
+      setTimeout(() => {
+        if (highlightedRef.current) {
+          highlightedRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 200);
+
+      const timer = setTimeout(() => {
+        setActiveHighlightId(null);
+        if (onClearHighlight) onClearHighlight();
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedMaintenanceId, onClearHighlight]);
 
   // Form State
   const [equipmentId, setEquipmentId] = useState(vehicles[0]?.id || '');
@@ -282,91 +315,118 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
             Nenhum registro de manutenção encontrado.
           </div>
         ) : (
-          filteredLogs.map(m => (
-            <div
-              key={m.id}
-              className={`p-4 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all ${
-                darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100 shadow-sm'
-              }`}
-            >
-              <div className="flex items-start gap-3.5">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-                  {m.type === 'TROCA_OLEO' ? <Droplets className="w-5 h-5" /> : <Wrench className="w-5 h-5" />}
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 uppercase">
-                      {m.type.replace('_', ' ')}
-                    </span>
-                    <span className="text-xs text-gray-500 dark:text-emerald-400 font-medium">
-                      🗓️ {formatDateBR(m.date)}
-                    </span>
-                    <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
-                      ⏱️ {m.kmOrHourAtService} h/km
-                    </span>
+          filteredLogs.map(m => {
+            const isHighlighted = !!activeHighlightId && (
+              m.id === activeHighlightId ||
+              m.equipmentId === activeHighlightId ||
+              (m.title && activeHighlightId.includes(m.id))
+            );
+            const targetVehicle = vehicles.find(v => v.id === m.equipmentId);
+
+            return (
+              <div
+                key={m.id}
+                ref={isHighlighted ? highlightedRef : undefined}
+                className={`p-4 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all duration-300 ${
+                  isHighlighted
+                    ? 'ring-2 ring-[#FACC15] shadow-lg shadow-amber-500/20 bg-amber-500/15 border-[#FACC15]'
+                    : darkMode ? 'bg-emerald-950/40 border-emerald-900' : 'bg-white border-emerald-100 shadow-sm'
+                }`}
+              >
+                <div className="flex items-start gap-3.5">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                    {m.type === 'TROCA_OLEO' ? <Droplets className="w-5 h-5" /> : <Wrench className="w-5 h-5" />}
                   </div>
-                  <h3 className="font-extrabold text-sm text-gray-900 dark:text-emerald-100">
-                    {m.title}
-                  </h3>
-                  <p className="text-xs text-emerald-800 dark:text-emerald-300 font-bold">
-                    🚜 {m.equipmentName} ({m.equipmentPlateOrCode})
-                  </p>
-                  <p className="text-xs text-gray-600 dark:text-emerald-200/90">
-                    {m.description}
-                  </p>
-                  {m.notes && (
-                    <p className="text-[11px] italic text-slate-500 dark:text-emerald-300">
-                      Obs: {m.notes}
-                    </p>
-                  )}
-                  <div className="text-[10px] text-gray-400 pt-0.5">
-                    Mecânico: <strong>{m.performedBy || 'Não informado'}</strong> | Oficina: <strong>{m.supplierOrWorkshop || 'Interna'}</strong>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 shrink-0 justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-emerald-800/10">
-                <div className="text-right">
-                  <span className="text-[10px] text-gray-500 dark:text-emerald-400 block">Custo</span>
-                  <span className="font-black text-sm text-gray-900 dark:text-emerald-100">{formatCurrency(m.cost)}</span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
-                    m.status === 'CONCLUIDO' 
-                      ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300' 
-                      : m.status === 'EM_ANDAMENTO' 
-                      ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300' 
-                      : 'bg-gray-200 text-gray-700'
-                  }`}>
-                    {m.status}
-                  </span>
-
-                  {/* Maintenance role Controls */}
-                  {canEdit && (
-                    <div className="flex items-center gap-1 pl-2 border-l border-emerald-800/20">
-                      <button
-                        onClick={() => handleOpenEdit(m)}
-                        className="p-1.5 rounded-lg bg-emerald-800/20 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-800/40 transition-colors"
-                        title="Editar Manutenção"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                      </button>
-                      {onDeleteMaintenance && (
-                        <button
-                          onClick={() => handleDelete(m.id)}
-                          className="p-1.5 rounded-lg bg-red-500/20 text-red-700 dark:text-red-300 hover:bg-red-500/40 transition-colors"
-                          title="Excluir Manutenção"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 uppercase">
+                        {m.type.replace('_', ' ')}
+                      </span>
+                      <span className="text-xs text-gray-500 dark:text-emerald-400 font-medium">
+                        🗓️ {formatDateBR(m.date)}
+                      </span>
+                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                        ⏱️ {m.kmOrHourAtService} h/km
+                      </span>
+                      {isHighlighted && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-black bg-[#FACC15] text-slate-950 animate-pulse">
+                          🔧 Registro da Notificação
+                        </span>
                       )}
                     </div>
-                  )}
+                    <h3 className="font-extrabold text-sm text-gray-900 dark:text-emerald-100">
+                      {m.title}
+                    </h3>
+                    <p className="text-xs text-emerald-800 dark:text-emerald-300 font-bold">
+                      🚜 {m.equipmentName} ({m.equipmentPlateOrCode})
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-emerald-200/90">
+                      {m.description}
+                    </p>
+                    {m.notes && (
+                      <p className="text-[11px] italic text-slate-500 dark:text-emerald-300">
+                        Obs: {m.notes}
+                      </p>
+                    )}
+                    <div className="text-[10px] text-gray-400 pt-0.5">
+                      Mecânico: <strong>{m.performedBy || 'Não informado'}</strong> | Oficina: <strong>{m.supplierOrWorkshop || 'Interna'}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 shrink-0 justify-between md:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-emerald-800/10">
+                  <div className="text-right">
+                    <span className="text-[10px] text-gray-500 dark:text-emerald-400 block">Custo</span>
+                    <span className="font-black text-sm text-gray-900 dark:text-emerald-100">{formatCurrency(m.cost)}</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${
+                      m.status === 'CONCLUIDO' 
+                        ? 'bg-emerald-500/20 text-emerald-800 dark:text-emerald-300' 
+                        : m.status === 'EM_ANDAMENTO' 
+                        ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300' 
+                        : 'bg-gray-200 text-gray-700'
+                    }`}>
+                      {m.status}
+                    </span>
+
+                    {targetVehicle && onOpenDigitalSheet && (
+                      <button
+                        onClick={() => onOpenDigitalSheet(targetVehicle)}
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-800/40 hover:bg-emerald-800/70 text-emerald-200 text-xs font-bold transition-colors"
+                        title={`Abrir ficha de ${targetVehicle.model}`}
+                      >
+                        Ficha Técnica
+                      </button>
+                    )}
+
+                    {/* Maintenance role Controls */}
+                    {canEdit && (
+                      <div className="flex items-center gap-1 pl-2 border-l border-emerald-800/20">
+                        <button
+                          onClick={() => handleOpenEdit(m)}
+                          className="p-1.5 rounded-lg bg-emerald-800/20 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-800/40 transition-colors"
+                          title="Editar Manutenção"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        {onDeleteMaintenance && (
+                          <button
+                            onClick={() => handleDelete(m.id)}
+                            className="p-1.5 rounded-lg bg-red-500/20 text-red-700 dark:text-red-300 hover:bg-red-500/40 transition-colors"
+                            title="Excluir Manutenção"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

@@ -187,11 +187,20 @@ self.addEventListener('notificationclick', (event) => {
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If a tab is already open, focus it and navigate
+      // If a tab is already open, focus it and notify client to navigate
       for (const client of clientList) {
-        if (client.url && 'focus' in client) {
+        if ('focus' in client) {
+          try {
+            client.postMessage({
+              type: 'ANDRADEAGRO_NOTIFICATION_CLICK',
+              url: targetUrl,
+              data: (event.notification.data) || {}
+            });
+          } catch (postErr) {
+            console.warn('[SW] Could not postMessage to client:', postErr);
+          }
           if ('navigate' in client) {
-            client.navigate(targetUrl);
+            client.navigate(targetUrl).catch(() => {});
           }
           return client.focus();
         }

@@ -1,5 +1,5 @@
-import React from 'react';
-import { AlertTriangle, CheckCircle2, ShieldAlert, Truck } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { AlertTriangle, CheckCircle2, ShieldAlert, Truck, Sparkles } from 'lucide-react';
 import { SmartAlert, User, Vehicle } from '../types';
 import { formatDateBR } from '../utils/calculations';
 
@@ -10,6 +10,9 @@ interface AlertsViewProps {
   vehicles?: Vehicle[];
   onOpenDigitalSheet?: (vehicle: Vehicle) => void;
   darkMode?: boolean;
+  highlightedAlertId?: string | null;
+  highlightedIssueId?: string | null;
+  onClearHighlight?: () => void;
 }
 
 export const AlertsView: React.FC<AlertsViewProps> = ({
@@ -17,10 +20,26 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
   currentUser,
   onResolveAlert,
   vehicles = [],
-  onOpenDigitalSheet
+  onOpenDigitalSheet,
+  highlightedAlertId,
+  highlightedIssueId,
+  onClearHighlight
 }) => {
   const unresolvedAlerts = alerts.filter(a => !a.resolved);
   const resolvedAlerts = alerts.filter(a => a.resolved);
+  const highlightedRef = useRef<HTMLDivElement | null>(null);
+
+  const targetId = highlightedAlertId || highlightedIssueId;
+
+  useEffect(() => {
+    if (targetId && highlightedRef.current) {
+      highlightedRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const timer = setTimeout(() => {
+        if (onClearHighlight) onClearHighlight();
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [targetId, onClearHighlight]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -49,59 +68,76 @@ export const AlertsView: React.FC<AlertsViewProps> = ({
             <p className="text-xs text-emerald-400 mt-0.5">Tudo operando dentro das margens de segurança na fazenda.</p>
           </div>
         ) : (
-          unresolvedAlerts.map(alert => (
-            <div
-              key={alert.id}
-              className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
-                alert.severity === 'ALTA'
-                  ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
-                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <div className="p-2 rounded-xl bg-amber-500 text-gray-950 font-bold shrink-0 mt-0.5">
-                  <ShieldAlert className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-extrabold text-xs uppercase">{alert.title}</span>
-                    <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-amber-500/20">
-                      Gravidade {alert.severity}
-                    </span>
+          unresolvedAlerts.map(alert => {
+            const isHighlighted = !!targetId && (
+              alert.id === targetId ||
+              (alert.equipmentId && alert.equipmentId === targetId) ||
+              alert.id.toLowerCase().includes(targetId.toLowerCase())
+            );
+
+            return (
+              <div
+                key={alert.id}
+                ref={isHighlighted ? highlightedRef : undefined}
+                className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all duration-300 ${
+                  isHighlighted
+                    ? 'ring-2 ring-[#FACC15] shadow-lg shadow-amber-500/20 bg-amber-500/20 border-[#FACC15]'
+                    : alert.severity === 'ALTA'
+                      ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
+                      : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-xl bg-amber-500 text-gray-950 font-bold shrink-0 mt-0.5">
+                    <ShieldAlert className="w-5 h-5" />
                   </div>
-                  <p className="text-xs mt-1 leading-relaxed">{alert.description}</p>
-                  <p className="text-[10px] opacity-75 mt-1">Data do Alerta: {formatDateBR(alert.date)}</p>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-extrabold text-xs uppercase">{alert.title}</span>
+                      <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-amber-500/20 text-amber-300">
+                        Gravidade {alert.severity}
+                      </span>
+                      {isHighlighted && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-extrabold bg-[#FACC15] text-slate-950 flex items-center gap-1 animate-pulse">
+                          <Sparkles className="w-3 h-3 text-slate-950" />
+                          Alerta da Notificação
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs mt-1 leading-relaxed">{alert.description}</p>
+                    <p className="text-[10px] opacity-75 mt-1">Data do Alerta: {formatDateBR(alert.date)}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {(() => {
+                    const targetVehicle = alert.equipmentId && vehicles ? vehicles.find(v => v.id === alert.equipmentId) : undefined;
+                    if (targetVehicle && onOpenDigitalSheet) {
+                      return (
+                        <button
+                          onClick={() => onOpenDigitalSheet(targetVehicle)}
+                          className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
+                          title={`Abrir ficha de ${targetVehicle.model}`}
+                        >
+                          <Truck className="w-4 h-4 text-[#FACC15]" />
+                          <span>Ficha ({targetVehicle.patrimonyCode || targetVehicle.licensePlate || 'Máquina'})</span>
+                        </button>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  <button
+                    onClick={() => onResolveAlert(alert.id)}
+                    className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold text-xs flex items-center gap-1.5 shadow-sm"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Resolver Alerta</span>
+                  </button>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {(() => {
-                  const targetVehicle = alert.equipmentId && vehicles ? vehicles.find(v => v.id === alert.equipmentId) : undefined;
-                  if (targetVehicle && onOpenDigitalSheet) {
-                    return (
-                      <button
-                        onClick={() => onOpenDigitalSheet(targetVehicle)}
-                        className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
-                        title={`Abrir ficha de ${targetVehicle.model}`}
-                      >
-                        <Truck className="w-4 h-4 text-[#FACC15]" />
-                        <span>Ficha ({targetVehicle.patrimonyCode || targetVehicle.licensePlate || 'Máquina'})</span>
-                      </button>
-                    );
-                  }
-                  return null;
-                })()}
-
-                <button
-                  onClick={() => onResolveAlert(alert.id)}
-                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold text-xs flex items-center gap-1.5 shadow-sm"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Resolver Alerta</span>
-                </button>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

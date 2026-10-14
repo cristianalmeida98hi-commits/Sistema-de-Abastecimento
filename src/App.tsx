@@ -18,7 +18,8 @@ import { autoSyncPushDevice } from './utils/pushNotifications';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { CheckCircle2, Tractor, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
+import { NotificationPermissionBanner } from './components/NotificationPermissionBanner';
+import { CheckCircle2, Tractor, AlertTriangle, RefreshCw, WifiOff, Bell, X, Sparkles } from 'lucide-react';
 
 // Code-split dynamic views to drastically reduce initial bundle size and accelerate time-to-first-paint
 const DashboardView = React.lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
@@ -98,6 +99,15 @@ export default function App() {
   const [preSelectedVehicleId, setPreSelectedVehicleId] = useState<string | undefined>(undefined);
   const [isQRScannerModalOpen, setIsQRScannerModalOpen] = useState<boolean>(false);
   const [selectedDigitalSheetVehicle, setSelectedDigitalSheetVehicle] = useState<Vehicle | null>(null);
+  const [digitalSheetInitialTab, setDigitalSheetInitialTab] = useState<'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES'>('OVERVIEW');
+  const [highlightedTankId, setHighlightedTankId] = useState<string | null>(null);
+  const [highlightedAlertId, setHighlightedAlertId] = useState<string | null>(null);
+  const [highlightedMaintenanceId, setHighlightedMaintenanceId] = useState<string | null>(null);
+  const [inAppPushAlert, setInAppPushAlert] = useState<{
+    title: string;
+    body: string;
+    data: any;
+  } | null>(null);
   const [fuelingSuccessFeedback, setFuelingSuccessFeedback] = useState<{
     show: boolean;
     liters: number;
@@ -294,37 +304,172 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashCheck);
   }, [vehicles, storageStatus]);
 
-  // 6. Listen for Push Notification Deep Link parameters (e.g. ?tab=alerts or ?tab=maintenance)
+  // 6. Comprehensive Deep-Linking Navigation Engine (Handles URL parameters, push clicks, and in-app alerts)
+  const applyDeepLink = useCallback((params: {
+    tab?: string | null;
+    equipmentId?: string | null;
+    sheetTab?: string | null;
+    tankId?: string | null;
+    issueId?: string | null;
+    maintenanceId?: string | null;
+    action?: string | null;
+  }) => {
+    if (!params) return;
+
+    const freshUser = getCurrentUser();
+    if (!freshUser) {
+      // User is not logged in: persist target in sessionStorage for instant post-login redirection
+      if (params.tab) sessionStorage.setItem('andradeagro_post_login_tab', params.tab);
+      if (params.equipmentId) sessionStorage.setItem('andradeagro_post_login_equipment_id', params.equipmentId);
+      if (params.sheetTab) sessionStorage.setItem('andradeagro_post_login_sheet_tab', params.sheetTab);
+      if (params.tankId) sessionStorage.setItem('andradeagro_post_login_tank_id', params.tankId);
+      if (params.issueId) sessionStorage.setItem('andradeagro_post_login_issue_id', params.issueId);
+      if (params.maintenanceId) sessionStorage.setItem('andradeagro_post_login_maintenance_id', params.maintenanceId);
+      if (params.action) sessionStorage.setItem('andradeagro_post_login_action', params.action);
+      return;
+    }
+
+    // Role-specific navigation routing
+    if (freshUser.role === 'FUNCIONARIO') {
+      if (params.equipmentId) {
+        const currentVehicles = getVehicles();
+        const found = currentVehicles.find(v => v.id === params.equipmentId || v.licensePlate === params.equipmentId || v.patrimonyCode === params.equipmentId);
+        if (found) {
+          setSelectedDigitalSheetVehicle(found);
+          setDigitalSheetInitialTab('OVERVIEW');
+        }
+      }
+      return;
+    }
+
+    // User is ADMIN or MANUTENCAO
+    // 1. Tab & View Routing
+    if (params.tab === 'stations' || params.tab === 'gas-stations' || params.tankId) {
+      setActiveTab('stations');
+      if (params.tankId) {
+        setHighlightedTankId(params.tankId);
+      }
+    } else if (params.tab === 'alerts' || params.issueId) {
+      setActiveTab('alerts');
+      if (params.issueId) {
+        setHighlightedAlertId(params.issueId);
+      }
+    } else if (params.tab === 'maintenance' || params.maintenanceId || params.action === 'oil_change') {
+      setActiveTab('maintenance');
+      if (params.maintenanceId) {
+        setHighlightedMaintenanceId(params.maintenanceId);
+      }
+    } else if (params.tab && ['dashboard', 'fleet', 'settings', 'staff', 'reports', 'qr-codes', 'digital-sheets'].includes(params.tab)) {
+      setActiveTab(params.tab);
+    }
+
+    // 2. Equipment Ficha & Specific Tab Opening
+    if (params.equipmentId) {
+      const currentVehicles = getVehicles();
+      const found = currentVehicles.find(v => v.id === params.equipmentId || v.licensePlate === params.equipmentId || v.patrimonyCode === params.equipmentId);
+      if (found) {
+        setSelectedDigitalSheetVehicle(found);
+        if (params.sheetTab && ['PREVENTIVE', 'HISTORY', 'TIMELINE', 'OVERVIEW', 'ISSUES'].includes(params.sheetTab)) {
+          setDigitalSheetInitialTab(params.sheetTab as any);
+        } else if (params.action === 'oil_change' || params.action === 'preventive') {
+          setDigitalSheetInitialTab('PREVENTIVE');
+        } else if (params.maintenanceId || params.action === 'maintenance_view') {
+          setDigitalSheetInitialTab('HISTORY');
+        } else if (params.issueId) {
+          setDigitalSheetInitialTab('ISSUES');
+        } else {
+          setDigitalSheetInitialTab('OVERVIEW');
+        }
+      }
+    }
+
+    // Dismiss any blocking dialogs
+    setIsFuelingModalOpen(false);
+    setIsQRScannerModalOpen(false);
+
+    // Clean URL query params safely without page reload
+    if (typeof window !== 'undefined' && window.location.search) {
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+    }
+  }, []);
+
+  // Listen for initial URL Search Parameters (?tab=...&equipmentId=...&tankId=...)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const urlParams = new URLSearchParams(window.location.search);
     const tabParam = urlParams.get('tab');
     const equipmentIdParam = urlParams.get('equipmentId');
+    const sheetTabParam = urlParams.get('sheetTab');
+    const tankIdParam = urlParams.get('tankId');
+    const issueIdParam = urlParams.get('issueId');
+    const maintenanceIdParam = urlParams.get('maintenanceId');
+    const actionParam = urlParams.get('action');
 
-    if (tabParam) {
-      if (currentUser) {
-        if (currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO') {
-          if (['alerts', 'maintenance', 'dashboard', 'settings', 'fleet'].includes(tabParam)) {
-            setActiveTab(tabParam);
-          }
-          if (equipmentIdParam) {
-            const currentVehicles = getVehicles();
-            const found = currentVehicles.find(v => v.id === equipmentIdParam || v.licensePlate === equipmentIdParam);
-            if (found) {
-              setSelectedDigitalSheetVehicle(found);
-            }
-          }
-        }
-        // Clean query param without full page reload
-        window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
-      } else {
-        sessionStorage.setItem('andradeagro_post_login_tab', tabParam);
-        if (equipmentIdParam) {
-          sessionStorage.setItem('andradeagro_post_login_equipment_id', equipmentIdParam);
-        }
-      }
+    if (tabParam || equipmentIdParam || tankIdParam || issueIdParam || maintenanceIdParam) {
+      applyDeepLink({
+        tab: tabParam,
+        equipmentId: equipmentIdParam,
+        sheetTab: sheetTabParam,
+        tankId: tankIdParam,
+        issueId: issueIdParam,
+        maintenanceId: maintenanceIdParam,
+        action: actionParam
+      });
     }
-  }, [currentUser]);
+  }, [currentUser, applyDeepLink]);
+
+  // Listen for Service Worker Messages (ANDRADEAGRO_NOTIFICATION_CLICK and ANDRADEAGRO_PUSH_EVENT)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const handleSwMessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (!msg) return;
+
+      if (msg.type === 'ANDRADEAGRO_NOTIFICATION_CLICK') {
+        const urlStr = msg.url;
+        const data = msg.data || {};
+        if (urlStr) {
+          try {
+            const parsed = new URL(urlStr, window.location.origin);
+            const pTab = parsed.searchParams.get('tab') || data.targetAction;
+            const pEquip = parsed.searchParams.get('equipmentId') || data.equipmentId;
+            const pSheetTab = parsed.searchParams.get('sheetTab') || data.sheetTab;
+            const pTank = parsed.searchParams.get('tankId') || data.tankId;
+            const pIssue = parsed.searchParams.get('issueId') || data.issueId;
+            const pMaint = parsed.searchParams.get('maintenanceId') || data.maintenanceId;
+            const pAction = parsed.searchParams.get('action');
+
+            applyDeepLink({
+              tab: pTab || undefined,
+              equipmentId: pEquip || undefined,
+              sheetTab: pSheetTab || undefined,
+              tankId: pTank || undefined,
+              issueId: pIssue || undefined,
+              maintenanceId: pMaint || undefined,
+              action: pAction || undefined
+            });
+          } catch {
+            applyDeepLink(data);
+          }
+        } else {
+          applyDeepLink(data);
+        }
+      } else if (msg.type === 'ANDRADEAGRO_PUSH_EVENT') {
+        // Push arrived while app is open in foreground: show prominent real-time notification
+        setInAppPushAlert({
+          title: msg.title || 'Notificação AndradeAgro',
+          body: msg.body || 'Novo evento registrado no sistema.',
+          data: msg.data || {}
+        });
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    };
+  }, [applyDeepLink]);
 
   // Handlers
   const handleLogout = () => {
@@ -336,25 +481,40 @@ export default function App() {
     setCurrentUser(user);
     setLoginSuccessMessage(null);
 
+    // Retrieve post-login deep link redirection targets
     const postLoginTab = typeof window !== 'undefined' ? sessionStorage.getItem('andradeagro_post_login_tab') : null;
     const postLoginEquipmentId = typeof window !== 'undefined' ? sessionStorage.getItem('andradeagro_post_login_equipment_id') : null;
+    const postLoginSheetTab = typeof window !== 'undefined' ? sessionStorage.getItem('andradeagro_post_login_sheet_tab') : null;
+    const postLoginTankId = typeof window !== 'undefined' ? sessionStorage.getItem('andradeagro_post_login_tank_id') : null;
+    const postLoginIssueId = typeof window !== 'undefined' ? sessionStorage.getItem('andradeagro_post_login_issue_id') : null;
+    const postLoginMaintenanceId = typeof window !== 'undefined' ? sessionStorage.getItem('andradeagro_post_login_maintenance_id') : null;
+    const postLoginAction = typeof window !== 'undefined' ? sessionStorage.getItem('andradeagro_post_login_action') : null;
 
-    if (postLoginTab && (user.role === 'ADMIN' || user.role === 'MANUTENCAO')) {
+    // Clean saved values immediately
+    if (typeof window !== 'undefined') {
       sessionStorage.removeItem('andradeagro_post_login_tab');
-      setActiveTab(postLoginTab);
+      sessionStorage.removeItem('andradeagro_post_login_equipment_id');
+      sessionStorage.removeItem('andradeagro_post_login_sheet_tab');
+      sessionStorage.removeItem('andradeagro_post_login_tank_id');
+      sessionStorage.removeItem('andradeagro_post_login_issue_id');
+      sessionStorage.removeItem('andradeagro_post_login_maintenance_id');
+      sessionStorage.removeItem('andradeagro_post_login_action');
+    }
+
+    if (postLoginTab || postLoginEquipmentId || postLoginTankId || postLoginIssueId || postLoginMaintenanceId) {
+      applyDeepLink({
+        tab: postLoginTab || undefined,
+        equipmentId: postLoginEquipmentId || undefined,
+        sheetTab: postLoginSheetTab || undefined,
+        tankId: postLoginTankId || undefined,
+        issueId: postLoginIssueId || undefined,
+        maintenanceId: postLoginMaintenanceId || undefined,
+        action: postLoginAction || undefined
+      });
     } else if (user.role === 'FUNCIONARIO') {
       setActiveTab('operator-fueling');
     } else {
       setActiveTab('dashboard');
-    }
-
-    if (postLoginEquipmentId && (user.role === 'ADMIN' || user.role === 'MANUTENCAO')) {
-      sessionStorage.removeItem('andradeagro_post_login_equipment_id');
-      const currentVehicles = getVehicles();
-      const found = currentVehicles.find(v => v.id === postLoginEquipmentId || v.licensePlate === postLoginEquipmentId);
-      if (found) {
-        setSelectedDigitalSheetVehicle(found);
-      }
     }
 
     if (typeof window !== 'undefined') {
@@ -591,6 +751,41 @@ export default function App() {
 
         {/* Content View Container */}
         <main ref={mainContentRef} className="flex-1 p-3 sm:p-6 lg:p-8 pb-safe overflow-y-auto max-w-[1600px] w-full mx-auto">
+          {/* Notification Permission Opt-in Banner for Admin and Maintenance */}
+          <NotificationPermissionBanner currentUser={currentUser} />
+
+          {/* Real-time Push Alert Banner when in foreground */}
+          {inAppPushAlert && (
+            <div className="w-full mb-4 p-4 rounded-2xl bg-gradient-to-r from-amber-500/20 via-emerald-900/60 to-emerald-950 border border-amber-500/60 shadow-xl flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold shrink-0">
+                  <Bell className="w-5 h-5 text-slate-950 animate-bounce" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-amber-300">{inAppPushAlert.title}</h4>
+                  <p className="text-xs text-emerald-100">{inAppPushAlert.body}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    applyDeepLink(inAppPushAlert.data);
+                    setInAppPushAlert(null);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-[#FACC15] hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-md transition-all active:scale-95"
+                >
+                  Ver Agora
+                </button>
+                <button
+                  onClick={() => setInAppPushAlert(null)}
+                  className="p-1.5 text-emerald-400 hover:text-white rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
           <ErrorBoundary key={activeTab}>
             <React.Suspense fallback={<ViewLoadingFallback />}>
               {activeTab === 'operator-fueling' && (
@@ -700,6 +895,10 @@ export default function App() {
                 onAddMaintenance={(m) => addMaintenance(m)}
                 onUpdateMaintenance={(id, fields) => updateMaintenance(id, fields)}
                 onDeleteMaintenance={(id) => deleteMaintenance(id)}
+                highlightedMaintenanceId={highlightedMaintenanceId}
+                initialEquipmentId={preSelectedVehicleId}
+                onOpenDigitalSheet={(v) => { setSelectedDigitalSheetVehicle(v); setDigitalSheetInitialTab('HISTORY'); }}
+                onClearHighlight={() => setHighlightedMaintenanceId(null)}
                 darkMode={darkMode}
               />
             )}
@@ -710,6 +909,8 @@ export default function App() {
                 onAddStation={(stn) => addGasStation(stn)}
                 onUpdateStation={(id, fields) => updateGasStation(id, fields)}
                 onDeleteStation={(id) => deleteGasStation(id)}
+                highlightedTankId={highlightedTankId}
+                onClearHighlightTank={() => setHighlightedTankId(null)}
                 darkMode={darkMode}
               />
             )}
@@ -744,7 +945,9 @@ export default function App() {
                 currentUser={currentUser}
                 onResolveAlert={(id) => { resolveAlert(id); refreshState(); }}
                 vehicles={vehicles}
-                onOpenDigitalSheet={(v) => setSelectedDigitalSheetVehicle(v)}
+                onOpenDigitalSheet={(v) => { setSelectedDigitalSheetVehicle(v); setDigitalSheetInitialTab('ISSUES'); }}
+                highlightedAlertId={highlightedAlertId}
+                onClearHighlight={() => setHighlightedAlertId(null)}
                 darkMode={darkMode}
               />
             )}
@@ -803,6 +1006,7 @@ export default function App() {
             isOpen={!!selectedDigitalSheetVehicle}
             onClose={() => {
               setSelectedDigitalSheetVehicle(null);
+              setDigitalSheetInitialTab('OVERVIEW');
               if (typeof window !== 'undefined' && window.location.hash) {
                 history.pushState("", document.title, window.location.pathname + window.location.search);
               }
@@ -815,7 +1019,7 @@ export default function App() {
             preventiveItems={preventiveItems}
             alerts={alerts}
             currentUser={currentUser}
-            initialTab="OVERVIEW"
+            initialTab={digitalSheetInitialTab}
             onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
             onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}
             onDeleteMaintenance={(id) => { deleteMaintenance(id); refreshState(); }}

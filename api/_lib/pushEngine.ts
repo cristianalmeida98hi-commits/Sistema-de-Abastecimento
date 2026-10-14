@@ -1204,30 +1204,51 @@ export async function dispatchPushToAuthorizedUsers(event: {
 
   let title = customTitle || '⚠️ Notificação AndradeAgro';
   let url = '/';
+  let sheetTab = 'OVERVIEW';
+  let targetAction = 'view';
+  let targetTankId = '';
+  let targetIssueId = '';
+  let targetMaintenanceId = '';
 
   if (eventType === 'NEW_ISSUE' || eventType === 'MACHINE_ISSUE') {
     title = customTitle || '⚠️ Novo problema registrado';
-    url = `/?tab=alerts&issueId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+    sheetTab = 'ISSUES';
+    targetAction = 'alerts';
+    targetIssueId = eventId;
+    url = `/?tab=alerts&issueId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}&sheetTab=ISSUES`;
   } else if (eventType === 'NEW_MAINTENANCE') {
     title = customTitle || 'Nova manutenção registrada';
-    url = `/?tab=maintenance&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+    sheetTab = 'HISTORY';
+    targetAction = 'digital_sheet';
+    targetMaintenanceId = eventId;
+    url = `/?tab=maintenance&action=maintenance_view&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}&sheetTab=HISTORY`;
   } else if (eventType === 'MAINTENANCE_DUE' || eventType === 'PREVENTIVE_MAINTENANCE') {
     title = customTitle || '🔧 Manutenção preventiva pendente';
-    url = `/?tab=maintenance&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+    sheetTab = 'PREVENTIVE';
+    targetAction = 'digital_sheet';
+    targetMaintenanceId = eventId;
+    url = `/?tab=maintenance&action=preventive&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}&sheetTab=PREVENTIVE`;
   } else if (eventType === 'OIL_CHANGE_DUE') {
     title = customTitle || '⚠️ Troca de óleo pendente';
-    url = `/?tab=maintenance&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+    sheetTab = 'PREVENTIVE';
+    targetAction = 'oil_change';
+    url = `/?tab=maintenance&action=oil_change&equipmentId=${encodeURIComponent(equipmentId || '')}&sheetTab=PREVENTIVE`;
   } else if (eventType === 'LOW_TANK_LEVEL') {
     title = customTitle || '⚠️ Nível de Combustível Baixo';
-    url = '/?tab=alerts';
+    targetTankId = equipmentId || 'tank-quadra';
+    targetAction = 'stations';
+    url = `/?tab=stations&tankId=${encodeURIComponent(targetTankId)}`;
   } else if (eventType === 'SUSPICIOUS_FUEL') {
     title = customTitle || '⚠️ Consumo Anômalo Detectado';
-    url = '/?tab=alerts';
+    targetAction = 'alerts';
+    url = `/?tab=alerts&alertType=suspicious_fuel&equipmentId=${encodeURIComponent(equipmentId || '')}`;
   } else if (eventType === 'TEST') {
     title = customTitle || 'Teste AndradeAgro';
+    targetAction = 'settings';
     url = '/?tab=settings';
   } else {
     title = customTitle || '⚠️ Alerta AndradeAgro';
+    targetAction = 'alerts';
     url = '/?tab=alerts';
   }
 
@@ -1252,6 +1273,11 @@ export async function dispatchPushToAuthorizedUsers(event: {
       eventId,
       eventType,
       equipmentId: equipmentId || '',
+      tankId: targetTankId,
+      issueId: targetIssueId,
+      maintenanceId: targetMaintenanceId,
+      sheetTab,
+      targetAction,
       timestamp: new Date().toISOString()
     }
   });

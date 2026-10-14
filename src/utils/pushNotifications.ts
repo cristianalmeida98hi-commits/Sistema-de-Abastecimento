@@ -431,6 +431,50 @@ export function isStoredPushActive(userId: string): boolean {
 }
 
 /**
+ * Check if the user previously dismissed the push notification opt-in invitation
+ */
+export function isPushPromptDismissed(userId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem(`andradeagro_push_prompt_dismissed_${userId}`) === 'true';
+}
+
+/**
+ * Record that user dismissed the push notification opt-in prompt
+ */
+export function dismissPushPrompt(userId: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(`andradeagro_push_prompt_dismissed_${userId}`, 'true');
+  window.dispatchEvent(new CustomEvent('andradeagro_push_status_changed'));
+}
+
+/**
+ * Reset push notification opt-in prompt dismissal so user can be prompted again
+ */
+export function resetPushPromptDismissal(userId: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(`andradeagro_push_prompt_dismissed_${userId}`);
+  window.dispatchEvent(new CustomEvent('andradeagro_push_status_changed'));
+}
+
+/**
+ * Check if current user is eligible to see the push notification opt-in prompt:
+ * - Must be logged in as ADMIN or MANUTENCAO (never FUNCIONARIO)
+ * - Browser must support Web Push
+ * - Permission must not be explicitly blocked ('denied')
+ * - Push must not already be active for this user
+ * - User must not have previously dismissed the invitation
+ */
+export function shouldShowPushOptInPrompt(currentUser?: User | null): boolean {
+  if (!currentUser) return false;
+  if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANUTENCAO') return false;
+  if (!isPushSupported()) return false;
+  if (Notification.permission === 'denied') return false;
+  if (isStoredPushActive(currentUser.id)) return false;
+  if (isPushPromptDismissed(currentUser.id)) return false;
+  return true;
+}
+
+/**
  * Check if a real PushSubscription is currently active in the service worker
  */
 export async function isSubscriptionActive(): Promise<boolean> {
@@ -958,13 +1002,16 @@ export async function dispatchPushNotificationEvent(payload: PushNotificationPay
  */
 export async function autoSyncPushDevice(currentUser?: User | null): Promise<void> {
   if (!currentUser) return;
+  // Security & Role check: ONLY ADMIN and MANUTENCAO should receive management push notifications
+  if (currentUser.role !== 'ADMIN' && currentUser.role !== 'MANUTENCAO') return;
   if (!isPushSupported()) return;
 
   const perm = getNotificationPermission();
   const wasStoredActive = isStoredPushActive(currentUser.id);
 
-  // If user previously activated or permission is already granted, ensure active registration
-  if (perm === 'granted' || wasStoredActive) {
+  // CRITICAL: Only synchronize if the user deliberately activated notifications in Andrade Agro
+  // AND browser permission is actively granted. Never auto-enroll without prior explicit user consent!
+  if (perm === 'granted' && wasStoredActive) {
     try {
       const reg = await navigator.serviceWorker.ready;
       const publicKey = await getVapidPublicKey().catch(() => null);

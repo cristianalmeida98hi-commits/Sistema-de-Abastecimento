@@ -103,10 +103,12 @@ export function calculateOilChangeStatus(vehicle: Vehicle): OilChangeStatus {
   const cycleUsed = Math.max(0, currentMeter - lastMeter);
   const progressPercent = Math.min(100, Math.max(0, (cycleUsed / interval) * 100));
 
+  const unitWord = isKm ? 'quilômetros' : 'horas';
+
   let status: OilStatusType = 'EM_DIA';
   let statusLabel = `Em dia (${remaining.toLocaleString('pt-BR')} ${unit} restantes)`;
   let statusShortLabel = 'Em dia';
-  let statusDetailedMessage = `A manutenção está em dia. Próxima troca prevista para ${nextMeter.toLocaleString('pt-BR')} ${unit}.`;
+  let statusDetailedMessage = `A manutenção está em dia. Faltam ${remaining.toLocaleString('pt-BR')} ${unitWord} para a próxima troca programada (meta de ${nextMeter.toLocaleString('pt-BR')} ${unit}).`;
   let badgeClass = 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300';
   let badgeBorderClass = 'border-emerald-500/30';
   let barColor = 'bg-emerald-500';
@@ -114,18 +116,18 @@ export function calculateOilChangeStatus(vehicle: Vehicle): OilChangeStatus {
   if (remaining <= 0 || currentMeter >= nextMeter) {
     status = 'ATRASADA';
     statusLabel = hoursOrKmOverdue > 0 
-      ? `Troca atrasada (${hoursOrKmOverdue.toLocaleString('pt-BR')} ${unit} de atraso)`
-      : `Troca atrasada`;
-    statusShortLabel = 'Troca atrasada';
-    statusDetailedMessage = `ATENÇÃO: A troca de óleo atingiu o limite de ${nextMeter.toLocaleString('pt-BR')} ${unit} e está atrasada em ${hoursOrKmOverdue.toLocaleString('pt-BR')} ${unit}.`;
+      ? `Troca de óleo vencida (${hoursOrKmOverdue.toLocaleString('pt-BR')} ${unit} de atraso)`
+      : `Troca de óleo vencida`;
+    statusShortLabel = 'Troca de óleo vencida';
+    statusDetailedMessage = `ATENÇÃO: Troca de óleo vencida! O equipamento atingiu ou ultrapassou o limite oficial de ${nextMeter.toLocaleString('pt-BR')} ${unit}${hoursOrKmOverdue > 0 ? ` (excedido em ${hoursOrKmOverdue.toLocaleString('pt-BR')} ${unitWord})` : ''}.`;
     badgeClass = 'bg-red-500 text-white font-extrabold animate-pulse';
     badgeBorderClass = 'border-red-600';
     barColor = 'bg-red-500';
   } else if (remaining <= warningAdvance) {
     status = 'PROXIMA';
-    statusLabel = `Troca próxima (restam ${remaining.toLocaleString('pt-BR')} ${unit})`;
-    statusShortLabel = 'Troca próxima';
-    statusDetailedMessage = `Revisão preventiva se aproximando: restam apenas ${remaining.toLocaleString('pt-BR')} ${unit} para atingir a meta de ${nextMeter.toLocaleString('pt-BR')} ${unit}.`;
+    statusLabel = `Troca de óleo próxima (faltam ${remaining.toLocaleString('pt-BR')} ${unit})`;
+    statusShortLabel = 'Troca de óleo próxima';
+    statusDetailedMessage = `Troca de óleo próxima: faltam ${remaining.toLocaleString('pt-BR')} ${unitWord} para a troca de óleo (prevista para ${nextMeter.toLocaleString('pt-BR')} ${unit}).`;
     badgeClass = 'bg-amber-500 text-gray-950 font-extrabold';
     badgeBorderClass = 'border-amber-600';
     barColor = 'bg-amber-500';

@@ -253,6 +253,19 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
   const currentMeter = vehicle.currentHourmeter || vehicle.currentKm || 0;
 
   const getPreventiveStatus = (item: PreventiveMaintenanceItem) => {
+    // If this item is motor oil and vehicle has active oil tracking, synchronize with official calculateOilChangeStatus
+    const isOil = item.itemKey === 'TROCA_OLEO_MOTOR' || item.itemKey === 'FILTRO_OLEO' || item.itemName?.toLowerCase().includes('óleo do motor') || item.itemName?.toLowerCase().includes('oleo do motor');
+    if (isOil && vehicle.oilChangeControlActive !== false && vehicle.category !== 'IMPLEMENTO') {
+      const oilStatus = calculateOilChangeStatus(vehicle);
+      if (oilStatus.status === 'ATRASADA') {
+        return { status: 'RED', label: 'Vencida 🔴', color: 'bg-red-600 text-white', hoursRemaining: -oilStatus.hoursOrKmOverdue };
+      }
+      if (oilStatus.status === 'PROXIMA') {
+        return { status: 'YELLOW', label: 'Próxima 🟡', color: 'bg-amber-500 text-slate-950', hoursRemaining: oilStatus.remaining };
+      }
+      return { status: 'GREEN', label: 'Em dia 🟢', color: 'bg-emerald-600 text-white', hoursRemaining: oilStatus.remaining };
+    }
+
     const hoursRemaining = item.nextScheduledHourmeter - currentMeter;
     if (hoursRemaining <= 0) {
       return { status: 'RED', label: 'Atrasada 🔴', color: 'bg-red-600 text-white', hoursRemaining };
@@ -296,12 +309,14 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
 
     // 1. Check real-time oil change status directly for this vehicle
     const oilStatus = calculateOilChangeStatus(vehicle);
+    const unitWord = oilStatus.unit === 'km' ? 'quilômetros' : 'horas';
+
     if (oilStatus.isOilActive) {
       if (oilStatus.status === 'ATRASADA') {
         list.push({
           id: `oil-alert-${vehicle.id}`,
-          title: `🔴 Troca de óleo pendente: ${vehicle.model}`,
-          desc: `Veículo: ${vehicle.model} (${vehicle.patrimonyCode || vehicle.licensePlate || 'Frota'}). Atrasada em ${oilStatus.hoursOrKmOverdue.toLocaleString('pt-BR')} ${oilStatus.unit}. Troca prevista para ${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit}.`,
+          title: `🔴 Troca de óleo vencida: ${vehicle.model}`,
+          desc: `Veículo: ${vehicle.model} (${vehicle.patrimonyCode || vehicle.licensePlate || 'Frota'}). Vencida há ${oilStatus.hoursOrKmOverdue.toLocaleString('pt-BR')} ${unitWord}. Troca prevista para ${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit}.`,
           type: 'RED',
           isOilAlert: true
         });
@@ -309,7 +324,7 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
         list.push({
           id: `oil-alert-${vehicle.id}`,
           title: `🟡 Troca de óleo próxima: ${vehicle.model}`,
-          desc: `Veículo: ${vehicle.model} (${vehicle.patrimonyCode || vehicle.licensePlate || 'Frota'}). Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${oilStatus.unit} para a próxima troca programada (${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit}).`,
+          desc: `Veículo: ${vehicle.model} (${vehicle.patrimonyCode || vehicle.licensePlate || 'Frota'}). Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${unitWord} para a troca de óleo (prevista para ${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit}).`,
           type: 'YELLOW',
           isOilAlert: true
         });
@@ -334,11 +349,15 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
         if (isOilType && list.some(l => l.isOilAlert)) {
           return;
         }
+
+        const isOilOverdue = oilStatus.status === 'ATRASADA';
         list.push({
           id: alt.id,
-          title: alt.title,
+          title: isOilType
+            ? (isOilOverdue ? `🔴 Troca de óleo vencida: ${vehicle.model}` : `🟡 Troca de óleo próxima: ${vehicle.model}`)
+            : alt.title,
           desc: alt.description,
-          type: alt.severity === 'ALTA' ? 'RED' : 'YELLOW',
+          type: isOilType ? (isOilOverdue ? 'RED' : 'YELLOW') : (alt.severity === 'ALTA' ? 'RED' : 'YELLOW'),
           isOilAlert: isOilType
         });
       });
@@ -346,10 +365,26 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
 
     // 3. Overdue or upcoming preventive maintenance items strictly for THIS vehicle
     machinePreventiveItems.forEach(item => {
-      // If this preventive item is for motor oil and oilStatus is already EM_DIA, do not show as overdue
-      if ((item.itemKey === 'TROCA_OLEO_MOTOR' || item.itemKey === 'FILTRO_OLEO') && oilStatus.status === 'EM_DIA') {
-        return;
+      const isMotorOilItem = item.itemKey === 'TROCA_OLEO_MOTOR' || item.itemKey === 'FILTRO_OLEO' || item.itemName?.toLowerCase().includes('óleo do motor') || item.itemName?.toLowerCase().includes('oleo do motor');
+      
+      // If this preventive item is motor oil and vehicle tracks oil via oilStatus, do not conflict with oilStatus
+      if (isMotorOilItem && oilStatus.isOilActive) {
+        if (oilStatus.status === 'EM_DIA') return;
+        if (list.some(l => l.isOilAlert)) return; // Already represented above
+        
+        if (oilStatus.status === 'PROXIMA') {
+          list.push({
+            id: `prev-${item.id}`,
+            title: `🟡 Troca de óleo próxima: ${item.itemName}`,
+            desc: `Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${unitWord} para a troca de óleo (${oilStatus.nextMeter.toLocaleString('pt-BR')}${oilStatus.unit}).`,
+            type: 'YELLOW',
+            isPreventiveAlert: true,
+            isOilAlert: true
+          });
+          return;
+        }
       }
+
       const st = getPreventiveStatus(item);
       if (st.status === 'RED') {
         list.push({
@@ -859,26 +894,36 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
             {(() => {
               const oilStatus = calculateOilChangeStatus(vehicle);
               if (!oilStatus.isOilActive) return null;
+              const unitFull = oilStatus.unit === 'km' ? 'quilômetros' : 'horas';
+
+              let statusBg = 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300';
+              let statusTitle = 'Em dia';
+              let statusText = `Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${unitFull} para a próxima troca de óleo`;
+
+              if (oilStatus.status === 'ATRASADA') {
+                statusBg = 'bg-red-50 dark:bg-red-950/50 border-red-300 dark:border-red-800 text-red-700 dark:text-red-300';
+                statusTitle = 'Troca de óleo vencida';
+                statusText = oilStatus.hoursOrKmOverdue > 0
+                  ? `Vencida há ${oilStatus.hoursOrKmOverdue.toLocaleString('pt-BR')} ${unitFull}`
+                  : `Limite de troca de óleo atingido (${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit})`;
+              } else if (oilStatus.status === 'PROXIMA') {
+                statusBg = 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200';
+                statusTitle = 'Troca de óleo próxima';
+                statusText = `Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${unitFull} para a troca de óleo`;
+              }
+
               return (
-                <div className={`p-2.5 px-3.5 rounded-2xl border flex items-center justify-between text-xs transition-all ${
-                  oilStatus.status === 'ATRASADA'
-                    ? 'bg-red-50 dark:bg-red-950/50 border-red-300 dark:border-red-800 text-red-700 dark:text-red-300'
-                    : oilStatus.status === 'PROXIMA'
-                      ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-300 dark:border-amber-800 text-amber-800 dark:text-amber-300'
-                      : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
-                }`}>
+                <div className={`p-2.5 px-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs transition-all ${statusBg}`}>
                   <div className="flex items-center gap-2">
-                    <span className="font-bold flex items-center gap-1.5">
+                    <span className="font-bold flex items-center gap-1.5 shrink-0">
                       <span className="w-2 h-2 rounded-full animate-pulse bg-current"></span>
-                      Controle de Troca de Óleo:
+                      {statusTitle}:
                     </span>
                     <span className="font-extrabold">
-                      {oilStatus.status === 'ATRASADA'
-                        ? `Atrasada em ${oilStatus.hoursOrKmOverdue} ${oilStatus.unit}`
-                        : `Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${oilStatus.unit}`}
+                      {statusText}
                     </span>
                   </div>
-                  <div className="text-[11px] opacity-90 font-medium">
+                  <div className="text-[11px] opacity-90 font-medium sm:text-right shrink-0">
                     Próxima troca aos <strong>{oilStatus.nextMeter.toLocaleString('pt-BR')} {oilStatus.unit}</strong>
                   </div>
                 </div>
@@ -1038,9 +1083,6 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
           {activeTab === 'PREVENTIVE' && (
             <div className="space-y-4 animate-in fade-in duration-200">
               {/* Highlight Banner for Oil Change Control (Synchronized with Fleet/Vehicle Control) */}
-              <div className={`p-4 sm:p-5 rounded-3xl border shadow-sm relative overflow-hidden transition-all ${
-                darkMode ? 'bg-emerald-950/70 border-amber-500/30' : 'bg-amber-50/70 border-amber-200'
-              }`}>
                   {(() => {
                     const oilStatus = calculateOilChangeStatus(vehicle);
                     const isOilActive = oilStatus.isOilActive;
@@ -1053,103 +1095,129 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                     const hoursInCycle = oilStatus.metersInCycle;
                     const progressPercent = oilStatus.progressPercent;
                     const unit = oilStatus.unit;
+                    const unitFull = unit === 'km' ? 'quilômetros' : 'horas';
 
+                    let containerClasses = darkMode 
+                      ? 'bg-emerald-950/50 border-emerald-500/30' 
+                      : 'bg-emerald-50/40 border-emerald-300';
+                    let iconWrapperClass = 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400';
+                    let iconFillClass = 'fill-emerald-600 dark:fill-emerald-400';
                     let badgeColor = 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
-                    let badgeLabel = `EM DIA (${rem}${unit} restantes)`;
+                    let badgeLabel = `EM DIA • FALTAM ${rem.toLocaleString('pt-BR')} ${unit.toUpperCase()}`;
                     let barColor = 'bg-emerald-500';
 
                     if (!isOilActive) {
+                      containerClasses = darkMode ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200';
+                      iconWrapperClass = 'bg-slate-500/20 text-slate-400';
+                      iconFillClass = 'fill-slate-400';
                       badgeColor = 'bg-slate-500/20 text-slate-400 border-slate-500/30';
                       badgeLabel = 'CONTROLE DESATIVADO';
                       barColor = 'bg-slate-400';
                     } else if (oilStatus.status === 'ATRASADA') {
-                      badgeColor = 'bg-red-500 text-white font-extrabold animate-pulse shadow-md border-red-600';
-                      badgeLabel = `VENCIDA HÁ ${oilStatus.hoursOrKmOverdue} ${unit.toUpperCase()}!`;
+                      containerClasses = darkMode ? 'bg-red-950/60 border-red-500/40' : 'bg-red-50/80 border-red-300';
+                      iconWrapperClass = 'bg-red-500/20 text-red-500';
+                      iconFillClass = 'fill-red-500';
+                      badgeColor = 'bg-red-600 text-white font-extrabold animate-pulse shadow-md border-red-700';
+                      badgeLabel = `TROCA DE ÓLEO VENCIDA • ATRASO DE ${oilStatus.hoursOrKmOverdue.toLocaleString('pt-BR')} ${unit.toUpperCase()}`;
                       barColor = 'bg-red-500';
                     } else if (oilStatus.status === 'PROXIMA') {
+                      containerClasses = darkMode ? 'bg-amber-950/60 border-amber-500/40' : 'bg-amber-50/80 border-amber-300';
+                      iconWrapperClass = 'bg-amber-500/20 text-amber-500';
+                      iconFillClass = 'fill-amber-500';
                       badgeColor = 'bg-amber-500 text-gray-950 font-extrabold shadow-md border-amber-600';
-                      badgeLabel = `TROCAR EM ${rem} ${unit.toUpperCase()}`;
+                      badgeLabel = `TROCA DE ÓLEO PRÓXIMA • FALTAM ${rem.toLocaleString('pt-BR')} ${unit.toUpperCase()}`;
                       barColor = 'bg-amber-500';
                     }
 
                     return (
-                      <div className="space-y-4">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3.5 border-amber-500/20">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
-                              <Droplet className="w-5 h-5 fill-amber-500" />
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-black text-sm text-slate-900 dark:text-slate-100">
-                                  Controle de Troca de Óleo {unit === 'km' ? 'por Quilometragem' : 'por Horímetro'}
-                                </h3>
-                                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-300">
-                                  Ciclo {interval.toLocaleString('pt-BR')}{unit}
-                                </span>
+                      <div className={`p-4 sm:p-5 rounded-3xl border shadow-sm relative overflow-hidden transition-all ${containerClasses}`}>
+                        <div className="space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3.5 border-black/10 dark:border-white/10">
+                            <div className="flex items-center gap-2.5">
+                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${iconWrapperClass}`}>
+                                <Droplet className={`w-5 h-5 ${iconFillClass}`} />
                               </div>
-                              <p className="text-[11px] text-slate-500 dark:text-emerald-300/80">
-                                Monitoramento preventivo contínuo do motor e componentes hidráulicos
-                              </p>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h3 className="font-black text-sm text-slate-900 dark:text-slate-100">
+                                    Controle de Troca de Óleo {unit === 'km' ? 'por Quilometragem' : 'por Horímetro'}
+                                  </h3>
+                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-500/10 text-slate-600 dark:text-slate-300">
+                                    Ciclo {interval.toLocaleString('pt-BR')}{unit}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                                  {oilStatus.status === 'ATRASADA'
+                                    ? `Atenção: limite de troca atingido (${nextH.toLocaleString('pt-BR')} ${unit}). Troca de óleo vencida há ${oilStatus.hoursOrKmOverdue.toLocaleString('pt-BR')} ${unitFull}.`
+                                    : oilStatus.status === 'PROXIMA'
+                                      ? `Faltam ${rem.toLocaleString('pt-BR')} ${unitFull} para a troca de óleo programada (meta de ${nextH.toLocaleString('pt-BR')} ${unit}).`
+                                      : `Monitoramento preventivo em dia. Próxima troca aos ${nextH.toLocaleString('pt-BR')} ${unit}.`}
+                                </p>
+                              </div>
+                            </div>
+
+                            <span className={`px-3 py-1.5 rounded-xl font-black text-xs uppercase tracking-wide border self-start sm:self-auto ${badgeColor}`}>
+                              {badgeLabel}
+                            </span>
+                          </div>
+
+                          {/* 4 Metric Cards */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                            <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/20 border border-emerald-900/20">
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block">
+                                {unit === 'km' ? 'Quilometragem Atual' : 'Horímetro Atual'}
+                              </span>
+                              <span className="text-base font-black text-slate-900 dark:text-emerald-200">
+                                {curH.toLocaleString('pt-BR')} {unit}
+                              </span>
+                            </div>
+
+                            <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/20 border border-emerald-900/20">
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block">
+                                Última Troca / Ref.
+                              </span>
+                              <span className="text-base font-black text-slate-900 dark:text-emerald-200">
+                                {lastH.toLocaleString('pt-BR')} {unit}
+                              </span>
+                              {oilStatus.lastDate && (
+                                <span className="text-[9px] text-slate-400 block mt-0.5">
+                                  {formatDateBR(oilStatus.lastDate)}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/20 border border-emerald-900/20">
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block">
+                                Intervalo Definido
+                              </span>
+                              <span className="text-base font-black text-slate-900 dark:text-emerald-200">
+                                {interval.toLocaleString('pt-BR')} {unit}
+                              </span>
+                              <span className="text-[9px] text-slate-400 block mt-0.5">
+                                Alerta com {advance}{unit}
+                              </span>
+                            </div>
+
+                            <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/20 border border-emerald-900/20">
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block">
+                                Próxima Troca
+                              </span>
+                              <span className={`text-base font-black ${
+                                oilStatus.status === 'ATRASADA' 
+                                  ? 'text-red-500 font-extrabold' 
+                                  : oilStatus.status === 'PROXIMA' 
+                                    ? 'text-amber-500' 
+                                    : 'text-emerald-600 dark:text-emerald-300'
+                              }`}>
+                                {nextH.toLocaleString('pt-BR')} {unit}
+                              </span>
+                              <span className="text-[9px] text-slate-400 block mt-0.5">
+                                {oilStatus.status === 'ATRASADA' 
+                                  ? `Vencida há ${oilStatus.hoursOrKmOverdue.toLocaleString('pt-BR')}${unit}` 
+                                  : `Faltam ${rem.toLocaleString('pt-BR')}${unit}`}
+                              </span>
                             </div>
                           </div>
-
-                          <span className={`px-3 py-1.5 rounded-xl font-black text-xs uppercase tracking-wide border self-start sm:self-auto ${badgeColor}`}>
-                            {badgeLabel}
-                          </span>
-                        </div>
-
-                        {/* 4 Metric Cards */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                          <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/20 border border-emerald-900/20">
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block">
-                              Horímetro Atual
-                            </span>
-                            <span className="text-base font-black text-slate-900 dark:text-emerald-200">
-                              {curH.toLocaleString('pt-BR')} {unit}
-                            </span>
-                          </div>
-
-                          <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/20 border border-emerald-900/20">
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block">
-                              Última Troca / Ref.
-                            </span>
-                            <span className="text-base font-black text-slate-900 dark:text-emerald-200">
-                              {lastH.toLocaleString('pt-BR')} {unit}
-                            </span>
-                            {oilStatus.lastDate && (
-                              <span className="text-[9px] text-slate-400 block mt-0.5">
-                                {formatDateBR(oilStatus.lastDate)}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/20 border border-emerald-900/20">
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block">
-                              Intervalo Definido
-                            </span>
-                            <span className="text-base font-black text-slate-900 dark:text-emerald-200">
-                              {interval.toLocaleString('pt-BR')} {unit}
-                            </span>
-                            <span className="text-[9px] text-slate-400 block mt-0.5">
-                              Alerta com {advance}{unit}
-                            </span>
-                          </div>
-
-                          <div className="p-3 rounded-2xl bg-white/60 dark:bg-black/20 border border-emerald-900/20">
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block">
-                              Próxima Troca
-                            </span>
-                            <span className={`text-base font-black ${
-                              oilStatus.status === 'ATRASADA' ? 'text-red-500 font-extrabold' : oilStatus.status === 'PROXIMA' ? 'text-amber-500' : 'text-slate-900 dark:text-emerald-200'
-                            }`}>
-                              {nextH.toLocaleString('pt-BR')} {unit}
-                            </span>
-                            <span className="text-[9px] text-slate-400 block mt-0.5">
-                              {oilStatus.status === 'ATRASADA' ? `Venceu há ${oilStatus.hoursOrKmOverdue}${unit}` : `Faltam ${rem}${unit}`}
-                            </span>
-                          </div>
-                        </div>
 
                         {/* Progress Bar of the Current Cycle */}
                         {isOilActive && (
@@ -1217,9 +1285,9 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                           </div>
                         )}
                       </div>
-                    );
-                  })()}
-                </div>
+                    </div>
+                  );
+                })()}
 
               {/* Direct Oil Change Modal inside Digital Sheet */}
               {isDirectOilChangeOpen && (
@@ -2099,22 +2167,42 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                           ? 'bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800'
                           : oilStatus.status === 'PROXIMA'
                             ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800'
-                            : 'bg-[#064E3B] text-white border-emerald-700'
+                            : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800'
                     }`}>
-                      <span className={`text-[10px] font-black block uppercase ${oilStatus.status === 'EM_DIA' ? 'text-[#FACC15]' : 'text-slate-500 dark:text-slate-400'}`}>
-                        Controle de Troca de Óleo:
+                      <span className={`text-[10px] font-black block uppercase ${
+                        !oilStatus.isOilActive
+                          ? 'text-slate-400'
+                          : oilStatus.status === 'ATRASADA'
+                            ? 'text-red-600 dark:text-red-400'
+                            : oilStatus.status === 'PROXIMA'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-emerald-700 dark:text-emerald-300'
+                      }`}>
+                        {!oilStatus.isOilActive
+                          ? 'Controle de Óleo'
+                          : oilStatus.status === 'ATRASADA'
+                            ? 'Troca de Óleo Vencida'
+                            : oilStatus.status === 'PROXIMA'
+                              ? 'Troca de Óleo Próxima'
+                              : 'Troca de Óleo Em Dia'}
                       </span>
                       <strong className={`text-xl font-black ${
-                        oilStatus.status === 'ATRASADA' ? 'text-red-600 dark:text-red-400' : oilStatus.status === 'PROXIMA' ? 'text-amber-600 dark:text-amber-400' : oilStatus.status === 'EM_DIA' ? 'text-white' : 'text-slate-600'
+                        !oilStatus.isOilActive
+                          ? 'text-slate-500'
+                          : oilStatus.status === 'ATRASADA'
+                            ? 'text-red-600 dark:text-red-400'
+                            : oilStatus.status === 'PROXIMA'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-emerald-800 dark:text-emerald-200'
                       }`}>
                         {oilStatus.isOilActive 
                           ? (oilStatus.status === 'ATRASADA' 
-                              ? `Vencida há ${oilStatus.hoursOrKmOverdue} ${oilStatus.unit}` 
+                              ? `Vencida há ${oilStatus.hoursOrKmOverdue.toLocaleString('pt-BR')} ${oilStatus.unit}` 
                               : `Faltam ${oilStatus.remaining.toLocaleString('pt-BR')} ${oilStatus.unit}`) 
                           : 'Desativado'}
                       </strong>
-                      <p className={`text-[10px] ${oilStatus.status === 'EM_DIA' ? 'text-slate-200' : 'text-slate-500'}`}>
-                        {oilStatus.isOilActive ? `Próxima troca em: ${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit}` : 'Sem plano ativo'}
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        {oilStatus.isOilActive ? `Próxima troca aos: ${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit}` : 'Sem plano ativo'}
                       </p>
                     </div>
                   </div>
@@ -2602,7 +2690,9 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                   </span>
                 </div>
                 <p className="font-extrabold text-sm">
-                  {selectedAlertDetail.isOilAlert ? 'Troca de Óleo Pendente' : selectedAlertDetail.title}
+                  {selectedAlertDetail.isOilAlert 
+                    ? (selectedAlertDetail.type === 'RED' ? 'Troca de Óleo Vencida' : 'Troca de Óleo Próxima') 
+                    : selectedAlertDetail.title}
                 </p>
                 <p className="text-xs opacity-90 leading-relaxed">
                   {selectedAlertDetail.desc}

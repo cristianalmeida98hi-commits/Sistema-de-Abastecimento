@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Vehicle, User, MaintenanceLog, FuelLog, PreventiveMaintenanceItem, SmartAlert, MachineIssue } from '../types';
 import { getSectorName } from '../utils/calculations';
+import { calculateOilChangeStatus } from '../utils/maintenanceCalculations';
 
 interface OperatorDigitalSheetsViewProps {
   vehicles: Vehicle[];
@@ -40,46 +41,40 @@ export const OperatorDigitalSheetsView: React.FC<OperatorDigitalSheetsViewProps>
 
   const activeSearch = searchQuery || localSearch;
 
-  // Helper to check vehicle oil change alert status
+  // Helper to check vehicle oil change alert status using official calculations
   const getVehicleOilAlertStatus = (v: Vehicle) => {
-    const meter = v.currentHourmeter || v.currentKm || 0;
-    
-    // 1. Check direct active smart alerts for this machine
-    const hasActiveOilAlert = alerts.some(a => 
-      !a.resolved && 
-      a.equipmentId === v.id && 
-      (a.type === 'OIL_CHANGE_DUE' || a.title?.toLowerCase().includes('óleo') || a.title?.toLowerCase().includes('oleo'))
-    );
-
-    // 2. Check preventive item for motor oil
-    const oilItem = preventiveItems.find(p => p.equipmentId === v.id && p.itemKey === 'TROCA_OLEO_MOTOR');
-    
-    let isOverdue = hasActiveOilAlert;
-    let isUpcoming = false;
-    let hoursRemaining = 0;
-
-    if (oilItem) {
-      hoursRemaining = oilItem.nextScheduledHourmeter - meter;
-      if (hoursRemaining <= 0) {
-        isOverdue = true;
-      } else if (hoursRemaining <= 50) {
-        isUpcoming = true;
-      }
+    const oilStatus = calculateOilChangeStatus(v);
+    if (!oilStatus.isOilActive) {
+      return {
+        hasAlert: false,
+        isOverdue: false,
+        isUpcoming: false,
+        hoursRemaining: 0,
+        hoursOrKmOverdue: 0,
+        nextMeter: 0,
+        unit: 'h',
+        unitWord: 'horas'
+      };
     }
 
+    const unitWord = oilStatus.unit === 'km' ? 'quilômetros' : 'horas';
+
     return {
-      hasAlert: isOverdue || isUpcoming,
-      isOverdue,
-      isUpcoming,
-      hoursRemaining,
-      nextMeter: oilItem?.nextScheduledHourmeter || 0
+      hasAlert: oilStatus.status === 'ATRASADA' || oilStatus.status === 'PROXIMA',
+      isOverdue: oilStatus.status === 'ATRASADA',
+      isUpcoming: oilStatus.status === 'PROXIMA',
+      hoursRemaining: oilStatus.remaining,
+      hoursOrKmOverdue: oilStatus.hoursOrKmOverdue,
+      nextMeter: oilStatus.nextMeter,
+      unit: oilStatus.unit,
+      unitWord
     };
   };
 
-  // Total vehicles needing oil changes
+  // Total vehicles with overdue oil changes
   const vehiclesWithOilAlerts = useMemo(() => {
     return vehicles.filter(v => getVehicleOilAlertStatus(v).isOverdue);
-  }, [vehicles, alerts, preventiveItems]);
+  }, [vehicles]);
 
   const filteredVehicles = useMemo(() => {
     return vehicles.filter(v => {
@@ -144,10 +139,10 @@ export const OperatorDigitalSheetsView: React.FC<OperatorDigitalSheetsViewProps>
             </div>
             <div>
               <h3 className="font-extrabold text-sm text-red-800 dark:text-red-200">
-                🚨 Atenção: {vehiclesWithOilAlerts.length} Equipamento(s) com Troca de Óleo Pendente!
+                🚨 Atenção: {vehiclesWithOilAlerts.length} Equipamento(s) com Troca de Óleo Vencida!
               </h3>
               <p className="text-xs text-red-700/90 dark:text-red-300/90 font-medium">
-                O horímetro programado (ciclo preventivo de 300h) foi atingido. Realize a troca e registre na ficha da máquina.
+                O limite programado de horas ou km foi atingido. Realize a troca e registre na ficha da máquina.
               </p>
             </div>
           </div>
@@ -156,7 +151,7 @@ export const OperatorDigitalSheetsView: React.FC<OperatorDigitalSheetsViewProps>
             onClick={() => setCategoryFilter('OIL_ALERTS')}
             className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-xl shadow transition-transform active:scale-95 shrink-0"
           >
-            Ver Máquinas em Alerta ({vehiclesWithOilAlerts.length})
+            Ver Máquinas Vencidas ({vehiclesWithOilAlerts.length})
           </button>
         </div>
       )}
@@ -290,22 +285,41 @@ export const OperatorDigitalSheetsView: React.FC<OperatorDigitalSheetsViewProps>
                   {/* Oil Change Alert Highlight Inside Card */}
                   {oilStatus.isOverdue ? (
                     <div className="p-2.5 rounded-2xl bg-red-500/20 border border-red-500/50 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 animate-bounce" />
+                      <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
                       <div className="min-w-0 flex-1">
                         <strong className="block text-[11px] font-black uppercase text-red-600 dark:text-red-400">
-                          🚨 Troca de Óleo Pendente
+                          🚨 Troca de Óleo Vencida
                         </strong>
                         <span className="text-[10px] opacity-90 block">
-                          Ciclo de revisão preventiva atingido no horímetro!
+                          {oilStatus.hoursOrKmOverdue > 0
+                            ? `Excedida em ${oilStatus.hoursOrKmOverdue.toLocaleString('pt-BR')} ${oilStatus.unitWord}`
+                            : `Limite de ${oilStatus.nextMeter.toLocaleString('pt-BR')} ${oilStatus.unit} atingido`}
                         </span>
                       </div>
                     </div>
                   ) : oilStatus.isUpcoming ? (
-                    <div className="p-2 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-[11px] flex items-center gap-2">
-                      <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                      <span className="font-bold truncate">Próxima Troca de Óleo: faltam {oilStatus.hoursRemaining}h</span>
+                    <div className="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <strong className="block text-[11px] font-black uppercase text-amber-700 dark:text-amber-300">
+                          Troca de Óleo Próxima
+                        </strong>
+                        <span className="text-[10px] opacity-90 block">
+                          Faltam {oilStatus.hoursRemaining.toLocaleString('pt-BR')} {oilStatus.unitWord} para a troca de óleo
+                        </span>
+                      </div>
                     </div>
-                  ) : null}
+                  ) : (
+                    <div className="p-2 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-[11px] flex items-center justify-between">
+                      <span className="font-bold flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        Em dia
+                      </span>
+                      <span className="text-[10px] opacity-80 font-medium">
+                        Faltam {oilStatus.hoursRemaining.toLocaleString('pt-BR')} {oilStatus.unit}
+                      </span>
+                    </div>
+                  )}
 
                   {/* Meter & Sector Specs */}
                   <div className="grid grid-cols-2 gap-2 text-xs p-3 rounded-2xl bg-slate-50 dark:bg-emerald-950/60 border border-slate-100 dark:border-emerald-900/40">

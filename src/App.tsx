@@ -549,7 +549,7 @@ export default function App() {
     }
   };
 
-  const handleOpenFuelingModalWithEquipment = (equipmentId: string) => {
+  const handleOpenFuelingModalWithEquipment = useCallback((equipmentId: string) => {
     const currentVehicles = getVehicles();
     const eq = currentVehicles.find(v => v.id === equipmentId);
     if (eq && eq.fuelType === 'NENHUM') {
@@ -558,14 +558,24 @@ export default function App() {
     }
     setPreSelectedVehicleId(equipmentId);
     setIsFuelingModalOpen(true);
-  };
+  }, []);
+
+  useEffect(() => {
+    const handleCustomOpenFueling = (e: any) => {
+      if (e?.detail?.vehicleId) {
+        handleOpenFuelingModalWithEquipment(e.detail.vehicleId);
+      }
+    };
+    window.addEventListener('andradeagro:open-fueling', handleCustomOpenFueling);
+    return () => window.removeEventListener('andradeagro:open-fueling', handleCustomOpenFueling);
+  }, [handleOpenFuelingModalWithEquipment]);
 
   const handleAddFuelLog = async (logData: Omit<FuelLog, 'id' | 'createdAt'>) => {
     try {
       await addFuelLog(logData);
       refreshState();
 
-      if (currentUser && currentUser.role === 'FUNCIONARIO') {
+      if (currentUser && currentUser.role === 'FUNCIONARIO' && !selectedDigitalSheetVehicle) {
         setIsFuelingModalOpen(false);
         setFuelingSuccessFeedback({
           show: true,
@@ -579,6 +589,8 @@ export default function App() {
           setCurrentUser(null);
           setLoginSuccessMessage(`✅ Abastecimento de ${logData.liters}L registrado com sucesso!`);
         }, 2200);
+      } else {
+        setIsFuelingModalOpen(false);
       }
     } catch (err: any) {
       console.error('Erro ao salvar abastecimento:', err);
@@ -1020,6 +1032,7 @@ export default function App() {
             alerts={alerts}
             currentUser={currentUser}
             initialTab={digitalSheetInitialTab}
+            onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
             onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
             onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}
             onDeleteMaintenance={(id) => { deleteMaintenance(id); refreshState(); }}
@@ -1034,7 +1047,7 @@ export default function App() {
 
       {/* Fueling Success Feedback Toast / Overlay (Problem 4) */}
       {fuelingSuccessFeedback?.show && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
           <div className="bg-emerald-950 border-2 border-amber-400 p-6 sm:p-8 rounded-3xl text-center space-y-4 max-w-sm w-full shadow-2xl animate-in zoom-in-95">
             <div className="w-16 h-16 bg-emerald-500 text-gray-950 rounded-full flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/30 animate-bounce">
               <CheckCircle2 className="w-10 h-10 text-white" />

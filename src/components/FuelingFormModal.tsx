@@ -55,11 +55,17 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   );
 
   const [equipmentId, setEquipmentId] = useState<string>(() => {
-    if (preSelectedVehicleId && fuelableVehicles.some(v => v.id === preSelectedVehicleId)) {
+    if (preSelectedVehicleId && vehicles.some(v => v.id === preSelectedVehicleId)) {
       return preSelectedVehicleId;
     }
-    return fuelableVehicles[0]?.id || '';
+    return fuelableVehicles[0]?.id || vehicles[0]?.id || '';
   });
+
+  useEffect(() => {
+    if (preSelectedVehicleId && vehicles.some(v => v.id === preSelectedVehicleId)) {
+      setEquipmentId(preSelectedVehicleId);
+    }
+  }, [preSelectedVehicleId, vehicles]);
 
   const selectedEquipment = useMemo(
     () => vehicles.find(v => v.id === equipmentId) || fuelableVehicles[0],
@@ -280,7 +286,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-in fade-in">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/80 backdrop-blur-md animate-in fade-in">
       <div className="w-full max-w-2xl sm:max-w-3xl rounded-3xl shadow-2xl border flex flex-col overflow-hidden bg-[#03231b] border-emerald-800 text-slate-100 max-h-[92vh]">
         
         {/* Modal Header */}

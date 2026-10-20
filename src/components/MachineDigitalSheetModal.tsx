@@ -690,29 +690,48 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
       
       {/* Mobile Floating Action Bar for Touch/Small Screens */}
-      <div className="fixed top-2 left-2 right-2 z-[100] flex sm:hidden items-center justify-between bg-[#064E3B] text-white p-2 rounded-2xl shadow-2xl border border-[#FACC15]/40 backdrop-blur-md">
+      <div className="fixed top-2 left-2 right-2 z-[100] flex sm:hidden items-center justify-between gap-1.5 bg-[#064E3B] text-white p-2 rounded-2xl shadow-2xl border border-[#FACC15]/40 backdrop-blur-md">
         <button
           onClick={handleDismiss}
-          className="px-3 py-2 rounded-xl bg-[#FACC15] text-[#064E3B] font-black text-xs flex items-center gap-1.5 shadow-md active:scale-95"
+          className="px-2.5 py-2 rounded-xl bg-[#FACC15] text-[#064E3B] font-black text-xs flex items-center gap-1 shadow-md active:scale-95 shrink-0"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Voltar</span>
         </button>
 
-        <span className="text-[11px] font-black text-[#FACC15] truncate max-w-[150px] px-2">
+        <span className="text-[11px] font-black text-[#FACC15] truncate max-w-[120px] px-1 text-center">
           {vehicle.model}
         </span>
 
-        <button
-          onClick={handleDismiss}
-          className="px-3 py-2 rounded-xl bg-red-600 text-white font-black text-xs flex items-center gap-1 shadow-md active:scale-95"
-        >
-          <span>Sair</span>
-          <X className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          {(!vehicle.fuelType || vehicle.fuelType !== 'NENHUM') && (
+            <button
+              onClick={() => {
+                if (onOpenFuelingModalWithEquipment) {
+                  onOpenFuelingModalWithEquipment(vehicle.id);
+                } else if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('andradeagro:open-fueling', { detail: { vehicleId: vehicle.id } }));
+                }
+              }}
+              className="px-2.5 py-2 rounded-xl bg-[#FACC15] hover:bg-yellow-400 text-[#064E3B] font-black text-xs flex items-center gap-1 shadow-md active:scale-95 border border-amber-300"
+              title={`Abastecer ${vehicle.model}`}
+            >
+              <Fuel className="w-3.5 h-3.5 text-[#064E3B]" />
+              <span>Abastecer</span>
+            </button>
+          )}
+
+          <button
+            onClick={handleDismiss}
+            className="p-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center justify-center shadow-md active:scale-95"
+            title="Fechar Ficha"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      <div className={`relative w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col mt-12 sm:mt-0 ${
+      <div className={`relative w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col mt-16 sm:mt-0 ${
         darkMode ? 'bg-slate-900 text-slate-100 border border-emerald-900/60' : 'bg-white text-slate-900'
       }`}>
 
@@ -836,22 +855,47 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+              {/* Action Buttons: The 3 Main Accesses (Abastecimento, Manutenção, Defeito) */}
+              <div className="flex flex-col sm:flex-row sm:flex-wrap lg:flex-nowrap items-stretch sm:items-center gap-2 w-full sm:w-auto mt-3 sm:mt-0">
+                {/* 1. REGISTRAR ABASTECIMENTO */}
+                {(!vehicle.fuelType || vehicle.fuelType !== 'NENHUM') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onOpenFuelingModalWithEquipment) {
+                        onOpenFuelingModalWithEquipment(vehicle.id);
+                      } else if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent('andradeagro:open-fueling', { detail: { vehicleId: vehicle.id } }));
+                      }
+                    }}
+                    className="w-full sm:w-auto min-h-[46px] px-4 py-2.5 rounded-2xl bg-[#FACC15] hover:bg-yellow-400 text-[#064E3B] font-black text-xs flex items-center justify-center gap-2 shadow-md hover:shadow-yellow-500/20 transition-all active:scale-95 border-2 border-amber-300 cursor-pointer"
+                    title={`Registrar abastecimento de ${vehicle.model}`}
+                  >
+                    <Fuel className="w-4 h-4 text-[#064E3B] shrink-0" />
+                    <span>REGISTRAR ABASTECIMENTO</span>
+                  </button>
+                )}
+
+                {/* 2. REGISTRAR MANUTENÇÃO */}
                 <button
-                  onClick={() => setIsReportProblemOpen(true)}
-                  className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md transition-transform active:scale-95"
+                  type="button"
+                  onClick={handleOpenAddMaintenance}
+                  className="w-full sm:w-auto min-h-[46px] px-4 py-2.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 border border-emerald-700/70 cursor-pointer"
+                  title={`Registrar manutenção de ${vehicle.model}`}
                 >
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>Informar Defeito</span>
+                  <Wrench className="w-4 h-4 text-[#FACC15] shrink-0" />
+                  <span>REGISTRAR MANUTENÇÃO</span>
                 </button>
 
+                {/* 3. INFORMAR DEFEITO */}
                 <button
-                  onClick={handleOpenAddMaintenance}
-                  className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-extrabold text-xs flex items-center justify-center gap-1.5 shadow-md transition-transform active:scale-95"
+                  type="button"
+                  onClick={() => setIsReportProblemOpen(true)}
+                  className="w-full sm:w-auto min-h-[46px] px-4 py-2.5 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
+                  title={`Informar defeito em ${vehicle.model}`}
                 >
-                  <PlusCircle className="w-4 h-4 text-[#FACC15]" />
-                  <span>Nova Manutenção</span>
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>INFORMAR DEFEITO</span>
                 </button>
               </div>
 
@@ -1900,15 +1944,14 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                   </p>
                 </div>
 
-                {canEdit && (
-                  <button
-                    onClick={handleOpenAddMaintenance}
-                    className="px-3.5 py-2 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center gap-1.5 shadow-md transition-transform active:scale-95"
-                  >
-                    <Plus className="w-4 h-4 text-[#FACC15]" />
-                    <span>+ Adicionar Registro de Manutenção</span>
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={handleOpenAddMaintenance}
+                  className="px-3.5 py-2 rounded-2xl bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs flex items-center gap-1.5 shadow-md transition-transform active:scale-95 border border-emerald-700/60"
+                >
+                  <Plus className="w-4 h-4 text-[#FACC15]" />
+                  <span>+ Registrar Manutenção</span>
+                </button>
               </div>
 
               {/* Section 1: Special Highlight for Oil & Filter Changes */}

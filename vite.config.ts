@@ -26,6 +26,8 @@ export default defineConfig(() => {
     build: {
       target: 'es2022',
       chunkSizeWarningLimit: 1200,
+      cssCodeSplit: true,
+      reportCompressedSize: false,
       rollupOptions: {
         output: {
           manualChunks(id) {
@@ -40,14 +42,23 @@ export default defineConfig(() => {
             if (id.includes('node_modules/firebase/')) {
               return 'vendor-firebase';
             }
+            if (id.includes('node_modules/exceljs')) {
+              return 'vendor-excel';
+            }
+            if (id.includes('node_modules/jspdf') || id.includes('node_modules/html2canvas')) {
+              return 'vendor-pdf';
+            }
             if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-') || id.includes('node_modules/victory-vendor')) {
               return 'vendor-charts';
             }
             if (id.includes('node_modules/lucide-react')) {
               return 'vendor-icons';
             }
-            if (id.includes('node_modules/jsqr') || id.includes('node_modules/qrcode')) {
-              return 'vendor-qr';
+            if (id.includes('node_modules/jsqr')) {
+              return 'vendor-scanner';
+            }
+            if (id.includes('node_modules/qrcode')) {
+              return 'vendor-qrcode';
             }
           },
         },

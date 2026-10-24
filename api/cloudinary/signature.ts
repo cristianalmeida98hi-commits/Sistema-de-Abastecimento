@@ -1,28 +1,30 @@
 import crypto from 'node:crypto';
-import { createRequire } from 'node:module';
-import { getFirebaseAdminDb } from '../_lib/pushEngine.js';
-
-const nodeRequire = createRequire(import.meta.url);
 
 function send(res: any, status: number, body: Record<string, unknown>) {
   res.status(status).json(body);
 }
 
+/**
+ * Valida o Firebase ID token pela API oficial de Authentication.
+ * Não depende de Firebase Admin/Service Account, que não está configurado em todos os ambientes Vercel.
+ */
 async function verifyUser(req: any): Promise<boolean> {
   const header = req.headers?.authorization || '';
   const match = /^Bearer\s+(.+)$/i.exec(header);
   if (!match) return false;
-  const db = getFirebaseAdminDb();
-  if (!db) return false;
+
+  const apiKey = process.env.FIREBASE_API_KEY || 'AIzaSyCKLaXPZ3xq5M2CCRVBkwRHS-7dQoBelEY';
   try {
-    const { getApps } = nodeRequire('firebase-admin/app');
-    const { getAuth } = nodeRequire('firebase-admin/auth');
-    const app = getApps()[0];
-    if (!app) return false;
-    await getAuth(app).verifyIdToken(match[1]);
-    return true;
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: match[1] })
+    });
+    if (!response.ok) return false;
+    const result = await response.json() as any;
+    return Array.isArray(result.users) && result.users.length > 0;
   } catch (error) {
-    console.warn('[Cloudinary] Token Firebase inválido:', (error as any)?.message || error);
+    console.warn('[Cloudinary] Não foi possível validar o token Firebase:', (error as any)?.message || error);
     return false;
   }
 }

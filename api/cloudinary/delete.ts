@@ -13,21 +13,26 @@ function send(res: any, status: number, body: Record<string, unknown>) {
  */
 function hasSameOrigin(req: any): boolean {
   const origin = req.headers?.origin;
-  const host = req.headers?.host;
-  if (typeof origin !== 'string' || typeof host !== 'string' || !host.trim()) return false;
+  const host = (req.headers?.['x-forwarded-host'] || req.headers?.host || '').split(',')[0].trim();
+  const directHost = (req.headers?.host || '').split(',')[0].trim();
+  if (!origin) return true;
+  if (!host && !directHost) return false;
 
   try {
     const parsed = new URL(origin);
     if (parsed.username || parsed.password) return false;
     const originHost = parsed.host.toLowerCase();
-    const requestHost = host.split(',')[0].trim().toLowerCase();
-    const isSecure = parsed.protocol === 'https:' ||
-      (parsed.protocol === 'http:' && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestHost));
-    if (!isSecure || originHost !== requestHost) return false;
+    const requestHost = host.toLowerCase();
+    const fallbackHost = directHost.toLowerCase();
+
+    if (originHost === requestHost || originHost === fallbackHost) return true;
+
+    const isLocal = (h: string) => /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(h);
+    if (isLocal(originHost) && (isLocal(requestHost) || isLocal(fallbackHost))) return true;
 
     const fetchSite = req.headers?.['sec-fetch-site'];
     if (typeof fetchSite === 'string' && fetchSite !== 'same-origin' && fetchSite !== 'none') return false;
-    return true;
+    return false;
   } catch {
     return false;
   }

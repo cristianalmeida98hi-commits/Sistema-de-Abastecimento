@@ -250,6 +250,9 @@ export interface FuelLog {
   observations?: string;
   flaggedSuspicious?: boolean;
   suspiciousReason?: string;
+  isAuthorizedCorrection?: boolean;
+  correctionReason?: string;
+  previousHourmeterAtCorrection?: number;
   createdAt: string;
   createdById: string;
   createdByName: string;

@@ -10,6 +10,7 @@ import {
   getTodayDateSaoPaulo, getCurrentTimeSaoPaulo, createTimestampForDateSaoPaulo
 } from '../utils/calculations';
 import { getTankStatus } from '../utils/storage';
+import { validateHourmeterReading } from '../utils/hourmeterValidation';
 import { VehicleSelector } from './VehicleSelector';
 
 interface FuelingFormModalProps {
@@ -146,10 +147,12 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
 
   const isKmBased = selectedEquipment?.category === 'VEICULO';
   const initialCurrentKmOrHour = isKmBased 
-    ? (selectedEquipment?.currentKm || 0) + 150 
-    : (selectedEquipment?.currentHourmeter || 0) + 8;
+    ? (selectedEquipment?.currentKm || '') 
+    : (selectedEquipment?.currentHourmeter || '');
 
   const [currentKmOrHour, setCurrentKmOrHour] = useState<number | string>(initialCurrentKmOrHour);
+  const [isAuthorizedCorrection, setIsAuthorizedCorrection] = useState(false);
+  const [correctionJustification, setCorrectionJustification] = useState('');
   const [operationType, setOperationType] = useState<OperationType>('GRAMA');
   const [activityType, setActivityType] = useState<ActivityType>('CORTE');
   const [observations, setObservations] = useState<string>('');
@@ -177,14 +180,32 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
         setDriverOrOperatorId(selectedEquipment.assignedOperatorId);
       }
       const nextMeter = isKmBased 
-        ? (selectedEquipment.currentKm || 0) + 100 
-        : (selectedEquipment.currentHourmeter || 0) + 8;
+        ? (selectedEquipment.currentKm || '') 
+        : (selectedEquipment.currentHourmeter || '');
       setCurrentKmOrHour(nextMeter);
+      setIsAuthorizedCorrection(false);
+      setCorrectionJustification('');
     }
   }, [equipmentId]);
 
   const numLiters = Number(liters) || 0;
   const numKmOrHour = Number(currentKmOrHour) || 0;
+
+  // Live intelligent validation of hourmeter
+  const hourmeterValidation = useMemo(() => {
+    if (isKmBased || !selectedEquipment) {
+      return { isValid: true, isBlocking: false, warningType: 'NONE' as const };
+    }
+    return validateHourmeterReading({
+      newHourmeter: currentKmOrHour,
+      equipment: selectedEquipment,
+      previousLogs,
+      currentDate: dateTime,
+      userRole: currentUser.role,
+      isAuthorizedCorrection,
+      justification: correctionJustification
+    });
+  }, [isKmBased, selectedEquipment, currentKmOrHour, previousLogs, dateTime, currentUser.role, isAuthorizedCorrection, correctionJustification]);
 
   // Calculate metrics
   const metrics = selectedEquipment ? calculateFuelLogMetrics(
@@ -216,6 +237,11 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
     e.preventDefault();
     if (!selectedEquipment || !selectedStation || numLiters <= 0) {
       alert('Por favor, selecione o equipamento e informe a quantidade de litros abastecidos.');
+      return;
+    }
+
+    if (!isKmBased && hourmeterValidation.isBlocking) {
+      alert(hourmeterValidation.message || 'Por favor, confira e corrija o horímetro no painel físico antes de continuar.');
       return;
     }
 
@@ -256,6 +282,9 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
         activityType,
         kmAtFueling: isKmBased ? numKmOrHour : undefined,
         hourmeterAtFueling: !isKmBased ? numKmOrHour : undefined,
+        isAuthorizedCorrection: !isKmBased && isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? true : undefined,
+        correctionReason: !isKmBased && isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? correctionJustification.trim() : undefined,
+        previousHourmeterAtCorrection: !isKmBased && isAuthorizedCorrection ? hourmeterValidation.details?.previous : undefined,
         previousKmOrHour: metrics.previousKmOrHour,
         calculatedAverageKmPerLiter: metrics.calculatedAverageKmPerLiter,
         calculatedAverageLitersPerHour: metrics.calculatedAverageLitersPerHour,
@@ -445,7 +474,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                     {isKmBased ? 'Quilometragem (KM) *' : 'Horímetro Atual (Horas) *'}
                   </label>
                   <span className="text-[11px] font-bold text-emerald-300">
-                    Anterior: {metrics.previousKmOrHour ? `${metrics.previousKmOrHour} ${isKmBased ? 'KM' : 'h'}` : 'Primeiro'}
+                    Anterior: {metrics.previousKmOrHour !== undefined ? `${metrics.previousKmOrHour} ${isKmBased ? 'KM' : 'h'}` : 'Primeiro'}
                   </span>
                 </div>
 
@@ -458,20 +487,115 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                     required
                     value={currentKmOrHour}
                     onChange={(e) => setCurrentKmOrHour(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 rounded-2xl border-2 border-emerald-700/80 bg-[#063327] text-[#FACC15] text-lg font-black outline-none focus:border-[#FACC15] focus:ring-2 focus:ring-[#FACC15]/20 transition-all"
+                    placeholder={isKmBased ? 'Ex: 68100' : 'Ex: 1450.5'}
+                    className={`w-full pl-11 pr-4 py-3 rounded-2xl border-2 text-lg font-black outline-none transition-all ${
+                      !isKmBased && hourmeterValidation.isBlocking
+                        ? 'border-red-500 bg-red-950/40 text-red-200 focus:ring-2 focus:ring-red-400'
+                        : !isKmBased && hourmeterValidation.warningType === 'EQUAL_READING'
+                        ? 'border-amber-500 bg-[#063327] text-amber-200 focus:ring-2 focus:ring-amber-400'
+                        : 'border-emerald-700/80 bg-[#063327] text-[#FACC15] focus:border-[#FACC15] focus:ring-2 focus:ring-[#FACC15]/20'
+                    }`}
                   />
                   <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-sm text-slate-200">
                     {isKmBased ? 'KM' : 'HORAS'}
                   </span>
                 </div>
 
-                {/* Meter difference note */}
-                <div className="flex items-center justify-between text-[11px] text-emerald-300 font-semibold pt-1">
-                  <span>Variação calculada:</span>
-                  <span className="text-white font-bold">
-                    +{Math.max(0, numKmOrHour - (metrics.previousKmOrHour || 0))} {isKmBased ? 'KM' : 'horas'}
-                  </span>
-                </div>
+                {/* Validação Inteligente do Horímetro (Regras A, B, C, D e Exceção de Manutenção) */}
+                {!isKmBased && (
+                  <div className="space-y-2 pt-1">
+                    {hourmeterValidation.isBlocking && (
+                      <div className="p-3.5 rounded-2xl bg-red-950/90 border-2 border-red-500/80 text-white space-y-2.5 animate-in fade-in duration-200">
+                        <div className="flex items-start gap-2.5">
+                          <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <p className="text-xs font-bold text-red-100 leading-relaxed">
+                              {hourmeterValidation.message}
+                            </p>
+                            {hourmeterValidation.details && (
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-[11px] text-red-300 font-semibold">
+                                <span>Última válida: <strong className="text-white">{hourmeterValidation.details.previous} h</strong></span>
+                                <span>Digitada: <strong className="text-white">{hourmeterValidation.details.current} h</strong></span>
+                                <span>Variação: <strong className="text-white">{hourmeterValidation.details.diff > 0 ? '+' : ''}{hourmeterValidation.details.diff} h</strong></span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Procedimento de Correção Autorizada: Exclusivo para Perfil MANUTENCAO ou ADMIN */}
+                        {hourmeterValidation.details?.canAuthorizeCorrection ? (
+                          <div className="mt-2 pt-2.5 border-t border-red-800/80 bg-red-900/40 p-3 rounded-xl space-y-2.5">
+                            <label className="flex items-center gap-2 cursor-pointer text-xs font-black text-[#FACC15]">
+                              <input
+                                type="checkbox"
+                                checked={isAuthorizedCorrection}
+                                onChange={(e) => setIsAuthorizedCorrection(e.target.checked)}
+                                className="w-4 h-4 rounded text-yellow-500 focus:ring-yellow-400"
+                              />
+                              <span>🔧 Ativar Correção Técnica Autorizada (Perfil {currentUser.role})</span>
+                            </label>
+
+                            {isAuthorizedCorrection && (
+                              <div className="space-y-1.5 pt-1">
+                                <label className="block text-[11px] font-black text-amber-200 uppercase tracking-wide">
+                                  Justificativa Obrigatória da Correção *
+                                </label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={correctionJustification}
+                                  onChange={(e) => setCorrectionJustification(e.target.value)}
+                                  placeholder="Ex: Substituição de horímetro analógico / retificação de lançamento incorreto"
+                                  className="w-full px-3 py-2 rounded-xl bg-[#031d16] border border-amber-400/80 text-white text-xs outline-none focus:ring-2 focus:ring-[#FACC15]"
+                                />
+                                <p className="text-[10px] text-amber-200/90 font-medium">
+                                  Esta liberação registrará uma entrada no histórico de auditoria com seu usuário, equipamento e data/hora.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-red-300/90 italic font-medium pt-0.5">
+                            Caso o valor no painel físico da máquina realmente seja este, solicite à equipe de Manutenção a autorização de ajuste.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {hourmeterValidation.warningType === 'EQUAL_READING' && (
+                      <div className="p-2.5 rounded-xl bg-amber-950/70 border border-amber-500/70 text-amber-200 flex items-center gap-2 text-xs font-semibold">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>{hourmeterValidation.message}</span>
+                      </div>
+                    )}
+
+                    {!hourmeterValidation.isBlocking && isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection && (
+                      <div className="p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-500/80 text-emerald-200 flex items-center gap-2 text-xs font-bold">
+                        <CheckCircle2 className="w-4 h-4 text-[#FACC15] shrink-0" />
+                        <span>Correção técnica autorizada pela Manutenção pronta para salvar.</span>
+                      </div>
+                    )}
+
+                    {!hourmeterValidation.isBlocking && !isAuthorizedCorrection && (hourmeterValidation.details?.diff || 0) > 0 && (
+                      <div className="flex items-center justify-between text-[11px] text-emerald-300 font-semibold pt-0.5">
+                        <span>Variação calculada:</span>
+                        <span className="text-[#FACC15] font-black">
+                          +{hourmeterValidation.details?.diff} horas
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Meter difference note for KM */}
+                {isKmBased && (
+                  <div className="flex items-center justify-between text-[11px] text-emerald-300 font-semibold pt-1">
+                    <span>Variação calculada:</span>
+                    <span className="text-white font-bold">
+                      +{Math.max(0, numKmOrHour - (metrics.previousKmOrHour || 0))} KM
+                    </span>
+                  </div>
+                )}
               </div>
 
             </div>
@@ -802,15 +926,27 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className={`px-6 py-3 min-h-[48px] rounded-2xl text-xs font-black bg-[#FACC15] hover:bg-yellow-400 text-[#064E3B] shadow-lg shadow-yellow-500/20 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer ${
-                  isSubmitting ? 'opacity-70 cursor-wait' : ''
+                disabled={isSubmitting || (!isKmBased && hourmeterValidation.isBlocking)}
+                className={`px-6 py-3 min-h-[48px] rounded-2xl text-xs font-black shadow-lg flex items-center justify-center gap-2 transition-all ${
+                  isSubmitting || (!isKmBased && hourmeterValidation.isBlocking)
+                    ? 'bg-slate-700 text-slate-400 border border-slate-600 cursor-not-allowed opacity-75'
+                    : 'bg-[#FACC15] hover:bg-yellow-400 text-[#064E3B] shadow-yellow-500/20 active:scale-95 cursor-pointer'
                 }`}
               >
                 {isSubmitting ? (
                   <>
                     <Clock className="w-4 h-4 animate-spin text-[#064E3B]" />
                     <span>Salvando Abastecimento...</span>
+                  </>
+                ) : !isKmBased && hourmeterValidation.isBlocking ? (
+                  <>
+                    <AlertTriangle className="w-4 h-4 text-red-300" />
+                    <span>Corrija o Horímetro para Salvar</span>
+                  </>
+                ) : isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-[#064E3B]" />
+                    <span>Salvar com Correção Autorizada</span>
                   </>
                 ) : (
                   <>

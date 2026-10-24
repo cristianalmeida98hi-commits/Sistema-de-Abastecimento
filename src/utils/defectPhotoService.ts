@@ -241,7 +241,7 @@ export async function uploadDefectPhotos(
     photoUrls: uploadedUrls,
     photoStoragePaths: uploadedPaths,
     failedCount: errors.length,
-    lastErrorMessage: errors.length > 0 ? errors.join('\\n') : undefined,
+    lastErrorMessage: errors.length > 0 ? errors.join('\n') : undefined,
     errors
   };
 }

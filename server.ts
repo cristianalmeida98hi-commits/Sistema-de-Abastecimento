@@ -13,6 +13,9 @@ import {
   INITIAL_FUEL_LOGS, INITIAL_MAINTENANCE_LOGS, INITIAL_ALERTS, 
   INITIAL_AUDIT_LOGS, INITIAL_SETTINGS, INITIAL_MACHINE_ISSUES, INITIAL_PREVENTIVE_ITEMS 
 } from './src/data/seedData';
+import { validateHourmeterReading } from './src/utils/hourmeterValidation';
+import cloudinarySignatureHandler from './api/cloudinary/signature';
+import cloudinaryDeleteHandler from './api/cloudinary/delete';
 
 async function startServer() {
   const app = express();
@@ -1062,6 +1065,73 @@ async function startServer() {
 
   app.post('/api/fuel-records', (req, res) => {
     const log = req.body;
+    const vehicles: any[] = serverDb['andradeagro_vehicles_v1'] || [];
+    const targetVehicle = vehicles.find((v: any) => v.id === log.equipmentId);
+    const isKm = targetVehicle?.category === 'VEICULO';
+
+    if (targetVehicle && !isKm && typeof log.hourmeterAtFueling === 'number') {
+      const users: any[] = serverDb['andradeagro_users_v1'] || [];
+      const user = users.find((u: any) => u.id === (log.createdById || log.attendantId || log.driverOrOperatorId));
+      const userRole = log.userRole || user?.role || 'FUNCIONARIO';
+
+      const validation = validateHourmeterReading({
+        newHourmeter: log.hourmeterAtFueling,
+        equipment: targetVehicle,
+        previousLogs: serverDb['andradeagro_fuel_logs_v1'] || [],
+        currentDate: log.dateTime,
+        userRole,
+        isAuthorizedCorrection: Boolean(log.isAuthorizedCorrection),
+        justification: log.correctionReason
+      });
+
+      if (validation.isBlocking) {
+        return res.status(400).json({
+          ok: false,
+          success: false,
+          error: validation.message,
+          warningType: validation.warningType,
+          details: validation.details
+        });
+      }
+
+      if (log.isAuthorizedCorrection && validation.details?.canAuthorizeCorrection) {
+        // Registrar log de auditoria no servidor
+        let auditList: any[] = serverDb['andradeagro_audit_logs_v1'] || [];
+        auditList.unshift({
+          id: `aud-${Date.now()}`,
+          dateTime: new Date().toISOString(),
+          userId: user?.id || 'sys',
+          userName: user?.name || 'Manutenção',
+          action: 'EDITAR',
+          entity: 'HORIMETRO_EQUIPAMENTO',
+          details: `Correção técnica autorizada de horímetro em ${targetVehicle.model} (${targetVehicle.licensePlate || targetVehicle.patrimonyCode}): de ${targetVehicle.currentHourmeter || 0}h para ${log.hourmeterAtFueling}h. Justificativa: ${log.correctionReason || 'Sem justificativa informada'}.`
+        });
+        serverDb['andradeagro_audit_logs_v1'] = auditList;
+
+        // Atualizar horímetro diretamente para o valor retificado
+        const vIndex = vehicles.findIndex((v: any) => v.id === targetVehicle.id);
+        if (vIndex >= 0) {
+          vehicles[vIndex] = {
+            ...vehicles[vIndex],
+            currentHourmeter: log.hourmeterAtFueling,
+            lastFuelingDate: (log.dateTime || '').slice(0, 10)
+          };
+          serverDb['andradeagro_vehicles_v1'] = vehicles;
+        }
+      } else {
+        // Atualização normal: avança horímetro se maior
+        const vIndex = vehicles.findIndex((v: any) => v.id === targetVehicle.id);
+        if (vIndex >= 0) {
+          vehicles[vIndex] = {
+            ...vehicles[vIndex],
+            currentHourmeter: Math.max(vehicles[vIndex].currentHourmeter || 0, log.hourmeterAtFueling),
+            lastFuelingDate: (log.dateTime || '').slice(0, 10)
+          };
+          serverDb['andradeagro_vehicles_v1'] = vehicles;
+        }
+      }
+    }
+
     let list = serverDb['andradeagro_fuel_logs_v1'] || [];
     const index = list.findIndex((f: any) => f.id === log.id);
     if (index >= 0) {
@@ -1234,6 +1304,10 @@ async function startServer() {
       res.status(404).json({ error: 'Issue not found' });
     }
   });
+
+  // CLOUDINARY API ROUTES
+  app.post('/api/cloudinary/signature', (req, res) => cloudinarySignatureHandler(req, res));
+  app.post('/api/cloudinary/delete', (req, res) => cloudinaryDeleteHandler(req, res));
 
   // Strict catch-all for unhandled /api/* routes - ALWAYS return JSON 404, never HTML!
   app.all('/api/*', (req, res) => {

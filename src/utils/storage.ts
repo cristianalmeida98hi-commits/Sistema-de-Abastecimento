@@ -24,6 +24,7 @@ import {
   getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO 
 } from './calculations';
 import { deleteDefectPhotos } from './defectPhotoService';
+import { validateHourmeterReading } from './hourmeterValidation';
 
 const SESSION_KEYS = {
   SESSION_USER: 'andradeagro_session_user_v1',
@@ -1084,13 +1085,47 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
       });
     }
 
-    // Update Equipment current KM / Hourmeter in Firestore
+    // Validar consistência do horímetro para máquinas e tratores
     const vehicles = getVehicles();
     const targetVehicle = vehicles.find(v => v.id === log.equipmentId);
+    const isKm = targetVehicle?.category === 'VEICULO';
+
+    if (targetVehicle && !isKm && typeof log.hourmeterAtFueling === 'number') {
+      const currentUser = getCurrentUser();
+      const userRole = currentUser?.role || 'FUNCIONARIO';
+      const validation = validateHourmeterReading({
+        newHourmeter: log.hourmeterAtFueling,
+        equipment: targetVehicle,
+        previousLogs: cache.fuelLogs,
+        currentDate: log.dateTime,
+        userRole,
+        isAuthorizedCorrection: Boolean(log.isAuthorizedCorrection),
+        justification: log.correctionReason
+      });
+
+      if (validation.isBlocking) {
+        throw new Error(validation.message || 'Horímetro inconsistente para este equipamento.');
+      }
+    }
+
+    // Update Equipment current KM / Hourmeter in Firestore
     if (targetVehicle) {
-      const isKm = targetVehicle.category === 'VEICULO';
       const updatedKm = isKm ? Math.max(targetVehicle.currentKm || 0, log.kmAtFueling || targetVehicle.currentKm || 0) : targetVehicle.currentKm;
-      const updatedHour = !isKm ? Math.max(targetVehicle.currentHourmeter || 0, log.hourmeterAtFueling || targetVehicle.currentHourmeter || 0) : targetVehicle.currentHourmeter;
+      
+      let updatedHour = targetVehicle.currentHourmeter;
+      if (!isKm && typeof log.hourmeterAtFueling === 'number') {
+        if (log.isAuthorizedCorrection) {
+          // Correção autorizada da manutenção: atualiza para o valor corrigido real
+          updatedHour = log.hourmeterAtFueling;
+          logAuditEvent(
+            'EDITAR',
+            'HORIMETRO_EQUIPAMENTO',
+            `Correção técnica autorizada de horímetro em ${targetVehicle.model} (${targetVehicle.licensePlate || targetVehicle.patrimonyCode}): de ${targetVehicle.currentHourmeter || 0}h para ${log.hourmeterAtFueling}h. Justificativa: ${log.correctionReason || 'Sem justificativa informada'}.`
+          );
+        } else {
+          updatedHour = Math.max(targetVehicle.currentHourmeter || 0, log.hourmeterAtFueling);
+        }
+      }
       
       const vehicleUpdates = cleanUndefined({
         currentKm: updatedKm,

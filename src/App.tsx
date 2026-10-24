@@ -21,6 +21,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { NotificationPermissionBanner } from './components/NotificationPermissionBanner';
 import { CheckCircle2, Tractor, AlertTriangle, RefreshCw, WifiOff, Bell, X, Sparkles } from 'lucide-react';
 
+import { LoginView } from './components/LoginView';
+
 // Code-split dynamic views to drastically reduce initial bundle size and accelerate time-to-first-paint
 const DashboardView = React.lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
 const FuelLogsView = React.lazy(() => import('./components/FuelLogsView').then(m => ({ default: m.FuelLogsView })));
@@ -35,7 +37,6 @@ const SettingsAndAboutView = React.lazy(() => import('./components/SettingsAndAb
 const OperatorFuelingView = React.lazy(() => import('./components/OperatorFuelingView').then(m => ({ default: m.OperatorFuelingView })));
 const OperatorDigitalSheetsView = React.lazy(() => import('./components/OperatorDigitalSheetsView').then(m => ({ default: m.OperatorDigitalSheetsView })));
 const QRCodeModuleView = React.lazy(() => import('./components/QRCodeModuleView').then(m => ({ default: m.QRCodeModuleView })));
-const LoginView = React.lazy(() => import('./components/LoginView').then(m => ({ default: m.LoginView })));
 
 // Dynamic modals loaded on demand
 const FuelingFormModal = React.lazy(() => import('./components/FuelingFormModal').then(m => ({ default: m.FuelingFormModal })));
@@ -221,8 +222,6 @@ export default function App() {
         import('./components/FuelLogsView');
         import('./components/MaintenanceView');
         import('./components/FuelingFormModal');
-      } else {
-        import('./components/LoginView');
       }
     };
     if ('requestIdleCallback' in window) {
@@ -685,13 +684,11 @@ export default function App() {
   // If not authenticated, render Login Screen
   if (!currentUser) {
     return (
-      <React.Suspense fallback={<LoginLoadingFallback />}>
-        <LoginView
-          onLoginSuccess={handleLoginSuccess}
-          darkMode={darkMode}
-          successMessage={loginSuccessMessage}
-        />
-      </React.Suspense>
+      <LoginView
+        onLoginSuccess={handleLoginSuccess}
+        darkMode={darkMode}
+        successMessage={loginSuccessMessage}
+      />
     );
   }
 

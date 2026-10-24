@@ -277,10 +277,16 @@ export async function deleteDefectPhotos(storagePathsOrUrls: string[]): Promise<
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.ok) {
-        console.warn('[AndradeAgro Cloudinary] Algumas fotos podem não ter sido removidas:', result);
+        const details = Array.isArray(result.results)
+          ? result.results.filter((item: any) => !item.ok).map((item: any) => item.error || item.result || item.publicId).join('; ')
+          : '';
+        throw new Error(details
+          ? `O Cloudinary não confirmou a exclusão de todas as fotos: ${details}`
+          : (result.error || 'O Cloudinary não confirmou a exclusão das fotos.'));
       }
     } catch (error: any) {
-      console.warn('[AndradeAgro Cloudinary] Falha ao solicitar exclusão:', error?.message || error);
+      console.error('[AndradeAgro Cloudinary] Falha ao solicitar exclusão:', error?.message || error);
+      throw error instanceof Error ? error : new Error('Falha ao excluir as fotos do Cloudinary.');
     }
   }
 

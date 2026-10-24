@@ -43,10 +43,9 @@ export default async function handler(req: any, res: any) {
   if (!issueId || !photoId) return send(res, 400, { ok: false, error: 'Identificadores da foto inválidos.' });
 
   const timestamp = Math.floor(Date.now() / 1000);
-  const folder = `andrade_agro/defeitos/${issueId}`;
-  const public_id = `${folder}/${photoId}`;
+  const public_id = `andrade_agro/defeitos/${issueId}/${photoId}`;
   const upload_preset = process.env.CLOUDINARY_UPLOAD_PRESET || 'andrade_agro_defeitos';
-  const params: Record<string, string | number> = { folder, public_id, timestamp, upload_preset };
+  const params: Record<string, string | number> = { public_id, timestamp, upload_preset };
   const toSign = Object.keys(params).sort().map(key => `${key}=${params[key]}`).join('&') + process.env.CLOUDINARY_API_SECRET;
   const signature = crypto.createHash('sha1').update(toSign).digest('hex');
 
@@ -55,7 +54,6 @@ export default async function handler(req: any, res: any) {
     cloudName: process.env.CLOUDINARY_CLOUD_NAME,
     apiKey: process.env.CLOUDINARY_API_KEY,
     timestamp,
-    folder,
     publicId: public_id,
     uploadPreset: upload_preset,
     signature

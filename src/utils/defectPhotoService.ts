@@ -257,7 +257,7 @@ export async function deleteDefectPhotos(storagePathsOrUrls: string[]): Promise<
     typeof item === 'string' && /^andrade_agro\\/defeitos\\/[a-zA-Z0-9_-]{1,100}\\/[a-zA-Z0-9_-]{1,120}$/.test(item)
   );
   const legacyItems = storagePathsOrUrls.filter(item =>
-    item && !cloudinaryIds.includes(item) && !item.startsWith('data:') && !item.includes('unsplash.com')
+    item && !cloudinaryIds.includes(item) && !item.startsWith('data:') && !item.includes('unsplash.com') && !item.includes('res.cloudinary.com')
   );
 
   if (cloudinaryIds.length > 0) {

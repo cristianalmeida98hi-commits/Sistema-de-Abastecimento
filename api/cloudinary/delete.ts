@@ -38,7 +38,10 @@ export default async function handler(req: any, res: any) {
 
   const results = [];
   for (const rawId of ids) {
-    if (typeof rawId !== 'string' || !/^andrade_agro\/defeitos\/[a-zA-Z0-9_-]{1,100}\/[a-zA-Z0-9_-]{1,120}$/.test(rawId)) {
+    const parts = typeof rawId === 'string' ? rawId.split('/') : [];
+    const validPublicId = parts.length === 4 && parts[0] === 'andrade_agro' && parts[1] === 'defeitos' &&
+      /^[a-zA-Z0-9_-]{1,100}$/.test(parts[2]) && /^[a-zA-Z0-9_-]{1,120}$/.test(parts[3]);
+    if (!validPublicId) {
       results.push({ publicId: String(rawId || ''), ok: false, error: 'Identificador fora da pasta permitida.' });
       continue;
     }

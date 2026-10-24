@@ -1,7 +1,36 @@
 import crypto from 'node:crypto';
 
 function send(res: any, status: number, body: Record<string, unknown>) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.status(status).json(body);
+}
+
+/**
+ * Bloqueia chamadas cross-origin ao endpoint. As funções são chamadas pelo próprio
+ * site; não aceitamos origem ausente, inválida ou diferente do host que recebeu a requisição.
+ * Isso é uma defesa contra abuso via navegador/CSRF, não substitui autenticação forte.
+ */
+function hasSameOrigin(req: any): boolean {
+  const origin = req.headers?.origin;
+  const host = req.headers?.host;
+  if (typeof origin !== 'string' || typeof host !== 'string' || !host.trim()) return false;
+
+  try {
+    const parsed = new URL(origin);
+    if (parsed.username || parsed.password) return false;
+    const originHost = parsed.host.toLowerCase();
+    const requestHost = host.split(',')[0].trim().toLowerCase();
+    const isSecure = parsed.protocol === 'https:' ||
+      (parsed.protocol === 'http:' && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestHost));
+    if (!isSecure || originHost !== requestHost) return false;
+
+    const fetchSite = req.headers?.['sec-fetch-site'];
+    if (typeof fetchSite === 'string' && fetchSite !== 'same-origin' && fetchSite !== 'none') return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Valida o ID token no Firebase Authentication sem depender de credenciais Admin na Vercel. */
@@ -26,6 +55,7 @@ async function verifyUser(req: any): Promise<boolean> {
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Método não permitido.' });
+  if (!hasSameOrigin(req)) return send(res, 403, { ok: false, error: 'Origem da requisição não permitida.' });
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiKey = process.env.CLOUDINARY_API_KEY;
   const apiSecret = process.env.CLOUDINARY_API_SECRET;

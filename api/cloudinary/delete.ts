@@ -51,7 +51,12 @@ export default async function handler(req: any, res: any) {
       const form = new URLSearchParams({ public_id: rawId, timestamp: String(timestamp), api_key: apiKey, signature });
       const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/destroy`, { method: 'POST', body: form });
       const payload = await response.json().catch(() => ({})) as any;
-      results.push({ publicId: rawId, ok: response.ok && (payload.result === 'ok' || payload.result === 'not found') });
+      results.push({
+        publicId: rawId,
+        ok: response.ok && (payload.result === 'ok' || payload.result === 'not found'),
+        result: typeof payload.result === 'string' ? payload.result : undefined,
+        error: payload.error?.message || (!response.ok ? `Cloudinary HTTP ${response.status}` : undefined)
+      });
     } catch {
       results.push({ publicId: rawId, ok: false, error: 'Falha de conexão com o Cloudinary.' });
     }

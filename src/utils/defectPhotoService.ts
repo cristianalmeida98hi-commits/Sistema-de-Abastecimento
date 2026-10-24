@@ -207,7 +207,6 @@ export async function uploadDefectPhotos(
       form.append('file', photo.blob, photo.fileName);
       form.append('api_key', signatureData.apiKey);
       form.append('timestamp', String(signatureData.timestamp));
-      form.append('folder', signatureData.folder);
       form.append('public_id', signatureData.publicId);
       form.append('upload_preset', signatureData.uploadPreset);
       form.append('signature', signatureData.signature);

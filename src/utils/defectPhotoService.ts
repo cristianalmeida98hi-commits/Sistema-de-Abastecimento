@@ -252,9 +252,12 @@ export async function uploadDefectPhotos(
 export async function deleteDefectPhotos(storagePathsOrUrls: string[]): Promise<void> {
   if (!storagePathsOrUrls || storagePathsOrUrls.length === 0) return;
 
-  const cloudinaryIds = storagePathsOrUrls.filter(item =>
-    typeof item === 'string' && /^andrade_agro\\/defeitos\\/[a-zA-Z0-9_-]{1,100}\\/[a-zA-Z0-9_-]{1,120}$/.test(item)
-  );
+  const cloudinaryIds = storagePathsOrUrls.filter(item => {
+    if (typeof item !== 'string') return false;
+    const parts = item.split('/');
+    return parts.length === 4 && parts[0] === 'andrade_agro' && parts[1] === 'defeitos' &&
+      /^[a-zA-Z0-9_-]{1,100}$/.test(parts[2]) && /^[a-zA-Z0-9_-]{1,120}$/.test(parts[3]);
+  });
   const legacyItems = storagePathsOrUrls.filter(item =>
     item && !cloudinaryIds.includes(item) && !item.startsWith('data:') && !item.includes('unsplash.com') && !item.includes('res.cloudinary.com')
   );

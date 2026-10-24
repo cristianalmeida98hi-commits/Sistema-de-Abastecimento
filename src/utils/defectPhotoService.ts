@@ -167,10 +167,8 @@ export async function compressDefectImage(file: File): Promise<ProcessedPhoto> {
 }
 
 /**
- * Uploads a list of processed photo blobs to Firebase Storage.
- * Organized strictly by: defeitos/{issueId}/{photoId}.jpg
- * REGRA: Se várias fotos forem selecionadas e apenas uma falhar, NÃO descarta
- * automaticamente as que foram enviadas com sucesso.
+ * Envia imagens comprimidas ao Cloudinary usando assinatura temporária gerada no servidor.
+ * O segredo da API nunca é enviado ao navegador.
  */
 export async function uploadDefectPhotos(
   issueId: string,
@@ -180,95 +178,121 @@ export async function uploadDefectPhotos(
     return { photoUrls: [], photoStoragePaths: [], failedCount: 0 };
   }
 
-  // Ensure authenticated session
-  await ensureFirebaseAuth();
+  const user = await ensureFirebaseAuth();
+  if (!user) throw new Error('Não foi possível validar a sessão Firebase para enviar as fotos.');
 
   const uploadedPaths: string[] = [];
   const uploadedUrls: string[] = [];
   const errors: string[] = [];
 
   for (let i = 0; i < photos.length; i++) {
-    const p = photos[i];
-    const storagePath = `defeitos/${issueId}/foto_${i + 1}_${Date.now()}.jpg`;
-    const fileRef = ref(storage, storagePath);
-
-    console.log(`[AndradeAgro Storage] Fazendo upload da foto ${i + 1}/${photos.length}: ${storagePath} (${(p.sizeBytes / 1024).toFixed(1)} KB)`);
-
-    const metadata = {
-      contentType: 'image/jpeg',
-      customMetadata: {
-        issueId,
-        originalName: p.fileName,
-        uploadedAt: new Date().toISOString()
-      }
-    };
-
+    const photo = photos[i];
     try {
-      await uploadBytes(fileRef, p.blob, metadata);
-      const downloadUrl = await getDownloadURL(fileRef);
+      const photoId = `foto_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const token = await user.getIdToken();
+      const signatureResponse = await fetch('/api/cloudinary/signature', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ issueId, photoId })
+      });
+      const signatureData = await signatureResponse.json().catch(() => ({}));
+      if (!signatureResponse.ok || !signatureData.ok) {
+        throw new Error(signatureData.error || 'Não foi possível preparar o envio seguro da foto.');
+      }
 
-      uploadedPaths.push(storagePath);
-      uploadedUrls.push(downloadUrl);
+      const form = new FormData();
+      form.append('file', photo.blob, photo.fileName);
+      form.append('api_key', signatureData.apiKey);
+      form.append('timestamp', String(signatureData.timestamp));
+      form.append('folder', signatureData.folder);
+      form.append('public_id', signatureData.publicId);
+      form.append('upload_preset', signatureData.uploadPreset);
+      form.append('signature', signatureData.signature);
+
+      const uploadResponse = await fetch(
+        `https://api.cloudinary.com/v1_1/${encodeURIComponent(signatureData.cloudName)}/image/upload`,
+        { method: 'POST', body: form }
+      );
+      const uploadData = await uploadResponse.json().catch(() => ({}));
+      if (!uploadResponse.ok || !uploadData.secure_url || !uploadData.public_id) {
+        throw new Error(uploadData.error?.message || 'O Cloudinary recusou o envio da imagem.');
+      }
+
+      uploadedPaths.push(uploadData.public_id);
+      uploadedUrls.push(uploadData.secure_url);
     } catch (photoErr: any) {
-      const parsedMsg = parseStorageErrorMessage(photoErr);
-      console.error(`[AndradeAgro Storage] Erro ao enviar foto ${i + 1}/${photos.length}:`, photoErr);
-      errors.push(`Foto ${i + 1} (${p.fileName}): ${parsedMsg}`);
+      const message = photoErr?.message || 'Falha ao enviar a foto.';
+      console.error(`[AndradeAgro Cloudinary] Falha na foto ${i + 1}/${photos.length}:`, message);
+      errors.push(`Foto ${i + 1} (${photo.fileName}): ${message}`);
     }
   }
 
-  // Se todas as fotos falharem, lançar erro com a mensagem detalhada da causa
   if (uploadedUrls.length === 0 && photos.length > 0) {
-    const mainErrorMsg = errors[0] || 'Falha ao enviar fotos para o servidor de armazenamento.';
-    const uploadErr = new Error(mainErrorMsg);
-    (uploadErr as any).errors = errors;
-    (uploadErr as any).uploadedPaths = uploadedPaths;
-    (uploadErr as any).uploadedUrls = uploadedUrls;
+    const uploadErr: any = new Error(errors[0] || 'Falha ao enviar fotos para o Cloudinary.');
+    uploadErr.errors = errors;
+    uploadErr.uploadedPaths = uploadedPaths;
+    uploadErr.uploadedUrls = uploadedUrls;
     throw uploadErr;
   }
-
-  console.log(`[AndradeAgro Storage] Concluído upload: ${uploadedUrls.length} com sucesso, ${errors.length} falhas.`);
 
   return {
     photoUrls: uploadedUrls,
     photoStoragePaths: uploadedPaths,
     failedCount: errors.length,
-    lastErrorMessage: errors.length > 0 ? errors.join('\n') : undefined,
+    lastErrorMessage: errors.length > 0 ? errors.join('\\n') : undefined,
     errors
   };
 }
 
 /**
- * Deletes photos from Firebase Storage associated with a defect.
- * Called when an issue is resolved (Regra 9) or during cleanup.
+ * Exclui fotos do Cloudinary e mantém suporte aos caminhos/URLs antigos do Firebase Storage.
  */
 export async function deleteDefectPhotos(storagePathsOrUrls: string[]): Promise<void> {
-  if (!storagePathsOrUrls || storagePathsOrUrls.length === 0) {
-    return;
+  if (!storagePathsOrUrls || storagePathsOrUrls.length === 0) return;
+
+  const cloudinaryIds = storagePathsOrUrls.filter(item =>
+    typeof item === 'string' && /^andrade_agro\\/defeitos\\/[a-zA-Z0-9_-]{1,100}\\/[a-zA-Z0-9_-]{1,120}$/.test(item)
+  );
+  const legacyItems = storagePathsOrUrls.filter(item =>
+    item && !cloudinaryIds.includes(item) && !item.startsWith('data:') && !item.includes('unsplash.com')
+  );
+
+  if (cloudinaryIds.length > 0) {
+    try {
+      const user = await ensureFirebaseAuth();
+      if (!user) throw new Error('Sessão Firebase indisponível.');
+      const token = await user.getIdToken();
+      const response = await fetch('/api/cloudinary/delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ publicIds: cloudinaryIds })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) {
+        console.warn('[AndradeAgro Cloudinary] Algumas fotos podem não ter sido removidas:', result);
+      }
+    } catch (error: any) {
+      console.warn('[AndradeAgro Cloudinary] Falha ao solicitar exclusão:', error?.message || error);
+    }
   }
 
-  // Ensure authenticated session
-  await ensureFirebaseAuth();
-
-  for (const item of storagePathsOrUrls) {
-    if (!item) continue;
-    // Ignorar data URLs ou URLs externas não pertencentes ao Firebase Storage
-    if (item.startsWith('data:') || item.includes('unsplash.com')) continue;
-
-    try {
-      let fileRef;
-      if (item.startsWith('http://') || item.startsWith('https://')) {
-        fileRef = ref(storage, item);
-      } else {
-        fileRef = ref(storage, item);
-      }
-
-      await deleteObject(fileRef);
-      console.log(`[AndradeAgro Storage] Foto removida do Storage com sucesso: ${item}`);
-    } catch (delErr: any) {
-      if (delErr?.code === 'storage/object-not-found' || delErr?.message?.includes('not-found')) {
-        console.info(`[AndradeAgro Storage] Foto já não existia no Storage: ${item}`);
-      } else {
-        console.warn(`[AndradeAgro Storage] Aviso ao tentar remover foto ${item}:`, delErr?.message || delErr);
+  if (legacyItems.length > 0) {
+    await ensureFirebaseAuth();
+    for (const item of legacyItems) {
+      try {
+        await deleteObject(ref(storage, item));
+      } catch (delErr: any) {
+        if (delErr?.code === 'storage/object-not-found' || delErr?.message?.includes('not-found')) {
+          console.info(`[AndradeAgro Storage] Foto antiga já não existia: ${item}`);
+        } else {
+          console.warn(`[AndradeAgro Storage] Aviso ao remover foto antiga ${item}:`, delErr?.message || delErr);
+        }
       }
     }
   }

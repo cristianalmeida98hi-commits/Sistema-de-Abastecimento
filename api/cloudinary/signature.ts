@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
 import { getFirebaseAdminDb } from '../_lib/pushEngine.js';
 
-const nodeRequire = (await import('node:module')).createRequire(import.meta.url);
+const nodeRequire = createRequire(import.meta.url);
 
 function send(res: any, status: number, body: Record<string, unknown>) {
   res.status(status).json(body);

@@ -1,25 +1,24 @@
 import crypto from 'node:crypto';
-import { createRequire } from 'node:module';
-import { getFirebaseAdminDb } from '../_lib/pushEngine.js';
-
-const nodeRequire = createRequire(import.meta.url);
 
 function send(res: any, status: number, body: Record<string, unknown>) {
   res.status(status).json(body);
 }
 
+/** Valida o ID token no Firebase Authentication sem depender de credenciais Admin na Vercel. */
 async function verifyUser(req: any): Promise<boolean> {
   const header = req.headers?.authorization || '';
   const match = /^Bearer\s+(.+)$/i.exec(header);
   if (!match) return false;
-  if (!getFirebaseAdminDb()) return false;
+  const apiKey = process.env.FIREBASE_API_KEY || 'AIzaSyCKLaXPZ3xq5M2CCRVBkwRHS-7dQoBelEY';
   try {
-    const { getApps } = nodeRequire('firebase-admin/app');
-    const { getAuth } = nodeRequire('firebase-admin/auth');
-    const app = getApps()[0];
-    if (!app) return false;
-    await getAuth(app).verifyIdToken(match[1]);
-    return true;
+    const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: match[1] })
+    });
+    if (!response.ok) return false;
+    const result = await response.json() as any;
+    return Array.isArray(result.users) && result.users.length > 0;
   } catch {
     return false;
   }
@@ -31,7 +30,7 @@ export default async function handler(req: any, res: any) {
   const apiKey = process.env.CLOUDINARY_API_KEY;
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
   if (!cloudName || !apiKey || !apiSecret) return send(res, 503, { ok: false, error: 'Configuração do Cloudinary incompleta.' });
-  if (!(await verifyUser(req))) return send(res, 401, { ok: false, error: 'Sessão Firebase inválida.' });
+  if (!(await verifyUser(req))) return send(res, 401, { ok: false, error: 'Sessão Firebase inválida. Entre novamente no sistema.' });
 
   const ids = req.body?.publicIds;
   if (!Array.isArray(ids) || ids.length > 3) return send(res, 400, { ok: false, error: 'Lista de fotos inválida.' });
@@ -51,9 +50,9 @@ export default async function handler(req: any, res: any) {
     try {
       const form = new URLSearchParams({ public_id: rawId, timestamp: String(timestamp), api_key: apiKey, signature });
       const response = await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/destroy`, { method: 'POST', body: form });
-      const payload = await response.json().catch(() => ({}));
+      const payload = await response.json().catch(() => ({})) as any;
       results.push({ publicId: rawId, ok: response.ok && (payload.result === 'ok' || payload.result === 'not found') });
-    } catch (error) {
+    } catch {
       results.push({ publicId: rawId, ok: false, error: 'Falha de conexão com o Cloudinary.' });
     }
   }

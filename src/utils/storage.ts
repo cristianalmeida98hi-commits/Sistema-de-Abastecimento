@@ -1608,7 +1608,10 @@ export async function resolveMachineIssue(issueId: string, notes?: string): Prom
     try {
       await deleteDefectPhotos(photosToDelete);
     } catch (photoErr) {
-      console.warn('[AndradeAgro Storage] Aviso ao excluir fotos do Storage ao resolver defeito:', photoErr);
+      console.error('[AndradeAgro Storage] Não foi possível excluir as fotos; o defeito não será resolvido:', photoErr);
+      throw new Error(photoErr instanceof Error
+        ? `Não foi possível excluir as fotos. O defeito continua aberto. ${photoErr.message}`
+        : 'Não foi possível excluir as fotos. O defeito continua aberto. Tente novamente ou contate o suporte.');
     }
   }
 

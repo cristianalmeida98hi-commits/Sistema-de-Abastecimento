@@ -61,7 +61,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
   // Central Tanks statuses memoized
   const centralTanks = useMemo(() => {
     return getCentralTanks();
-  }, [settings]);
+  }, [settings, fuelLogs]);
 
   const centralTanksStatus = useMemo(() => {
     return centralTanks.map(tank => ({

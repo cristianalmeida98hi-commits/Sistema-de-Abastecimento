@@ -1,20 +1,29 @@
 import { FuelLog, Vehicle, FuelType, Sector, GasStation } from '../types';
 import { getOperationTypeName, getActivityTypeName, getEffectiveActivityName, getEffectiveCategoryName } from './operations';
 
+const currencyFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+const numberFormatters = new Map<number, Intl.NumberFormat>();
+
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount || 0);
+  return currencyFormatter.format(amount || 0);
 }
 
 export function formatNumber(value: number, decimals: number = 1): string {
-  return new Intl.NumberFormat('pt-BR', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(value || 0);
+  let formatter = numberFormatters.get(decimals);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat('pt-BR', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+    numberFormatters.set(decimals, formatter);
+  }
+  return formatter.format(value || 0);
 }
 
 const TIMEZONE_BR = 'America/Sao_Paulo';

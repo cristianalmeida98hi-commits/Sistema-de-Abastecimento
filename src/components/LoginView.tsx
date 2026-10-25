@@ -384,7 +384,7 @@ export const LoginViewComponent: React.FC<LoginViewProps> = ({ onLoginSuccess, s
                                   <div className="w-2.5 h-2.5 border-2 border-[#FACC15] border-t-transparent rounded-full animate-spin shrink-0"></div>
                                 )}
                                 <span className="truncate">
-                                  {user.name.split(' ')[0]} {user.name.split(' ')[1] ? user.name.split(' ')[1][0] + '.' : ''}
+                                  {user.name}
                                 </span>
                               </span>
                               <span className="text-[8px] font-bold bg-amber-500/10 text-amber-400 px-1 py-0.5 rounded shrink-0 uppercase">

@@ -662,7 +662,16 @@
       "active": true
     }
   ],
-  "andradeagro_fuel_logs_v1": [],
+  "andradeagro_fuel_logs_v1": [
+    {
+      "id": "test-direct-hack",
+      "equipmentId": "trator-teste-1",
+      "hourmeterAtFueling": 90000,
+      "liters": 100,
+      "dateTime": "2026-10-21T10:00:00-03:00",
+      "userRole": "FUNCIONARIO"
+    }
+  ],
   "andradeagro_maintenance_logs_v1": [],
   "andradeagro_machine_issues_v1": [
     {
@@ -934,7 +943,9 @@
     "test-1790209236588",
     "test-node-1790288168311",
     "test-1790288386449",
-    "test-1790291054653"
+    "test-1790291054653",
+    "issue-test-12345",
+    "issue-test-1792930630056"
   ],
   "andradeagro_vapid_keys": {
     "publicKey": "BGidTH8JXdHgg5XYTG-Z3iAJhCOVguQQf0B5iL-GMHJVXdnj_1JLv1bvtCG0GOCSBU-LqYL9dpUcCZaj_nV3H4s",

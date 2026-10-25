@@ -445,5 +445,11 @@ export interface PushNotificationPayload {
   equipmentId?: string;
   customTitle?: string;
   url?: string;
+  photoUrl?: string;
+  image?: string;
+  issueId?: string;
+  reportedByUserId?: string;
+  reportedByUserName?: string;
+  action?: string;
 }
 

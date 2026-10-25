@@ -19,7 +19,7 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { NotificationPermissionBanner } from './components/NotificationPermissionBanner';
-import { CheckCircle2, Tractor, AlertTriangle, RefreshCw, WifiOff, Bell, X, Sparkles } from 'lucide-react';
+import { CheckCircle2, Tractor, AlertTriangle, RefreshCw, WifiOff, Bell, X, Sparkles, Camera } from 'lucide-react';
 
 import { LoginView } from './components/LoginView';
 
@@ -101,6 +101,8 @@ export default function App() {
   const [isQRScannerModalOpen, setIsQRScannerModalOpen] = useState<boolean>(false);
   const [selectedDigitalSheetVehicle, setSelectedDigitalSheetVehicle] = useState<Vehicle | null>(null);
   const [digitalSheetInitialTab, setDigitalSheetInitialTab] = useState<'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES'>('OVERVIEW');
+  const [digitalSheetInitialIssueId, setDigitalSheetInitialIssueId] = useState<string | undefined>(undefined);
+  const [digitalSheetInitialAction, setDigitalSheetInitialAction] = useState<string | undefined>(undefined);
   const [highlightedTankId, setHighlightedTankId] = useState<string | null>(null);
   const [highlightedAlertId, setHighlightedAlertId] = useState<string | null>(null);
   const [highlightedMaintenanceId, setHighlightedMaintenanceId] = useState<string | null>(null);
@@ -157,12 +159,14 @@ export default function App() {
         refreshState();
       };
 
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') handleResume();
+      };
+
       window.addEventListener('online', handleOnline);
       window.addEventListener('offline', handleOffline);
       window.addEventListener('andradeagro_network_status', handleResume);
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') handleResume();
-      });
+      document.addEventListener('visibilitychange', handleVisibilityChange);
       window.addEventListener('pageshow', handleResume);
       window.addEventListener('focus', handleResume);
 
@@ -170,7 +174,7 @@ export default function App() {
         window.removeEventListener('online', handleOnline);
         window.removeEventListener('offline', handleOffline);
         window.removeEventListener('andradeagro_network_status', handleResume);
-        document.removeEventListener('visibilitychange', handleResume);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
         window.removeEventListener('pageshow', handleResume);
         window.removeEventListener('focus', handleResume);
       };
@@ -348,38 +352,51 @@ export default function App() {
       if (params.tankId) {
         setHighlightedTankId(params.tankId);
       }
-    } else if (params.tab === 'alerts' || params.issueId) {
+    } else if (params.tab === 'alerts' && !params.issueId) {
       setActiveTab('alerts');
-      if (params.issueId) {
-        setHighlightedAlertId(params.issueId);
-      }
     } else if (params.tab === 'maintenance' || params.maintenanceId || params.action === 'oil_change') {
       setActiveTab('maintenance');
       if (params.maintenanceId) {
         setHighlightedMaintenanceId(params.maintenanceId);
       }
-    } else if (params.tab && ['dashboard', 'fleet', 'settings', 'staff', 'reports', 'qr-codes', 'digital-sheets'].includes(params.tab)) {
+    } else if (params.tab && ['dashboard', 'fleet', 'settings', 'staff', 'reports', 'qr-codes', 'digital-sheets', 'audit'].includes(params.tab)) {
       setActiveTab(params.tab);
     }
 
-    // 2. Equipment Ficha & Specific Tab Opening
-    if (params.equipmentId) {
+    // 2. Equipment Ficha & Specific Defect / Tab Opening
+    let targetEquipId = params.equipmentId;
+    if (!targetEquipId && params.issueId) {
+      const cleanIssueId = params.issueId.startsWith('issue-') ? params.issueId.slice(6) : params.issueId;
+      const issues = getMachineIssues();
+      const matchIssue = issues.find(i => i.id === cleanIssueId || i.id === params.issueId);
+      if (matchIssue) {
+        targetEquipId = matchIssue.equipmentId;
+      }
+    }
+
+    if (targetEquipId) {
       const currentVehicles = getVehicles();
-      const found = currentVehicles.find(v => v.id === params.equipmentId || v.licensePlate === params.equipmentId || v.patrimonyCode === params.equipmentId);
+      const found = currentVehicles.find(v => v.id === targetEquipId || v.licensePlate === targetEquipId || v.patrimonyCode === targetEquipId);
       if (found) {
         setSelectedDigitalSheetVehicle(found);
-        if (params.sheetTab && ['PREVENTIVE', 'HISTORY', 'TIMELINE', 'OVERVIEW', 'ISSUES'].includes(params.sheetTab)) {
+        if (params.issueId) {
+          setDigitalSheetInitialTab('ISSUES');
+          setDigitalSheetInitialIssueId(params.issueId);
+          setDigitalSheetInitialAction(params.action || undefined);
+        } else if (params.sheetTab && ['PREVENTIVE', 'HISTORY', 'TIMELINE', 'OVERVIEW', 'ISSUES'].includes(params.sheetTab)) {
           setDigitalSheetInitialTab(params.sheetTab as any);
         } else if (params.action === 'oil_change' || params.action === 'preventive') {
           setDigitalSheetInitialTab('PREVENTIVE');
         } else if (params.maintenanceId || params.action === 'maintenance_view') {
           setDigitalSheetInitialTab('HISTORY');
-        } else if (params.issueId) {
-          setDigitalSheetInitialTab('ISSUES');
         } else {
           setDigitalSheetInitialTab('OVERVIEW');
         }
       }
+    } else if (params.issueId) {
+      // If equipment wasn't resolved, navigate to alerts tab as fallback
+      setActiveTab('alerts');
+      setHighlightedAlertId(params.issueId);
     }
 
     // Dismiss any blocking dialogs
@@ -765,17 +782,46 @@ export default function App() {
 
           {/* Real-time Push Alert Banner when in foreground */}
           {inAppPushAlert && (
-            <div className="w-full mb-4 p-4 rounded-2xl bg-gradient-to-r from-amber-500/20 via-emerald-900/60 to-emerald-950 border border-amber-500/60 shadow-xl flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold shrink-0">
-                  <Bell className="w-5 h-5 text-slate-950 animate-bounce" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-black text-amber-300">{inAppPushAlert.title}</h4>
-                  <p className="text-xs text-emerald-100">{inAppPushAlert.body}</p>
+            <div className="w-full mb-4 p-4 rounded-2xl bg-gradient-to-r from-amber-500/20 via-emerald-900/60 to-emerald-950 border border-amber-500/60 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
+              <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                {/* Photo thumbnail if attached */}
+                {(inAppPushAlert.data?.image || inAppPushAlert.data?.photoUrl) ? (
+                  <div className="relative group shrink-0">
+                    <img
+                      src={inAppPushAlert.data.image || inAppPushAlert.data.photoUrl}
+                      alt="Foto do defeito"
+                      className="w-14 h-14 rounded-xl object-cover border-2 border-amber-400/80 shadow-md bg-black/40"
+                    />
+                    <div className="absolute -bottom-1 -right-1 bg-amber-500 text-slate-950 p-1 rounded-full shadow">
+                      <Camera className="w-3 h-3 text-slate-950" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold shrink-0 shadow-md">
+                    <Bell className="w-5 h-5 text-slate-950 animate-bounce" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <h4 className="text-sm font-black text-amber-300 truncate">{inAppPushAlert.title}</h4>
+                  <p className="text-xs text-emerald-100 line-clamp-2 mt-0.5 whitespace-pre-line">{inAppPushAlert.body}</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                {inAppPushAlert.data?.issueId && (currentUser.role === 'ADMIN' || currentUser.role === 'MANUTENCAO') && (
+                  <button
+                    onClick={() => {
+                      applyDeepLink({
+                        ...inAppPushAlert.data,
+                        action: 'resolve'
+                      });
+                      setInAppPushAlert(null);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-md transition-all active:scale-95 flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Resolver
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     applyDeepLink(inAppPushAlert.data);
@@ -783,11 +829,12 @@ export default function App() {
                   }}
                   className="px-3.5 py-1.5 rounded-xl bg-[#FACC15] hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-md transition-all active:scale-95"
                 >
-                  Ver Agora
+                  {inAppPushAlert.data?.photoUrl || inAppPushAlert.data?.image ? 'Ver Defeito e Foto' : 'Ver Agora'}
                 </button>
                 <button
                   onClick={() => setInAppPushAlert(null)}
                   className="p-1.5 text-emerald-400 hover:text-white rounded-lg transition-colors"
+                  title="Fechar notificação"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1016,6 +1063,8 @@ export default function App() {
             onClose={() => {
               setSelectedDigitalSheetVehicle(null);
               setDigitalSheetInitialTab('OVERVIEW');
+              setDigitalSheetInitialIssueId(undefined);
+              setDigitalSheetInitialAction(undefined);
               if (typeof window !== 'undefined' && window.location.hash) {
                 history.pushState("", document.title, window.location.pathname + window.location.search);
               }
@@ -1029,6 +1078,8 @@ export default function App() {
             alerts={alerts}
             currentUser={currentUser}
             initialTab={digitalSheetInitialTab}
+            initialIssueId={digitalSheetInitialIssueId}
+            initialAction={digitalSheetInitialAction}
             onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
             onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
             onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}

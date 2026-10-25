@@ -671,6 +671,7 @@ export interface ActiveAuthorizedDevicesResult {
  */
 export async function getActiveAuthorizedDevices(options?: {
   targetUserId?: string;
+  excludeUserId?: string;
   directSubscription?: any;
   directUserName?: string;
   directUserRole?: string;
@@ -791,6 +792,8 @@ export async function getActiveAuthorizedDevices(options?: {
     .filter(d => {
       if (!isValidPushSubscription(d.subscription)) return false;
       if (options?.targetUserId && d.userId !== options.targetUserId) return false;
+      // Evita eco no próprio dispositivo do operador que registrou o defeito
+      if (options?.excludeUserId && d.userId === options.excludeUserId && (d.userRole === 'FUNCIONARIO' || d.role === 'FUNCIONARIO')) return false;
       return true;
     });
 
@@ -1138,6 +1141,11 @@ export async function dispatchPushToAuthorizedUsers(event: {
   directSubscription?: any;
   directUserName?: string;
   directUserRole?: string;
+  photoUrl?: string;
+  image?: string;
+  issueId?: string;
+  reportedByUserId?: string;
+  reportedByUserName?: string;
 }): Promise<{
   ok: boolean;
   success: boolean;
@@ -1165,7 +1173,12 @@ export async function dispatchPushToAuthorizedUsers(event: {
     customTitle,
     directSubscription,
     directUserName,
-    directUserRole
+    directUserRole,
+    photoUrl,
+    image,
+    issueId,
+    reportedByUserId,
+    reportedByUserName
   } = event;
 
   // [ETAPA 1/10] Requisição recebida
@@ -1174,12 +1187,14 @@ export async function dispatchPushToAuthorizedUsers(event: {
   // [ETAPA 2/10] Firebase Admin inicializado / verificado
   const adminDb = getFirebaseAdminDb();
   const hasFirebaseAdmin = Boolean(adminDb);
-  const hasFirebaseCreds = Boolean(hasFirebaseAdmin || (firebaseConfig.apiKey && firebaseConfig.projectId));
   console.log(`[AndradeAgro PushEngine] [ETAPA 2/10] Firebase Admin status: ${hasFirebaseAdmin ? 'INICIALIZADO (Service Account)' : 'NÃO INICIALIZADO (modo fallback)'}`);
 
-  // Deduplication check
-  if (processedEventIds.has(eventId)) {
-    console.log(`[AndradeAgro PushEngine] Evento ${eventId} já processado anteriormente. Descartando duplicata.`);
+  // Deduplication check: normaliza eventId para evitar divergências de chave
+  const cleanIssueId = issueId || (eventId.startsWith('issue-') ? eventId.slice(6) : eventId);
+  const dedupKey = (eventType === 'NEW_ISSUE' || eventType === 'MACHINE_ISSUE') ? `issue-${cleanIssueId}` : eventId;
+
+  if (processedEventIds.has(dedupKey) || processedEventIds.has(eventId)) {
+    console.log(`[AndradeAgro PushEngine] Evento ${dedupKey} já processado anteriormente. Descartando duplicata.`);
     return {
       ok: false,
       success: false,
@@ -1196,12 +1211,14 @@ export async function dispatchPushToAuthorizedUsers(event: {
     } as any;
   }
 
-  processedEventIds.add(eventId);
+  processedEventIds.add(dedupKey);
+  if (eventId !== dedupKey) processedEventIds.add(eventId);
   if (processedEventIds.size > 500) {
     const first = processedEventIds.values().next().value;
     if (first) processedEventIds.delete(first);
   }
 
+  const effectivePhoto = photoUrl || image || undefined;
   let title = customTitle || '⚠️ Notificação AndradeAgro';
   let url = '/';
   let sheetTab = 'OVERVIEW';
@@ -1211,11 +1228,11 @@ export async function dispatchPushToAuthorizedUsers(event: {
   let targetMaintenanceId = '';
 
   if (eventType === 'NEW_ISSUE' || eventType === 'MACHINE_ISSUE') {
-    title = customTitle || '⚠️ Novo problema registrado';
+    title = customTitle || `⚠️ Defeito: ${equipmentName}`;
     sheetTab = 'ISSUES';
     targetAction = 'alerts';
-    targetIssueId = eventId;
-    url = `/?tab=alerts&issueId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}&sheetTab=ISSUES`;
+    targetIssueId = cleanIssueId;
+    url = `/?tab=fleet&equipmentId=${encodeURIComponent(equipmentId || '')}&sheetTab=ISSUES&issueId=${encodeURIComponent(cleanIssueId)}`;
   } else if (eventType === 'NEW_MAINTENANCE') {
     title = customTitle || 'Nova manutenção registrada';
     sheetTab = 'HISTORY';
@@ -1252,25 +1269,38 @@ export async function dispatchPushToAuthorizedUsers(event: {
     url = '/?tab=alerts';
   }
 
-  const notificationBody = eventType === 'TEST'
-    ? (description || 'Notificações Push funcionando.')
-    : eventType === 'OIL_CHANGE_DUE'
-      ? (description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`)
-      : eventType === 'NEW_MAINTENANCE'
-        ? (description || `${equipmentName} • Manutenção registrada`).trim()
-        : (equipmentName && equipmentName !== 'Equipamento Agrícola' && equipmentName !== 'Tanque' && !description.toLowerCase().startsWith(equipmentName.toLowerCase()))
-          ? `${equipmentName}\n${description}`.trim()
-          : (description || 'Novo alerta registrado no sistema.').trim();
+  let notificationBody = '';
+  if (eventType === 'NEW_ISSUE' || eventType === 'MACHINE_ISSUE') {
+    const photoTag = effectivePhoto ? ' • 📷 Foto anexada' : '';
+    const reporterTag = reportedByUserName ? `\n• Relatado por: ${reportedByUserName}` : '';
+    notificationBody = `${equipmentName}\n"${description}"${reporterTag}${photoTag}`.trim();
+  } else if (eventType === 'TEST') {
+    notificationBody = description || 'Notificações Push funcionando.';
+  } else if (eventType === 'OIL_CHANGE_DUE') {
+    notificationBody = description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`;
+  } else if (eventType === 'NEW_MAINTENANCE') {
+    notificationBody = (description || `${equipmentName} • Manutenção registrada`).trim();
+  } else {
+    notificationBody = (equipmentName && equipmentName !== 'Equipamento Agrícola' && equipmentName !== 'Tanque' && !description.toLowerCase().startsWith(equipmentName.toLowerCase()))
+      ? `${equipmentName}\n${description}`.trim()
+      : (description || 'Novo alerta registrado no sistema.').trim();
+  }
 
   const payload = JSON.stringify({
     title,
     body: notificationBody,
     icon: '/icon-192.png',
     badge: '/icon-192.png',
-    tag: `andradeagro-${eventType.toLowerCase()}-${eventId}`,
+    image: effectivePhoto,
+    tag: `andradeagro-${eventType.toLowerCase()}-${cleanIssueId}`,
+    renotify: false,
+    actions: (eventType === 'NEW_ISSUE' || eventType === 'MACHINE_ISSUE') ? [
+      { action: 'open_defect', title: '🔍 Ver Defeito e Foto' },
+      { action: 'resolve_defect', title: '✅ Resolver' }
+    ] : undefined,
     data: {
       url,
-      eventId,
+      eventId: dedupKey,
       eventType,
       equipmentId: equipmentId || '',
       tankId: targetTankId,
@@ -1278,14 +1308,18 @@ export async function dispatchPushToAuthorizedUsers(event: {
       maintenanceId: targetMaintenanceId,
       sheetTab,
       targetAction,
+      image: effectivePhoto,
+      photoUrl: effectivePhoto,
+      reportedByUserName,
       timestamp: new Date().toISOString()
     }
   });
 
   // [ETAPA 3, 4, 5] Firestore acessado, user_devices consultado, dispositivos encontrados
-  // UNIFICADO: Utiliza a mesma função getActiveAuthorizedDevices()
+  // UNIFICADO: Utiliza a mesma função getActiveAuthorizedDevices() com exclusão do autor
   const devicesResult = await getActiveAuthorizedDevices({
     targetUserId: eventType !== 'TEST' ? targetUserId : undefined,
+    excludeUserId: reportedByUserId,
     directSubscription,
     directUserName,
     directUserRole

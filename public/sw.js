@@ -139,28 +139,39 @@ self.addEventListener('push', (event) => {
   const notificationTitle = payload.title || (payload.notification && payload.notification.title) || '⚠️ Notificação AndradeAgro';
   const notificationBody = payload.body || (payload.notification && payload.notification.body) || (payload.data && payload.data.body) || '';
   const targetUrl = (payload.data && payload.data.url) || payload.url || (payload.notification && payload.notification.click_action) || '/';
+  const photoImage = payload.image || (payload.data && payload.data.image) || (payload.data && payload.data.photoUrl) || (payload.notification && payload.notification.image) || undefined;
+  const actions = Array.isArray(payload.actions) ? payload.actions : (payload.data && Array.isArray(payload.data.actions) ? payload.data.actions : undefined);
 
   const notificationOptions = {
     body: notificationBody,
     icon: payload.icon || (payload.notification && payload.notification.icon) || '/icon-192.png',
     badge: payload.badge || '/icon-192.png',
+    image: photoImage, // Exibe a foto diretamente no card da notificação push em plataformas suportadas (Android Chrome, Desktop Chrome/Edge)
+    actions: actions, // Ações unificadas no mesmo alerta (Ver Defeito / Resolver)
     data: {
       url: targetUrl,
+      image: photoImage,
+      photoUrl: photoImage,
       ...(payload.data || {})
     },
     vibrate: [200, 100, 200],
     tag: payload.tag || (payload.data && payload.data.eventId) || ('andradeagro-event-' + Date.now()),
-    renotify: true,
+    renotify: false, // Evita disparos duplicados para o mesmo evento de defeito
     requireInteraction: false
   };
 
   // Exibe a notificação do sistema operacional em foreground e background
   const notifyPromise = self.registration.showNotification(notificationTitle, notificationOptions).catch((err) => {
-    console.warn('[SW] Rich notification failed, trying basic notification:', err);
-    return self.registration.showNotification(notificationTitle, {
+    console.warn('[SW] Rich notification failed (possibly image format/network), trying basic notification:', err);
+    // Fallback sem imagem se a plataforma falhar ao renderizar rich image
+    const fallbackOptions = {
       body: notificationBody,
-      icon: '/icon-192.png'
-    });
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: notificationOptions.data,
+      tag: notificationOptions.tag
+    };
+    return self.registration.showNotification(notificationTitle, fallbackOptions);
   });
 
   // Notifica também abas/janelas do Andrade Agro que estejam abertas em primeiro plano
@@ -170,6 +181,7 @@ self.addEventListener('push', (event) => {
         type: 'ANDRADEAGRO_PUSH_EVENT',
         title: notificationTitle,
         body: notificationBody,
+        image: photoImage,
         data: notificationOptions.data
       });
     }
@@ -181,20 +193,25 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const targetUrl = (event.notification.data && event.notification.data.url)
-    ? event.notification.data.url
-    : '/';
+  const data = (event.notification && event.notification.data) || {};
+  let targetUrl = data.url || '/';
+
+  // Se o usuário clicou no botão "Resolver" diretamente na notificação
+  if (event.action === 'resolve_defect') {
+    targetUrl += (targetUrl.includes('?') ? '&' : '?') + 'action=resolve';
+  }
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If a tab is already open, focus it and notify client to navigate
+      // Se houver aba aberta, foca e navega nela
       for (const client of clientList) {
         if ('focus' in client) {
           try {
             client.postMessage({
               type: 'ANDRADEAGRO_NOTIFICATION_CLICK',
               url: targetUrl,
-              data: (event.notification.data) || {}
+              action: event.action || 'open',
+              data: { ...data, action: event.action || 'open' }
             });
           } catch (postErr) {
             console.warn('[SW] Could not postMessage to client:', postErr);
@@ -205,7 +222,7 @@ self.addEventListener('notificationclick', (event) => {
           return client.focus();
         }
       }
-      // Otherwise open a new window
+      // Caso contrário, abre uma nova janela com a rota direta
       if (clients.openWindow) {
         return clients.openWindow(targetUrl);
       }

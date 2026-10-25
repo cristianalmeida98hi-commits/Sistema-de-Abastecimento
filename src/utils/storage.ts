@@ -332,13 +332,18 @@ function setupFirestoreListeners() {
       notifyDataUpdated(false);
     }, (err) => {
       console.warn('[Firestore AuditLogs Connection]', err?.message || err);
-      onSnapshot(collection(db, 'audit_logs'), (snap) => {
-        const fallbackItems = snap.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
-        fallbackItems.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
-        cache.auditLogs = fallbackItems.slice(0, 150);
-        loadedCollections.add('audit_logs');
-        notifyDataUpdated(false);
-      });
+      try {
+        const unsubFallback = onSnapshot(collection(db, 'audit_logs'), (snap) => {
+          const fallbackItems = snap.docs.map(d => ({ ...d.data(), id: d.id } as AuditLog));
+          fallbackItems.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+          cache.auditLogs = fallbackItems.slice(0, 150);
+          loadedCollections.add('audit_logs');
+          notifyDataUpdated(false);
+        });
+        activeFirestoreUnsubscribers.push(unsubFallback);
+      } catch (fallbackErr) {
+        console.warn('[Firestore AuditLogs Fallback Connection]', fallbackErr);
+      }
     });
     activeFirestoreUnsubscribers.push(unsubAudit);
 
@@ -1046,6 +1051,29 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
 
   const cleanedLog = cleanUndefined(newLog);
 
+  // Validar consistência do horímetro ANTES de gravar no Firestore ou alterar o cache
+  const vehicles = getVehicles();
+  const targetVehicle = vehicles.find(v => v.id === log.equipmentId);
+  const isKm = targetVehicle?.category === 'VEICULO';
+
+  if (targetVehicle && !isKm && typeof log.hourmeterAtFueling === 'number') {
+    const currentUser = getCurrentUser();
+    const userRole = currentUser?.role || 'FUNCIONARIO';
+    const validation = validateHourmeterReading({
+      newHourmeter: log.hourmeterAtFueling,
+      equipment: targetVehicle,
+      previousLogs: cache.fuelLogs,
+      currentDate: log.dateTime,
+      userRole,
+      isAuthorizedCorrection: Boolean(log.isAuthorizedCorrection),
+      justification: log.correctionReason
+    });
+
+    if (validation.isBlocking) {
+      throw new Error(validation.message || 'Horímetro inconsistente para este equipamento.');
+    }
+  }
+
   // Optimistically update local memory cache
   cache.fuelLogs = [cleanedLog, ...cache.fuelLogs.filter(l => l.id !== cleanedLog.id)];
   notifyDataUpdated();
@@ -1083,29 +1111,6 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
         fuelLogId: cleanedLog.id,
         notes: `Abastecimento de ${log.liters}L em ${log.equipmentName} (${log.equipmentPlateOrCode}).`
       });
-    }
-
-    // Validar consistência do horímetro para máquinas e tratores
-    const vehicles = getVehicles();
-    const targetVehicle = vehicles.find(v => v.id === log.equipmentId);
-    const isKm = targetVehicle?.category === 'VEICULO';
-
-    if (targetVehicle && !isKm && typeof log.hourmeterAtFueling === 'number') {
-      const currentUser = getCurrentUser();
-      const userRole = currentUser?.role || 'FUNCIONARIO';
-      const validation = validateHourmeterReading({
-        newHourmeter: log.hourmeterAtFueling,
-        equipment: targetVehicle,
-        previousLogs: cache.fuelLogs,
-        currentDate: log.dateTime,
-        userRole,
-        isAuthorizedCorrection: Boolean(log.isAuthorizedCorrection),
-        justification: log.correctionReason
-      });
-
-      if (validation.isBlocking) {
-        throw new Error(validation.message || 'Horímetro inconsistente para este equipamento.');
-      }
     }
 
     // Update Equipment current KM / Hourmeter in Firestore
@@ -1617,14 +1622,23 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
 
   logAuditEvent('CRIAR', 'Problema', `Relatou problema em ${newIssue.equipmentName}: ${newIssue.description}`);
 
+  const primaryPhoto = (newIssue.photoUrls && newIssue.photoUrls.length > 0)
+    ? newIssue.photoUrls[0]
+    : (newIssue.photoUrl || undefined);
+
   // Dispatch real push notification to authorized users (ADMIN and MANUTENCAO)
   dispatchPushNotificationEvent({
     eventType: 'NEW_ISSUE',
     eventId: `issue-${cleaned.id}`,
+    issueId: cleaned.id,
     equipmentName: newIssue.equipmentName,
     equipmentId: newIssue.equipmentId,
-    customTitle: `⚠️ Problema Relatado: ${newIssue.equipmentName}`,
-    description: `Operador ${newIssue.reportedByUserName} relatou: "${newIssue.description || 'Problema informado pelo operador.'}"`
+    customTitle: `⚠️ Defeito: ${newIssue.equipmentName}`,
+    description: newIssue.description || 'Defeito informado pelo operador.',
+    reportedByUserId: newIssue.reportedByUserId,
+    reportedByUserName: newIssue.reportedByUserName,
+    photoUrl: primaryPhoto,
+    image: primaryPhoto
   }).catch(() => {});
 
   return cleaned;

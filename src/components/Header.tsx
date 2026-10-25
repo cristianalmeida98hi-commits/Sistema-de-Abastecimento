@@ -34,7 +34,23 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
   onToggleMobileMenu,
 }) => {
   const [showAlertsDropdown, setShowAlertsDropdown] = useState(false);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
   const unresolvedAlerts = React.useMemo(() => (alerts || []).filter(a => !a.resolved), [alerts]);
+
+  React.useEffect(() => {
+    if (!showAlertsDropdown) return;
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowAlertsDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [showAlertsDropdown]);
 
   return (
     <header className="sticky top-0 z-30 border-b transition-colors pt-safe min-h-[4rem] flex items-center bg-[#04281f]/95 border-emerald-900/60 text-[#f8fafc] backdrop-blur-md">
@@ -105,7 +121,7 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
             </button>
 
             {/* Notifications Bell */}
-            <div className="relative">
+            <div ref={dropdownRef} className="relative">
               <button
                 onClick={() => setShowAlertsDropdown(!showAlertsDropdown)}
                 className="w-10 h-10 sm:w-9 sm:h-9 min-h-[44px] sm:min-h-0 rounded-full border flex items-center justify-center relative transition-colors bg-emerald-900/40 border-emerald-800 text-emerald-200 hover:bg-emerald-800/60"

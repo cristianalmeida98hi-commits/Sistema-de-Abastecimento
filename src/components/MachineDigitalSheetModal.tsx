@@ -44,6 +44,8 @@ interface MachineDigitalSheetModalProps {
   onResolveIssue?: (issueId: string) => void;
   onUpdateVehicleStatus?: (vehicleId: string, newStatus: 'ATIVO' | 'EM_MANUTENCAO' | 'INATIVO') => void;
   initialTab?: 'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES';
+  initialIssueId?: string;
+  initialAction?: string;
   darkMode?: boolean;
 }
 
@@ -71,11 +73,13 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
   onResolveIssue,
   onUpdateVehicleStatus,
   initialTab = 'HISTORY',
+  initialIssueId,
+  initialAction,
   darkMode = true
 }) => {
   const canEdit = canEditSystemData(currentUser?.role);
 
-  const [activeTab, setActiveTab] = useState<'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES'>(initialIssueId ? 'ISSUES' : initialTab);
   const [isReportProblemOpen, setIsReportProblemOpen] = useState(false);
   const [selectedIssueForPhotos, setSelectedIssueForPhotos] = useState<MachineIssue | null>(null);
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
@@ -93,6 +97,18 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
     isIssueAlert?: boolean;
     isPreventiveAlert?: boolean;
   } | null>(null);
+
+  // Deep-link direto para a aba de Defeitos e acionamento de resolução quando solicitado
+  useEffect(() => {
+    if (initialIssueId) {
+      setActiveTab('ISSUES');
+      const cleanId = initialIssueId.startsWith('issue-') ? initialIssueId.slice(6) : initialIssueId;
+      const target = machineIssues.find(i => i.id === cleanId || i.id === initialIssueId);
+      if (target && initialAction === 'resolve' && target.status === 'ABERTO') {
+        setIssueToConfirmResolve(target);
+      }
+    }
+  }, [initialIssueId, initialAction, machineIssues]);
 
   // Synchronize internal form values whenever the active vehicle changes
   useEffect(() => {
@@ -189,20 +205,30 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
     return machineFuelLogs.filter(f => f.dateTime.startsWith(currentMonth));
   }, [machineFuelLogs, currentMonth]);
 
-  const litersConsumedMonth = useMemo(() => {
-    return monthFuelLogs.reduce((sum, f) => sum + f.liters, 0);
-  }, [monthFuelLogs]);
-
-  const totalSpentMonth = useMemo(() => {
-    return monthFuelLogs.reduce((sum, f) => sum + f.totalValue, 0);
+  const { litersConsumedMonth, totalSpentMonth } = useMemo(() => {
+    let liters = 0;
+    let spent = 0;
+    for (let i = 0; i < monthFuelLogs.length; i++) {
+      liters += monthFuelLogs[i].liters || 0;
+      spent += monthFuelLogs[i].totalValue || 0;
+    }
+    return { litersConsumedMonth: liters, totalSpentMonth: spent };
   }, [monthFuelLogs]);
 
   const accumulatedFuelCost = useMemo(() => {
-    return machineFuelLogs.reduce((sum, f) => sum + (f.totalValue || 0), 0);
+    let sum = 0;
+    for (let i = 0; i < machineFuelLogs.length; i++) {
+      sum += machineFuelLogs[i].totalValue || 0;
+    }
+    return sum;
   }, [machineFuelLogs]);
 
   const accumulatedMaintenanceCost = useMemo(() => {
-    return machineMaintenanceLogs.reduce((sum, m) => sum + (m.cost || 0), 0);
+    let sum = 0;
+    for (let i = 0; i < machineMaintenanceLogs.length; i++) {
+      sum += machineMaintenanceLogs[i].cost || 0;
+    }
+    return sum;
   }, [machineMaintenanceLogs]);
 
   const totalAccumulatedCost = accumulatedFuelCost + accumulatedMaintenanceCost;
@@ -2427,22 +2453,31 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                     const isAutoResolvedByOil = isOilIssue && oilStatus.status === 'EM_DIA';
                     const isEffectivelyOpen = iss.status === 'ABERTO' && !isAutoResolvedByOil;
 
+                    const isTargetIssue = Boolean(initialIssueId && (iss.id === initialIssueId || `issue-${iss.id}` === initialIssueId || initialIssueId.includes(iss.id)));
+
                     return (
                       <div
                         key={iss.id}
-                        className={`p-4 rounded-2xl border text-xs space-y-2.5 ${
-                          isEffectivelyOpen 
-                            ? 'bg-red-500/10 border-red-500/30 text-slate-900 dark:text-slate-100'
-                            : 'bg-emerald-500/10 border-emerald-500/30 text-slate-900 dark:text-slate-100'
+                        className={`p-4 rounded-2xl border text-xs space-y-3 transition-all duration-300 ${
+                          isTargetIssue
+                            ? 'ring-2 ring-amber-400 bg-amber-500/10 border-amber-400 shadow-md'
+                            : isEffectivelyOpen 
+                              ? 'bg-red-500/10 border-red-500/30 text-slate-900 dark:text-slate-100'
+                              : 'bg-emerald-500/10 border-emerald-500/30 text-slate-900 dark:text-slate-100'
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className={`px-2 py-0.5 rounded-md font-black text-[9px] uppercase ${
                               isEffectivelyOpen ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
                             }`}>
                               {isAutoResolvedByOil ? 'RESOLVIDO (TROCA DE ÓLEO CONCLUÍDA)' : iss.status}
                             </span>
+                            {isTargetIssue && (
+                              <span className="px-2 py-0.5 rounded-md font-extrabold text-[9px] bg-amber-400 text-slate-950 flex items-center gap-1 animate-pulse">
+                                🔔 Defeito da Notificação
+                              </span>
+                            )}
                             <span className="font-bold text-slate-600 dark:text-emerald-300">
                               Relatado por {iss.reportedByUserName}
                             </span>
@@ -2453,11 +2488,11 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                           </span>
                         </div>
 
-                        <p className="font-medium text-slate-800 dark:text-slate-200">
+                        <p className="font-medium text-slate-800 dark:text-slate-200 leading-relaxed text-sm">
                           "{iss.description}"
                         </p>
 
-                        {/* Regra 8: Indicador leve de foto anexada (não carregar todas as fotos na listagem geral) */}
+                        {/* Exibição direta da foto no card sem exigir clique prévio para visualizá-la */}
                         {(() => {
                           const photos = iss.photoUrls && iss.photoUrls.length > 0 
                             ? iss.photoUrls 
@@ -2465,17 +2500,43 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                           if (photos.length === 0) return null;
 
                           return (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedIssueForPhotos(iss);
-                                setActivePhotoIndex(0);
-                              }}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 active:scale-95 cursor-pointer"
-                            >
-                              <Camera className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                              <span>{photos.length > 1 ? `📷 ${photos.length} Fotos Anexadas` : '📷 Foto Anexada'}</span>
-                            </button>
+                            <div className="pt-1 flex flex-wrap items-center gap-3">
+                              <div
+                                onClick={() => {
+                                  setSelectedIssueForPhotos(iss);
+                                  setActivePhotoIndex(0);
+                                }}
+                                className="relative group cursor-pointer"
+                                title="Clique para ampliar a foto do defeito"
+                              >
+                                <img
+                                  src={photos[0]}
+                                  alt="Foto do defeito"
+                                  className="w-24 h-24 sm:w-28 sm:h-28 object-cover rounded-2xl border-2 border-emerald-600/50 shadow-sm transition-transform group-hover:scale-105"
+                                  loading="lazy"
+                                />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center text-white text-[11px] font-bold">
+                                  🔍 Ampliar
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <span className="text-[11px] font-bold text-emerald-400 block">
+                                  {photos.length > 1 ? `📷 ${photos.length} fotos anexadas` : '📷 Foto anexada pelo operador'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedIssueForPhotos(iss);
+                                    setActivePhotoIndex(0);
+                                  }}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold transition-all bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 active:scale-95 cursor-pointer"
+                                >
+                                  <Camera className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                  <span>{photos.length > 1 ? `Ver Todas as ${photos.length} Fotos` : 'Ampliar em Tela Cheia'}</span>
+                                </button>
+                              </div>
+                            </div>
                           );
                         })()}
 

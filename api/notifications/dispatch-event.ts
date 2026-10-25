@@ -14,7 +14,20 @@ export default async function handler(req: any, res: any) {
 
   try {
     const body = await parseRequestBody(req);
-    const { eventType, eventId, equipmentName, description, equipmentId, targetUserId, customTitle } = body;
+    const { 
+      eventType, 
+      eventId, 
+      equipmentName, 
+      description, 
+      equipmentId, 
+      targetUserId, 
+      customTitle,
+      photoUrl,
+      image,
+      issueId,
+      reportedByUserId,
+      reportedByUserName
+    } = body;
 
     if (!eventType || !eventId) {
       return sendJson(res, 400, { success: false, error: 'eventType e eventId são obrigatórios' });
@@ -27,7 +40,12 @@ export default async function handler(req: any, res: any) {
       description: description || 'Evento registrado.',
       equipmentId,
       targetUserId,
-      customTitle
+      customTitle,
+      photoUrl,
+      image,
+      issueId,
+      reportedByUserId,
+      reportedByUserName
     });
 
     return sendJson(res, 200, result);

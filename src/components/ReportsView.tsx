@@ -78,11 +78,6 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
   // RESUMO GERENCIAL COMPLETO (Calculado sobre os registros reais filtrados)
   const managerialSummary = useMemo(() => {
     const totalCount = filteredLogs.length;
-    const totalLiters = filteredLogs.reduce((acc, l) => acc + (l.liters || 0), 0);
-    const totalCost = filteredLogs.reduce((acc, l) => acc + (l.totalValue || 0), 0);
-    const avgLiters = totalCount > 0 ? totalLiters / totalCount : 0;
-    const avgPricePerLiter = totalLiters > 0 ? totalCost / totalLiters : 0;
-
     if (totalCount === 0) {
       return {
         totalCount: 0,
@@ -98,6 +93,8 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
       };
     }
 
+    let totalLiters = 0;
+    let totalCost = 0;
     const eqMap = new Map<string, { name: string; code: string; liters: number; count: number }>();
     const opMap = new Map<string, { name: string; liters: number; count: number }>();
     const actMap = new Map<string, { name: string; liters: number; count: number }>();
@@ -106,6 +103,8 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
 
     filteredLogs.forEach(l => {
       const liters = l.liters || 0;
+      totalLiters += liters;
+      totalCost += (l.totalValue || 0);
 
       // Equipamento
       const eqKey = l.equipmentId || l.equipmentName || 'OUTRO';
@@ -145,6 +144,9 @@ export const ReportsViewComponent: React.FC<ReportsViewProps> = ({
     const sortedAct = Array.from(actMap.values()).sort((a, b) => b.liters - a.liters);
     const sortedOper = Array.from(operMap.values()).sort((a, b) => b.liters - a.liters);
     const sortedSec = Array.from(secMap.values()).sort((a, b) => b.liters - a.liters);
+
+    const avgLiters = totalCount > 0 ? totalLiters / totalCount : 0;
+    const avgPricePerLiter = totalLiters > 0 ? totalCost / totalLiters : 0;
 
     return {
       totalCount,

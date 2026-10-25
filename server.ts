@@ -328,9 +328,9 @@ async function startServer() {
     return Array.from(deviceMap.values());
   }
 
-  // UNIFIED DEVICE SELECTION: getActiveAuthorizedDevices
   async function getActiveAuthorizedDevices(options?: {
     targetUserId?: string;
+    excludeUserId?: string;
     directSubscription?: any;
     directUserName?: string;
     directUserRole?: string;
@@ -380,6 +380,8 @@ async function startServer() {
       .filter(d => {
         if (!isValidPushSubscription(d.subscription)) return false;
         if (options?.targetUserId && d.userId !== options.targetUserId) return false;
+        // Evita eco no próprio dispositivo do operador que registrou o defeito
+        if (options?.excludeUserId && d.userId === options.excludeUserId && d.userRole === 'FUNCIONARIO') return false;
         return true;
       });
 
@@ -439,6 +441,11 @@ async function startServer() {
     directSubscription?: any;
     directUserName?: string;
     directUserRole?: string;
+    photoUrl?: string;
+    image?: string;
+    issueId?: string;
+    reportedByUserId?: string;
+    reportedByUserName?: string;
   }) {
     const { 
       eventType, 
@@ -450,13 +457,21 @@ async function startServer() {
       customTitle,
       directSubscription,
       directUserName,
-      directUserRole
+      directUserRole,
+      photoUrl,
+      image,
+      issueId,
+      reportedByUserId,
+      reportedByUserName
     } = event;
 
-    // Deduplication check
+    // Deduplication check: normaliza eventId para evitar que 'issue-iss-123' e 'iss-123' gerem duas notificações
+    const cleanIssueId = issueId || (eventId.startsWith('issue-') ? eventId.slice(6) : eventId);
+    const dedupKey = eventType === 'NEW_ISSUE' ? `issue-${cleanIssueId}` : eventId;
+
     let processedList: string[] = serverDb['andradeagro_processed_push_events'] || [];
-    if (processedList.includes(eventId)) {
-      console.log(`[Push Notification] Event ${eventId} already processed. Deduplicating.`);
+    if (processedList.includes(dedupKey) || processedList.includes(eventId)) {
+      console.log(`[Push Notification] Event ${dedupKey} already processed. Deduplicating.`);
       return {
         ok: false,
         success: false,
@@ -474,19 +489,22 @@ async function startServer() {
       };
     }
 
-    processedList.push(eventId);
+    processedList.push(dedupKey);
+    if (eventId !== dedupKey) processedList.push(eventId);
     if (processedList.length > 500) {
       processedList = processedList.slice(-500);
     }
     serverDb['andradeagro_processed_push_events'] = processedList;
     saveDatabase();
 
+    const effectivePhoto = photoUrl || image || undefined;
     let title = customTitle || '⚠️ Notificação AndradeAgro';
     let url = '/';
 
     if (eventType === 'NEW_ISSUE') {
-      title = customTitle || '⚠️ Novo problema registrado';
-      url = `/?tab=alerts&issueId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
+      title = customTitle || `⚠️ Defeito: ${equipmentName}`;
+      // Deep link direto para a ficha técnica da máquina na aba de Defeitos com o item selecionado
+      url = `/?tab=fleet&equipmentId=${encodeURIComponent(equipmentId || '')}&sheetTab=ISSUES&issueId=${encodeURIComponent(cleanIssueId)}`;
     } else if (eventType === 'NEW_MAINTENANCE') {
       title = customTitle || '🔧 Nova manutenção registrada';
       url = `/?tab=maintenance&maintenanceId=${encodeURIComponent(eventId)}&equipmentId=${encodeURIComponent(equipmentId || '')}`;
@@ -498,32 +516,52 @@ async function startServer() {
       url = '/?tab=settings';
     }
 
-    const notificationBody = eventType === 'TEST' 
-      ? (description || 'Notificações Push funcionando.')
-      : eventType === 'OIL_CHANGE_DUE'
-        ? (description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`)
-        : `${equipmentName}\n${description}`.trim();
+    // Montagem da descrição clara e legível
+    let notificationBody = '';
+    if (eventType === 'NEW_ISSUE') {
+      const photoTag = effectivePhoto ? ' • 📷 Foto anexada' : '';
+      const reporterTag = reportedByUserName ? `\n• Relatado por: ${reportedByUserName}` : '';
+      notificationBody = `${equipmentName}\n"${description}"${reporterTag}${photoTag}`.trim();
+    } else if (eventType === 'TEST') {
+      notificationBody = description || 'Notificações Push funcionando.';
+    } else if (eventType === 'OIL_CHANGE_DUE') {
+      notificationBody = description || `O veículo ${equipmentName} precisa de atenção para troca de óleo.`;
+    } else {
+      notificationBody = `${equipmentName}\n${description}`.trim();
+    }
 
+    // Payload compatível com navegadores modernos (rich image, deduplication tag e actions)
     const payload = JSON.stringify({
       title,
       body: notificationBody,
       icon: '/icon-192.png',
       badge: '/icon-192.png',
-      tag: `andradeagro-${eventType.toLowerCase()}-${eventId}`,
+      image: effectivePhoto,
+      tag: `andradeagro-${eventType.toLowerCase()}-${cleanIssueId}`,
+      renotify: false,
+      actions: eventType === 'NEW_ISSUE' ? [
+        { action: 'open_defect', title: '🔍 Ver Defeito e Foto' },
+        { action: 'resolve_defect', title: '✅ Resolver' }
+      ] : undefined,
       data: {
         url,
-        eventId,
+        eventId: dedupKey,
         eventType,
         equipmentId: equipmentId || '',
+        issueId: cleanIssueId,
+        image: effectivePhoto,
+        photoUrl: effectivePhoto,
+        reportedByUserName,
         timestamp: new Date().toISOString()
       }
     });
 
-    console.log(`[Push Notification] [1. Início] Preparando envio de ${eventType} (ID: ${eventId})`);
+    console.log(`[Push Notification] [1. Início] Preparando envio de ${eventType} (ID: ${dedupKey})`);
 
-    // Fetch active authorized devices using the unified function
+    // Fetch active authorized devices (exclui o próprio operador que reportou para evitar eco no mesmo aparelho)
     const devicesResult = await getActiveAuthorizedDevices({
       targetUserId: eventType !== 'TEST' ? targetUserId : undefined,
+      excludeUserId: reportedByUserId,
       directSubscription,
       directUserName,
       directUserRole
@@ -757,7 +795,20 @@ async function startServer() {
 
   app.post('/api/notifications/dispatch-event', async (req, res) => {
     try {
-      const { eventType, eventId, equipmentName, description, equipmentId, targetUserId, customTitle } = req.body;
+      const { 
+        eventType, 
+        eventId, 
+        equipmentName, 
+        description, 
+        equipmentId, 
+        targetUserId, 
+        customTitle,
+        photoUrl,
+        image,
+        issueId,
+        reportedByUserId,
+        reportedByUserName
+      } = req.body;
       if (!eventType || !eventId) {
         return res.status(400).json({ ok: false, error: 'eventType e eventId são obrigatórios' });
       }
@@ -769,7 +820,12 @@ async function startServer() {
         description: description || 'Evento registrado no sistema.',
         equipmentId,
         targetUserId,
-        customTitle
+        customTitle,
+        photoUrl: photoUrl || image,
+        image: image || photoUrl,
+        issueId,
+        reportedByUserId,
+        reportedByUserName
       });
 
       res.json(result);
@@ -1278,11 +1334,19 @@ async function startServer() {
     saveDatabase();
 
     if (isNew) {
+      const issueId = issue.id || `iss-${Date.now()}`;
+      const photo = (issue.photoUrls && issue.photoUrls.length > 0) ? issue.photoUrls[0] : (issue.photoUrl || undefined);
       dispatchPushToAuthorizedUsers({
         eventType: 'NEW_ISSUE',
-        eventId: issue.id || `iss-${Date.now()}`,
+        eventId: `issue-${issueId}`,
+        issueId,
         equipmentName: issue.equipmentName || 'Máquina Agrícola',
-        description: issue.description || 'Problema reportado.'
+        equipmentId: issue.equipmentId,
+        description: issue.description || 'Problema reportado.',
+        photoUrl: photo,
+        image: photo,
+        reportedByUserId: issue.reportedByUserId,
+        reportedByUserName: issue.reportedByUserName
       }).catch(err => console.error('[Push Notification] Error on issue trigger:', err));
     }
 

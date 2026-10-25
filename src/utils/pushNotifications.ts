@@ -977,7 +977,13 @@ export async function dispatchPushNotificationEvent(payload: PushNotificationPay
         equipmentName: payload.equipmentName,
         description: payload.description,
         equipmentId: payload.equipmentId,
-        customTitle: payload.customTitle
+        customTitle: payload.customTitle,
+        photoUrl: payload.photoUrl || payload.image,
+        image: payload.image || payload.photoUrl,
+        issueId: payload.issueId,
+        reportedByUserId: payload.reportedByUserId,
+        reportedByUserName: payload.reportedByUserName,
+        url: payload.url
       })
     });
 

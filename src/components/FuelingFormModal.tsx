@@ -235,6 +235,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!selectedEquipment || !selectedStation || numLiters <= 0) {
       alert('Por favor, selecione o equipamento e informe a quantidade de litros abastecidos.');
       return;

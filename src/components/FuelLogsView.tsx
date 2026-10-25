@@ -99,10 +99,20 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
     selectedDriverId, selectedStationId, selectedFuelType, selectedOperationType, startDate, endDate
   ]);
 
-  // Aggregates
-  const totalLiters = filteredLogs.reduce((acc, l) => acc + l.liters, 0);
-  const totalCost = filteredLogs.reduce((acc, l) => acc + l.totalValue, 0);
-  const avgPrice = totalLiters > 0 ? totalCost / totalLiters : 0;
+  // Aggregates memoized in single pass
+  const { totalLiters, totalCost, avgPrice } = useMemo(() => {
+    let liters = 0;
+    let cost = 0;
+    for (let i = 0; i < filteredLogs.length; i++) {
+      liters += filteredLogs[i].liters || 0;
+      cost += filteredLogs[i].totalValue || 0;
+    }
+    return {
+      totalLiters: liters,
+      totalCost: cost,
+      avgPrice: liters > 0 ? cost / liters : 0
+    };
+  }, [filteredLogs]);
 
   // Check if user can edit this log - STRICT PERMISSION: only ADMINISTRADOR and MANUTENCAO
   const canEditLog = (log?: FuelLog | null): boolean => {

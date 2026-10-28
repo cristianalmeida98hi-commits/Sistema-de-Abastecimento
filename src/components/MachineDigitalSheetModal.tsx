@@ -78,6 +78,7 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
   darkMode = true
 }) => {
   const canEdit = canEditSystemData(currentUser?.role);
+  const canManageTimeline = currentUser?.role === 'MANUTENCAO';
 
   const [activeTab, setActiveTab] = useState<'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES'>(initialIssueId ? 'ISSUES' : initialTab);
   const [isReportProblemOpen, setIsReportProblemOpen] = useState(false);
@@ -96,6 +97,7 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
     isOilAlert?: boolean;
     isIssueAlert?: boolean;
     isPreventiveAlert?: boolean;
+    photoUrl?: string;
   } | null>(null);
 
   // Deep-link direto para a aba de Defeitos e acionamento de resolução quando solicitado
@@ -331,6 +333,7 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
       isOilAlert?: boolean;
       isIssueAlert?: boolean;
       isPreventiveAlert?: boolean;
+      photoUrl?: string;
     }[] = [];
 
     // 1. Check real-time oil change status directly for this vehicle
@@ -365,6 +368,11 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
       );
 
       vehicleSpecificAlerts.forEach(alt => {
+        // Se for alerta de MACHINE_ISSUE, não duplicar: os defeitos em aberto são apresentados de forma rica e unificada abaixo
+        if (alt.type === 'MACHINE_ISSUE' || alt.id.startsWith('alt-iss-')) {
+          return;
+        }
+
         const isOilType = alt.type === 'OIL_CHANGE_DUE' || 
                           (alt.title && (alt.title.toLowerCase().includes('óleo') || alt.title.toLowerCase().includes('oleo')));
         // If it's an oil alert and vehicle oil is already in day, ignore stale/residual alert
@@ -431,14 +439,28 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
       }
     });
 
-    // 4. Unresolved issues strictly for THIS vehicle
-    if (openIssues.length > 0) {
+    // 4. Defeitos relatados estritamente para ESTA máquina (Unificado com foto e sem duplicidade de alertas)
+    if (openIssues.length === 1) {
+      const singleIssue = openIssues[0];
+      const photo = singleIssue.photoUrls?.[0] || singleIssue.photoUrl;
+      list.push({
+        id: `issue-${singleIssue.id}`,
+        title: `⚠️ Defeito Relatado: ${vehicle.model}`,
+        desc: `Operador ${singleIssue.reportedByUserName} relatou: "${singleIssue.description}" • ${formatDateBR(singleIssue.dateTime)}`,
+        type: 'RED',
+        isIssueAlert: true,
+        photoUrl: photo
+      });
+    } else if (openIssues.length > 1) {
+      const firstWithPhoto = openIssues.find(i => (i.photoUrls && i.photoUrls.length > 0) || i.photoUrl);
+      const photo = firstWithPhoto?.photoUrls?.[0] || firstWithPhoto?.photoUrl;
       list.push({
         id: `issues-${vehicle.id}`,
-        title: `🚨 ${openIssues.length} Problema(s) Pendente(s)`,
-        desc: `Defeitos informados por operadores aguardando resolução na oficina.`,
+        title: `🚨 ${openIssues.length} Defeitos Relatados: ${vehicle.model}`,
+        desc: openIssues.map(i => `${i.reportedByUserName}: "${i.description}"`).join(' • '),
         type: 'RED',
-        isIssueAlert: true
+        isIssueAlert: true,
+        photoUrl: photo
       });
     }
 
@@ -618,9 +640,12 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
     setIsMntFormOpen(true);
   };
 
-  // Open form to edit maintenance
+  // Open form to edit maintenance (Restrito estritamente ao perfil MANUTENCAO)
   const handleOpenEditMaintenance = (m: MaintenanceLog) => {
-    if (!canEdit) return;
+    if (!canManageTimeline) {
+      alert('Acesso negado: Somente o perfil MANUTENÇÃO possui permissão para editar registros da linha do tempo.');
+      return;
+    }
     setEditingMntId(m.id);
     setMntType(m.type);
     setMntTitle(m.title);
@@ -645,6 +670,10 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
     const safeDateTime = createTimestampForDateSaoPaulo(mntDate);
 
     if (editingMntId) {
+      if (!canManageTimeline) {
+        alert('Acesso negado: Somente o perfil MANUTENÇÃO possui permissão para alterar registros da linha do tempo.');
+        return;
+      }
       if (onUpdateMaintenance) {
         onUpdateMaintenance(editingMntId, {
           type: mntType,
@@ -695,7 +724,10 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
   };
 
   const handleDeleteMnt = (id: string) => {
-    if (!canEdit) return;
+    if (!canManageTimeline) {
+      alert('Acesso negado: Somente o perfil MANUTENÇÃO possui permissão para excluir registros da linha do tempo.');
+      return;
+    }
     if (confirm('Tem certeza que deseja excluir este registro de manutenção?')) {
       if (onDeleteMaintenance) {
         onDeleteMaintenance(id);
@@ -1070,11 +1102,21 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                   role="button"
                   title="Clique para ver detalhes do alerta desta máquina"
                 >
-                  <div className="flex items-start gap-3">
-                    <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="font-extrabold block">{alt.title}</strong>
-                      <span className="text-[11px] opacity-90">{alt.desc}</span>
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-amber-400" />
+                    <div className="flex-1 min-w-0">
+                      <strong className="font-extrabold block text-slate-100">{alt.title}</strong>
+                      <span className="text-[11px] opacity-90 block text-slate-200">{alt.desc}</span>
+                      {alt.photoUrl && (
+                        <div className="mt-2 relative inline-block">
+                          <img
+                            src={alt.photoUrl}
+                            alt="Foto do defeito relatado"
+                            className="w-32 h-24 sm:w-44 sm:h-28 object-cover rounded-xl border border-red-500/50 shadow-sm"
+                            loading="lazy"
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="shrink-0 flex items-center gap-1 text-[11px] font-bold opacity-80 pl-2">
@@ -2080,8 +2122,8 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                               🗓️ {log.dateTime ? formatDateTimeBR(log.dateTime) : formatDateBR(log.date)}
                             </span>
 
-                            {/* Maintenance role controls */}
-                            {canEdit && (
+                            {/* Maintenance role controls - Exclusivo perfil MANUTENCAO */}
+                            {canManageTimeline && (
                               <div className="flex items-center gap-1 ml-2">
                                 <button
                                   onClick={() => handleOpenEditMaintenance(log)}
@@ -2189,6 +2231,28 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                         {item.photoUrl && (
                           <div className="mt-2 w-24 h-20 rounded-xl overflow-hidden border">
                             <img src={item.photoUrl} alt="Anexo" className="w-full h-full object-cover" />
+                          </div>
+                        )}
+
+                        {/* Controles de edição e exclusão na Linha do Tempo: estritamente exclusivos para perfil MANUTENCAO */}
+                        {item.type === 'MAINTENANCE' && canManageTimeline && (
+                          <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-slate-200/60 dark:border-emerald-900">
+                            <button
+                              onClick={() => handleOpenEditMaintenance(item.rawObj as MaintenanceLog)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-emerald-800 hover:bg-slate-300 text-slate-700 dark:text-emerald-100 flex items-center gap-1 text-[10px] font-bold shadow-xs active:scale-95 transition-all"
+                              title="Editar registro da linha do tempo"
+                            >
+                              <Edit className="w-3 h-3 text-[#FACC15]" />
+                              <span>Editar</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteMnt((item.rawObj as MaintenanceLog).id)}
+                              className="px-2.5 py-1 rounded-lg bg-red-100 dark:bg-red-950/80 hover:bg-red-200 text-red-600 dark:text-red-300 flex items-center gap-1 text-[10px] font-bold shadow-xs active:scale-95 transition-all"
+                              title="Excluir registro da linha do tempo"
+                            >
+                              <Trash2 className="w-3 h-3 text-red-400" />
+                              <span>Excluir</span>
+                            </button>
                           </div>
                         )}
                       </div>

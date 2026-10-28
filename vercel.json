@@ -10,5 +10,11 @@
       "source": "/((?!api/|api$).*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/cleanup-audit-logs",
+      "schedule": "0 3 * * *"
+    }
   ]
 }

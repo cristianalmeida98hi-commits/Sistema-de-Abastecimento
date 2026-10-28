@@ -36,7 +36,8 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
   onOpenDigitalSheet,
   onClearHighlight
 }) => {
-  const canEdit = canEditSystemData(currentUser.role);
+  const canManageMaintenance = currentUser.role === 'MANUTENCAO';
+  const canAdd = canEditSystemData(currentUser.role);
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -121,7 +122,10 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
   };
 
   const handleOpenEdit = (m: MaintenanceLog) => {
-    if (!canEdit) return;
+    if (!canManageMaintenance) {
+      alert('Acesso negado: Somente usuários com perfil de MANUTENÇÃO possuem permissão para editar registros de manutenção.');
+      return;
+    }
     const eq = vehicles.find(v => v.id === m.equipmentId);
     const isKm = eq?.category === 'VEICULO' || eq?.maintenanceControlType === 'QUILOMETRAGEM';
     const interval = isKm 
@@ -144,8 +148,16 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
   };
 
   const handleDelete = (id: string) => {
-    if (!canEdit) return;
-    if (confirm('Tem certeza que deseja excluir esta manutenção?')) {
+    if (!canManageMaintenance) {
+      alert('Acesso negado: Somente usuários com perfil de MANUTENÇÃO possuem permissão para excluir registros de manutenção.');
+      return;
+    }
+    const target = maintenanceLogs.find(m => m.id === id);
+    const msg = target 
+      ? `Tem certeza que deseja excluir o registro de manutenção "${target.title}" do equipamento ${target.equipmentName} (${target.equipmentPlateOrCode})?\n\nEsta ação é definitiva e recalibrará os contadores se for uma troca de óleo.`
+      : 'Tem certeza que deseja excluir este registro de manutenção?';
+
+    if (confirm(msg)) {
       if (onDeleteMaintenance) {
         onDeleteMaintenance(id);
       }
@@ -178,6 +190,10 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (editingId && !canManageMaintenance) {
+      alert('Acesso negado: Somente usuários com perfil de MANUTENÇÃO possuem permissão para alterar registros de manutenção.');
+      return;
+    }
     const eq = vehicles.find(v => v.id === equipmentId);
     if (!eq) return;
 
@@ -239,7 +255,7 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
           </p>
         </div>
 
-        {canEdit && (
+        {canAdd && (
           <button
             onClick={handleOpenAdd}
             className="bg-[#064E3B] hover:bg-[#043d2e] text-[#FACC15] font-black text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center gap-2 self-start sm:self-auto transition-transform active:scale-95"
@@ -401,13 +417,13 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
                       </button>
                     )}
 
-                    {/* Maintenance role Controls */}
-                    {canEdit && (
+                    {/* Maintenance role Controls - Exclusivo Perfil MANUTENCAO */}
+                    {canManageMaintenance && (
                       <div className="flex items-center gap-1 pl-2 border-l border-emerald-800/20">
                         <button
                           onClick={() => handleOpenEdit(m)}
                           className="p-1.5 rounded-lg bg-emerald-800/20 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-800/40 transition-colors"
-                          title="Editar Manutenção"
+                          title="Editar Manutenção (Exclusivo Manutenção)"
                         >
                           <Edit className="w-3.5 h-3.5" />
                         </button>
@@ -415,7 +431,7 @@ export const MaintenanceViewComponent: React.FC<MaintenanceViewProps> = ({
                           <button
                             onClick={() => handleDelete(m.id)}
                             className="p-1.5 rounded-lg bg-red-500/20 text-red-700 dark:text-red-300 hover:bg-red-500/40 transition-colors"
-                            title="Excluir Manutenção"
+                            title="Excluir Manutenção (Exclusivo Manutenção)"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>

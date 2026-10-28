@@ -16,6 +16,7 @@ import {
 import { validateHourmeterReading } from './src/utils/hourmeterValidation';
 import cloudinarySignatureHandler from './api/cloudinary/signature';
 import cloudinaryDeleteHandler from './api/cloudinary/delete';
+import cleanupAuditLogsHandler from './api/cron/cleanup-audit-logs';
 
 async function startServer() {
   const app = express();
@@ -1372,6 +1373,19 @@ async function startServer() {
   // CLOUDINARY API ROUTES
   app.post('/api/cloudinary/signature', (req, res) => cloudinarySignatureHandler(req, res));
   app.post('/api/cloudinary/delete', (req, res) => cloudinaryDeleteHandler(req, res));
+
+  // AUDIT LOGS RETENTION 90-DAY CRON ROUTE
+  app.all('/api/cron/cleanup-audit-logs', (req, res) => cleanupAuditLogsHandler(req, res));
+
+  // Daily automated audit log retention task (runs every 24 hours)
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  setInterval(() => {
+    console.log('[AndradeAgro Cron] Running daily audit log retention cleanup...');
+    cleanupAuditLogsHandler({ method: 'GET' } as any, {
+      setHeader: () => {},
+      status: () => ({ json: (data: any) => console.log('[AndradeAgro Cron Result]', data) })
+    } as any).catch(err => console.error('[AndradeAgro Cron Error]', err));
+  }, ONE_DAY_MS);
 
   // Strict catch-all for unhandled /api/* routes - ALWAYS return JSON 404, never HTML!
   app.all('/api/*', (req, res) => {

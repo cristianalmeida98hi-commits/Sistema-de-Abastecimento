@@ -360,6 +360,9 @@ function setupFirestoreListeners() {
     }, (err) => console.warn('[Firestore Settings Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubSettings);
 
+    // Verificação agendada da retenção de 90 dias de logs de auditoria (executa no máx. 1x a cada 24h)
+    maybeTriggerAuditLogAutoCleanup();
+
   } catch (err) {
     console.error('[Firestore init error]', err);
     if (cache.vehicles.length === 0 && cache.users.length === 0) {
@@ -1022,7 +1025,7 @@ export function getPreventiveItems(equipmentId?: string): PreventiveMaintenanceI
 export function logAuditEvent(action: AuditLog['action'], entity: string, details: string) {
   const user = getCurrentUser();
   const newLog: AuditLog = {
-    id: `aud-${Date.now()}`,
+    id: `aud-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     dateTime: new Date().toISOString(),
     userId: user?.id || 'sys',
     userName: user?.name || 'Sistema',
@@ -1031,6 +1034,90 @@ export function logAuditEvent(action: AuditLog['action'], entity: string, detail
     details
   };
   setDoc(doc(db, 'audit_logs', newLog.id), cleanUndefined(newLog)).catch(console.error);
+}
+
+/**
+ * Política de Retenção de 90 Dias para Logs de Login, Segurança e Auditoria.
+ * Exclui exclusivamente registros da coleção 'audit_logs' com mais de 90 dias.
+ * NUNCA afeta manutenções, abastecimentos, veículos ou qualquer dado operacional.
+ * É estritamente idempotente.
+ */
+export async function cleanupAuditLogsOlderThan90Days(triggeredBy: string = 'automática'): Promise<{
+  deletedCount: number;
+  cutoffDateISO: string;
+}> {
+  const RETENTION_DAYS = 90;
+  const cutoffTime = Date.now() - (RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const cutoffDateISO = new Date(cutoffTime).toISOString();
+
+  try {
+    const eligibleLogs = cache.auditLogs.filter(log => {
+      if (!log.dateTime) return false;
+      const logTime = new Date(log.dateTime).getTime();
+      return !isNaN(logTime) && logTime < cutoffTime;
+    });
+
+    if (eligibleLogs.length === 0) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('andradeagro_last_audit_cleanup', String(Date.now()));
+      }
+      return { deletedCount: 0, cutoffDateISO };
+    }
+
+    const deletedIds = new Set<string>();
+
+    for (const log of eligibleLogs) {
+      try {
+        await deleteDoc(doc(db, 'audit_logs', log.id));
+        deletedIds.add(log.id);
+      } catch (err) {
+        console.warn(`[Audit Cleanup] Falha ao excluir log ${log.id}:`, err);
+      }
+    }
+
+    const count = deletedIds.size;
+    if (count > 0) {
+      cache.auditLogs = cache.auditLogs.filter(l => !deletedIds.has(l.id));
+      notifyDataUpdated(false);
+
+      const caller = getCurrentUser();
+      const callerName = caller?.name || triggeredBy;
+      logAuditEvent(
+        'CONFIGURACAO',
+        'Auditoria',
+        `Política de retenção de 90 dias executada (${triggeredBy} por ${callerName}): ${count} registro(s) anterior(es) a ${new Date(cutoffTime).toLocaleDateString('pt-BR')} foram removidos.`
+      );
+    }
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('andradeagro_last_audit_cleanup', String(Date.now()));
+    }
+
+    return { deletedCount: count, cutoffDateISO };
+  } catch (error) {
+    console.error('[Audit Cleanup Error]', error);
+    return { deletedCount: 0, cutoffDateISO };
+  }
+}
+
+/**
+ * Verificação periódica defensiva de limpeza de logs.
+ * Executa no máximo uma vez a cada 24 horas no cliente.
+ */
+export function maybeTriggerAuditLogAutoCleanup() {
+  if (typeof window === 'undefined') return;
+  try {
+    const lastRunStr = localStorage.getItem('andradeagro_last_audit_cleanup');
+    const lastRun = lastRunStr ? Number(lastRunStr) : 0;
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    if (Date.now() - lastRun > ONE_DAY_MS) {
+      setTimeout(() => {
+        cleanupAuditLogsOlderThan90Days('rotina automática diária').catch(() => {});
+      }, 5000);
+    }
+  } catch (err) {
+    console.warn('[Audit Auto-Cleanup Check]', err);
+  }
 }
 
 // Mutators - All updating Firebase Firestore directly
@@ -1554,6 +1641,16 @@ export async function addMaintenance(m: Omit<MaintenanceLog, 'id'>): Promise<Mai
 }
 
 export async function updateMaintenance(id: string, fields: Partial<MaintenanceLog>): Promise<void> {
+  const caller = getCurrentUser();
+  if (!caller || caller.role !== 'MANUTENCAO') {
+    throw new Error('Acesso negado: Somente usuários com perfil de MANUTENÇÃO possuem autorização para alterar registros de manutenção.');
+  }
+
+  const existingMnt = cache.maintenanceLogs.find(m => m.id === id);
+  if (!existingMnt) {
+    throw new Error('Registro de manutenção não encontrado.');
+  }
+
   const toUpdate: Partial<MaintenanceLog> = { ...fields };
   if (toUpdate.date && !toUpdate.dateTime) {
     toUpdate.dateTime = createTimestampForDateSaoPaulo(toUpdate.date);
@@ -1563,16 +1660,108 @@ export async function updateMaintenance(id: string, fields: Partial<MaintenanceL
   notifyDataUpdated();
 
   await updateDoc(doc(db, 'maintenance_logs', id), cleaned);
-  logAuditEvent('EDITAR', 'Manutenção', `Atualizou registro de manutenção ID ${id}.`);
+
+  // Se for uma troca de óleo e o horímetro/KM de serviço foi atualizado, sincronizar com o veículo
+  const effectiveType = toUpdate.type || existingMnt.type;
+  if (effectiveType === 'TROCA_OLEO' && toUpdate.kmOrHourAtService !== undefined) {
+    const targetVehicle = getVehicles().find(v => v.id === (toUpdate.equipmentId || existingMnt.equipmentId));
+    if (targetVehicle) {
+      const isKm = targetVehicle.category === 'VEICULO' || targetVehicle.maintenanceControlType === 'QUILOMETRAGEM';
+      const interval = isKm 
+        ? (Number(targetVehicle.oilChangeIntervalKm) || Number(targetVehicle.maintenanceIntervalKm) || 10000)
+        : (Number(targetVehicle.oilChangeIntervalHours) || Number(targetVehicle.maintenanceIntervalHours) || 300);
+      const newMeter = Number(toUpdate.kmOrHourAtService);
+      const nextTarget = toUpdate.nextServiceKmOrHour && Number(toUpdate.nextServiceKmOrHour) > newMeter
+        ? Number(toUpdate.nextServiceKmOrHour)
+        : newMeter + interval;
+
+      const vehicleUpdates: Partial<Vehicle> = {
+        lastOilChangeDate: toUpdate.date || existingMnt.date
+      };
+      if (isKm) {
+        vehicleUpdates.lastOilChangeKm = newMeter;
+        vehicleUpdates.nextOilChangeKm = nextTarget;
+      } else {
+        vehicleUpdates.lastOilChangeHourmeter = newMeter;
+        vehicleUpdates.nextOilChangeHourmeter = nextTarget;
+      }
+      await updateVehicle(targetVehicle.id, vehicleUpdates);
+    }
+  }
+
+  logAuditEvent(
+    'EDITAR',
+    'Manutenção',
+    `Manutenção (${caller.name}) alterou o registro "${cleaned.title || existingMnt.title}" do equipamento ${existingMnt.equipmentName} (${existingMnt.equipmentPlateOrCode}).`
+  );
   checkAutomatedAlerts();
 }
 
 export async function deleteMaintenance(id: string): Promise<void> {
+  const caller = getCurrentUser();
+  if (!caller || caller.role !== 'MANUTENCAO') {
+    throw new Error('Acesso negado: Somente usuários com perfil de MANUTENÇÃO possuem autorização para excluir registros de manutenção.');
+  }
+
+  const targetMnt = cache.maintenanceLogs.find(m => m.id === id);
+  if (!targetMnt) {
+    console.warn(`[deleteMaintenance] Registro ${id} não encontrado no cache.`);
+    return;
+  }
+
+  // Remove do cache de manutenção
   cache.maintenanceLogs = cache.maintenanceLogs.filter(m => m.id !== id);
   notifyDataUpdated();
 
+  // Exclui do Firestore
   await deleteDoc(doc(db, 'maintenance_logs', id));
-  logAuditEvent('EXCLUIR', 'Manutenção', `Excluiu o registro de manutenção ID ${id}.`);
+
+  // Regra de integridade: Se a manutenção excluída for troca de óleo, recalibrar contadores do veículo com base na anterior válida
+  if (targetMnt.type === 'TROCA_OLEO' || targetMnt.title.toLowerCase().includes('óleo') || targetMnt.title.toLowerCase().includes('oleo')) {
+    const targetVehicle = getVehicles().find(v => v.id === targetMnt.equipmentId);
+    if (targetVehicle) {
+      const isKm = targetVehicle.category === 'VEICULO' || targetVehicle.maintenanceControlType === 'QUILOMETRAGEM';
+      const interval = isKm 
+        ? (Number(targetVehicle.oilChangeIntervalKm) || Number(targetVehicle.maintenanceIntervalKm) || 10000)
+        : (Number(targetVehicle.oilChangeIntervalHours) || Number(targetVehicle.maintenanceIntervalHours) || 300);
+
+      // Buscar outras trocas de óleo restantes para este equipamento
+      const remainingOilChanges = cache.maintenanceLogs
+        .filter(m => m.equipmentId === targetVehicle.id && (m.type === 'TROCA_OLEO' || m.title.toLowerCase().includes('óleo') || m.title.toLowerCase().includes('oleo')))
+        .sort((a, b) => (b.kmOrHourAtService || 0) - (a.kmOrHourAtService || 0));
+
+      if (remainingOilChanges.length > 0) {
+        // Encontrou troca de óleo anterior válida
+        const prev = remainingOilChanges[0];
+        const nextTarget = prev.nextServiceKmOrHour && prev.nextServiceKmOrHour > prev.kmOrHourAtService
+          ? prev.nextServiceKmOrHour
+          : prev.kmOrHourAtService + interval;
+
+        const vehicleUpdates: Partial<Vehicle> = {
+          lastOilChangeDate: prev.date,
+          lastMaintenanceDate: prev.date
+        };
+
+        if (isKm) {
+          vehicleUpdates.lastOilChangeKm = prev.kmOrHourAtService;
+          vehicleUpdates.nextOilChangeKm = nextTarget;
+        } else {
+          vehicleUpdates.lastOilChangeHourmeter = prev.kmOrHourAtService;
+          vehicleUpdates.nextOilChangeHourmeter = nextTarget;
+        }
+
+        await updateVehicle(targetVehicle.id, vehicleUpdates);
+      } else {
+        console.log(`[deleteMaintenance] Nenhuma troca de óleo restante para ${targetVehicle.model}. Mantendo integridade dos dados.`);
+      }
+    }
+  }
+
+  logAuditEvent(
+    'EXCLUIR',
+    'Manutenção',
+    `Manutenção (${caller.name}) excluiu o registro "${targetMnt.title}" (${targetMnt.type}) do equipamento ${targetMnt.equipmentName} (${targetMnt.equipmentPlateOrCode}) no horímetro/KM ${targetMnt.kmOrHourAtService}.`
+  );
   checkAutomatedAlerts();
 }
 
@@ -1589,18 +1778,26 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
   const cleaned = cleanUndefined(newIssue);
   cache.machineIssues = [cleaned, ...cache.machineIssues];
 
+  const primaryPhoto = (newIssue.photoUrls && newIssue.photoUrls.length > 0)
+    ? newIssue.photoUrls[0]
+    : (newIssue.photoUrl || undefined);
+
   const newAlert: SmartAlert = cleanUndefined({
-    id: `alt-iss-${Date.now()}`,
+    id: `alt-iss-${cleaned.id}`,
     type: 'MACHINE_ISSUE',
     severity: 'ALTA',
-    title: `Problema Relatado: ${newIssue.equipmentName}`,
+    title: `Defeito Relatado: ${newIssue.equipmentName}`,
     description: `Operador ${newIssue.reportedByUserName} relatou: "${newIssue.description}"`,
     equipmentId: newIssue.equipmentId,
     equipmentName: newIssue.equipmentName,
     date: currentDateBR,
     resolved: false,
     pushNotified: true,
-    pushNotifiedAt: new Date().toISOString()
+    pushNotifiedAt: new Date().toISOString(),
+    issueId: cleaned.id,
+    photoUrl: primaryPhoto,
+    photoUrls: newIssue.photoUrls,
+    operatorName: newIssue.reportedByUserName
   });
   cache.alerts = [newAlert, ...cache.alerts];
   notifyDataUpdated();
@@ -1621,10 +1818,6 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
   }
 
   logAuditEvent('CRIAR', 'Problema', `Relatou problema em ${newIssue.equipmentName}: ${newIssue.description}`);
-
-  const primaryPhoto = (newIssue.photoUrls && newIssue.photoUrls.length > 0)
-    ? newIssue.photoUrls[0]
-    : (newIssue.photoUrl || undefined);
 
   // Dispatch real push notification to authorized users (ADMIN and MANUTENCAO)
   dispatchPushNotificationEvent({
@@ -1679,6 +1872,29 @@ export async function resolveMachineIssue(issueId: string, notes?: string): Prom
 
   await updateDoc(doc(db, 'machine_issues', issueId), fields);
   logAuditEvent('EDITAR', 'Problema', `Resolveu o problema relatado ID ${issueId}`);
+
+  // Sincronizar e resolver alertas correspondentes ao defeito no cache e Firestore
+  const matchingAlerts = cache.alerts.filter(a => 
+    !a.resolved && (
+      a.issueId === issueId || 
+      a.id === `alt-iss-${issueId}` || 
+      (a.type === 'MACHINE_ISSUE' && targetIssue && a.equipmentId === targetIssue.equipmentId)
+    )
+  );
+  for (const alt of matchingAlerts) {
+    alt.resolved = true;
+    alt.resolvedAt = new Date().toISOString();
+    alt.resolvedBy = user?.name || 'Oficina';
+    try {
+      await updateDoc(doc(db, 'alerts', alt.id), {
+        resolved: true,
+        resolvedAt: alt.resolvedAt,
+        resolvedBy: alt.resolvedBy
+      });
+    } catch (e) {
+      console.warn('[resolveMachineIssue] Could not update alert in Firestore:', e);
+    }
+  }
 }
 
 // Preventive Maintenance Mutators
@@ -1884,6 +2100,21 @@ export async function resolveAlert(id: string, resolvedByName?: string): Promise
   }
   if (targetAlert?.type === 'SUSPICIOUS_FUEL' && targetAlert?.id) {
     clearPushEventDeduplication(targetAlert.id).catch(() => {});
+  }
+
+  // Se o alerta for de MACHINE_ISSUE, sincronizar e resolver o defeito em machine_issues
+  if (targetAlert?.type === 'MACHINE_ISSUE' || targetAlert?.issueId) {
+    const matchingIssue = cache.machineIssues.find(i => 
+      i.status === 'ABERTO' && (
+        (targetAlert.issueId && i.id === targetAlert.issueId) ||
+        (targetAlert.equipmentId && i.equipmentId === targetAlert.equipmentId)
+      )
+    );
+    if (matchingIssue) {
+      resolveMachineIssue(matchingIssue.id, 'Resolvido via Central de Alertas').catch(err => {
+        console.warn('[resolveAlert] Auto resolving machine issue:', err);
+      });
+    }
   }
 
   cache.alerts = cache.alerts.map(a => a.id === id ? { ...a, ...fields } as SmartAlert : a);

@@ -181,6 +181,16 @@ export const HeaderComponent: React.FC<HeaderProps> = ({
                               <span className="text-[10px] opacity-75">{alert.date}</span>
                             </div>
                             <p className="text-[11px] opacity-90 line-clamp-2">{alert.description}</p>
+                            {alert.photoUrl && (
+                              <div className="mt-1.5 flex items-center gap-2">
+                                <img
+                                  src={alert.photoUrl}
+                                  alt="Foto do defeito"
+                                  className="w-12 h-9 object-cover rounded-lg border border-amber-500/40 shadow-xs"
+                                />
+                                <span className="text-[10px] text-amber-300 font-bold">Foto anexada</span>
+                              </div>
+                            )}
                             {targetVehicle && (
                               <span className="text-[10px] font-bold text-amber-500 mt-1 block">
                                 ➜ Abrir Ficha: {targetVehicle.model} ({targetVehicle.patrimonyCode || targetVehicle.licensePlate || 'Frota'})

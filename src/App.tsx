@@ -949,8 +949,20 @@ export default function App() {
                 users={users}
                 currentUser={currentUser}
                 onAddMaintenance={(m) => addMaintenance(m)}
-                onUpdateMaintenance={(id, fields) => updateMaintenance(id, fields)}
-                onDeleteMaintenance={(id) => deleteMaintenance(id)}
+                onUpdateMaintenance={(id, fields) => {
+                  if (currentUser?.role !== 'MANUTENCAO') {
+                    alert('Acesso negado: Somente o perfil MANUTENÇÃO possui autorização para editar registros de manutenção.');
+                    return;
+                  }
+                  updateMaintenance(id, fields);
+                }}
+                onDeleteMaintenance={(id) => {
+                  if (currentUser?.role !== 'MANUTENCAO') {
+                    alert('Acesso negado: Somente o perfil MANUTENÇÃO possui autorização para excluir registros de manutenção.');
+                    return;
+                  }
+                  deleteMaintenance(id);
+                }}
                 highlightedMaintenanceId={highlightedMaintenanceId}
                 initialEquipmentId={preSelectedVehicleId}
                 onOpenDigitalSheet={(v) => { setSelectedDigitalSheetVehicle(v); setDigitalSheetInitialTab('HISTORY'); }}
@@ -1005,12 +1017,14 @@ export default function App() {
                 highlightedAlertId={highlightedAlertId}
                 onClearHighlight={() => setHighlightedAlertId(null)}
                 darkMode={darkMode}
+                machineIssues={machineIssues}
               />
             )}
 
             {activeTab === 'audit' && (
               <AuditLogsView
                 auditLogs={auditLogs}
+                currentUser={currentUser}
                 darkMode={darkMode}
               />
             )}
@@ -1082,8 +1096,22 @@ export default function App() {
             initialAction={digitalSheetInitialAction}
             onOpenFuelingModalWithEquipment={handleOpenFuelingModalWithEquipment}
             onAddMaintenance={(m) => { addMaintenance(m); refreshState(); }}
-            onUpdateMaintenance={(id, fields) => { updateMaintenance(id, fields); refreshState(); }}
-            onDeleteMaintenance={(id) => { deleteMaintenance(id); refreshState(); }}
+            onUpdateMaintenance={(id, fields) => {
+              if (currentUser?.role !== 'MANUTENCAO') {
+                alert('Acesso negado: Somente o perfil MANUTENÇÃO possui permissão para editar registros da linha do tempo.');
+                return;
+              }
+              updateMaintenance(id, fields);
+              refreshState();
+            }}
+            onDeleteMaintenance={(id) => {
+              if (currentUser?.role !== 'MANUTENCAO') {
+                alert('Acesso negado: Somente o perfil MANUTENÇÃO possui permissão para excluir registros da linha do tempo.');
+                return;
+              }
+              deleteMaintenance(id);
+              refreshState();
+            }}
             onReportProblemSubmit={(issueData) => { addMachineIssue(issueData); refreshState(); }}
             onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => { recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes); refreshState(); }}
             onResolveIssue={(issueId) => { resolveMachineIssue(issueId); refreshState(); }}

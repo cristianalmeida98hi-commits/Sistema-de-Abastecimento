@@ -366,6 +366,10 @@ export interface SmartAlert {
   pushNotified?: boolean;
   pushNotifiedForCycle?: number;
   pushNotifiedAt?: string;
+  issueId?: string;
+  photoUrl?: string;
+  photoUrls?: string[];
+  operatorName?: string;
 }
 
 export interface AuditLog {

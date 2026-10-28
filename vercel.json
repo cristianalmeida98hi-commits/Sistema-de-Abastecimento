@@ -7,6 +7,14 @@
   },
   "rewrites": [
     {
+      "source": "/api/notificacoes/status",
+      "destination": "/api/notifications/status"
+    },
+    {
+      "source": "/api/notificacoes/vapid-public-key",
+      "destination": "/api/notifications/vapid-public-key"
+    },
+    {
       "source": "/((?!api/|api$).*)",
       "destination": "/index.html"
     }

@@ -78,6 +78,8 @@ export type StorageLoadingState = 'LOADING' | 'LOADED_EMPTY' | 'LOADED_WITH_DATA
 let storageLoadingState: StorageLoadingState = 'LOADING';
 let firestoreLoadError: string | null = null;
 const loadedCollections = new Set<string>();
+// Indica que os dados iniciais já foram reconciliados sem disparar notificações antigas.
+let initialAlertBaselineEstablished = false;
 
 // Pre-load persistent local cache to guarantee zero-latency rendering and offline protection
 function loadInitialCacheFromStorage() {
@@ -319,7 +321,7 @@ function setupFirestoreListeners() {
       const isFirstAlertsSnapshot = !loadedCollections.has('alerts');
       loadedCollections.add('alerts');
       // Na primeira carga, aguarda os dados históricos de alertas antes de avaliar novos eventos.
-      notifyDataUpdated(isFirstAlertsSnapshot);
+      notifyDataUpdated(!isFirstAlertsSnapshot);
     }, (err) => console.warn('[Firestore Alerts Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubAlerts);
 
@@ -463,18 +465,24 @@ export function notifyDataUpdated(shouldCheckAlerts: boolean = true) {
       persistLocalCacheDebounced();
     }, 120);
 
-    // Não avaliar alertas enquanto a carga histórica ainda não trouxe alertas e tanques.
-    // Isso evita interpretar o cache temporariamente vazio como um problema novo e reenviar eventos antigos.
-    if (
-      shouldCheckAlerts &&
+    // Aguarda os primeiros snapshots essenciais e faz uma reconciliação silenciosa.
+    // Só depois dessa linha de base a reavaliação automática pode emitir push.
+    const canCheckAlerts =
       isStorageReady() &&
       loadedCollections.has('alerts') &&
       loadedCollections.has('central_tanks') &&
-      cache.vehicles.length > 0
-    ) {
+      loadedCollections.has('vehicles') &&
+      cache.vehicles.length > 0;
+
+    if (canCheckAlerts && (!initialAlertBaselineEstablished || shouldCheckAlerts)) {
       if (alertCheckDebounceTimer) clearTimeout(alertCheckDebounceTimer);
       alertCheckDebounceTimer = setTimeout(() => {
-        checkAutomatedAlerts();
+        if (!initialAlertBaselineEstablished) {
+          checkAutomatedAlerts(false);
+          initialAlertBaselineEstablished = true;
+        } else {
+          checkAutomatedAlerts(true);
+        }
       }, 1500);
     }
   }
@@ -2421,7 +2429,7 @@ export async function setOilChangeConfigAndReference(
 }
 
 // Automated Intelligence Checker for Alerts (Multi-tank & Multi-interval maintenance)
-export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
+export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = true) {
   try {
     const settings = getSettings();
     if (!settings.autoAlertsEnabled) return;
@@ -2456,7 +2464,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
 
           // Disparo de Web Push para nível de tanque baixo
           const tankEventId = `tank-alert-${tank.id}-${isCritical ? 'crit' : 'low'}-${Math.round(tankStatus.currentStock)}`;
-          dispatchPushNotificationEvent({
+          triggerPushOnNewAlert && dispatchPushNotificationEvent({
             eventType: 'LOW_TANK_LEVEL',
             eventId: tankEventId,
             equipmentName: tank.name,
@@ -2482,7 +2490,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
 
           if (transitionToCritical) {
             const tankCritEventId = `tank-alert-${tank.id}-crit-${Math.round(tankStatus.currentStock)}`;
-            dispatchPushNotificationEvent({
+            triggerPushOnNewAlert && dispatchPushNotificationEvent({
               eventType: 'LOW_TANK_LEVEL',
               eventId: tankCritEventId,
               equipmentName: tank.name,
@@ -2585,7 +2593,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               setDoc(doc(db, 'alerts', mntAlertId), alertObj).catch(console.error);
 
               // Dispatch real push notification to authorized users
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: v.model,
@@ -2609,7 +2617,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               cache.alerts = cache.alerts.map(a => a.id === openAlert.id ? updated : a);
               setDoc(doc(db, 'alerts', openAlert.id), updated).catch(console.error);
 
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: v.model,
@@ -2626,7 +2634,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               cache.alerts = cache.alerts.map(a => a.id === openAlert.id ? { ...openAlert } : a);
               setDoc(doc(db, 'alerts', openAlert.id), openAlert).catch(console.error);
 
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: v.model,
@@ -2673,7 +2681,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
 
               // Disparo de Web Push para aviso de troca de óleo próxima
               const warningEventId = `oil-warning-${v.id}-${nextMnt}`;
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: warningEventId,
                 equipmentName: v.model,
@@ -2780,7 +2788,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
 
               // Dispatch real push notification to authorized users
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
@@ -2804,7 +2812,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               cache.alerts = cache.alerts.map(a => a.id === openKmAlert.id ? updated : a);
               setDoc(doc(db, 'alerts', openKmAlert.id), updated).catch(console.error);
 
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
@@ -2820,7 +2828,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               cache.alerts = cache.alerts.map(a => a.id === openKmAlert.id ? { ...openKmAlert } : a);
               setDoc(doc(db, 'alerts', openKmAlert.id), openKmAlert).catch(console.error);
 
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
@@ -2866,7 +2874,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
 
               // Disparo de Web Push para aviso de troca de óleo próxima em km
               const warningEventId = `oil-warning-${v.id}-${nextKm}`;
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: warningEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,

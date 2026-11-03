@@ -892,7 +892,7 @@ export async function flushPendingPushEvents(): Promise<void> {
   if (queue.length === 0) return;
 
   console.log(`[Push Notification Queue] Flusing ${queue.length} pending push events...`);
-  const remaining: PushNotificationPayload[] = [];
+  const remaining: PendingPushEvent[] = [];
 
   for (const item of queue) {
     try {

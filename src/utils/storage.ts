@@ -316,8 +316,10 @@ function setupFirestoreListeners() {
       if (items.length > 0 || cache.alerts.length === 0) {
         cache.alerts = items;
       }
+      const isFirstAlertsSnapshot = !loadedCollections.has('alerts');
       loadedCollections.add('alerts');
-      notifyDataUpdated(false);
+      // Na primeira carga, aguarda os dados históricos de alertas antes de avaliar novos eventos.
+      notifyDataUpdated(isFirstAlertsSnapshot);
     }, (err) => console.warn('[Firestore Alerts Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubAlerts);
 
@@ -461,7 +463,15 @@ export function notifyDataUpdated(shouldCheckAlerts: boolean = true) {
       persistLocalCacheDebounced();
     }, 120);
 
-    if (shouldCheckAlerts && isStorageReady() && cache.vehicles.length > 0) {
+    // Não avaliar alertas enquanto a carga histórica ainda não trouxe alertas e tanques.
+    // Isso evita interpretar o cache temporariamente vazio como um problema novo e reenviar eventos antigos.
+    if (
+      shouldCheckAlerts &&
+      isStorageReady() &&
+      loadedCollections.has('alerts') &&
+      loadedCollections.has('central_tanks') &&
+      cache.vehicles.length > 0
+    ) {
       if (alertCheckDebounceTimer) clearTimeout(alertCheckDebounceTimer);
       alertCheckDebounceTimer = setTimeout(() => {
         checkAutomatedAlerts();

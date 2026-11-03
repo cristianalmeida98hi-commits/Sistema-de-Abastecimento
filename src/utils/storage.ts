@@ -168,6 +168,7 @@ export function clearFirestoreListeners() {
 function setupFirestoreListeners() {
   // Prevent duplicate listeners and establish a fresh silent baseline after reconnect/resume.
   clearFirestoreListeners();
+  if (alertCheckDebounceTimer) clearTimeout(alertCheckDebounceTimer);
   loadedCollections.clear();
   initialAlertBaselineEstablished = false;
 
@@ -2451,8 +2452,11 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = true) {
         const desc = `O ${tank.name} (${tank.location}) está com ${Math.round(tankStatus.currentStock).toLocaleString('pt-BR')} L. Nível ${isCritical ? 'crítico' : 'abaixo do estoque mínimo'} de ${minStock.toLocaleString('pt-BR')} L. Reabastecimento recomendado.`;
 
         if (!existingLowTank || existingLowTank.resolved) {
-          // Um alerta resolvido que volta a ficar abaixo do limite representa um novo ciclo.
-          const tankEventId = `tank-alert-${tank.id}-${isCritical ? 'crit' : 'low'}-${Date.now()}`;
+          // Usa uma chave compartilhada pelo alerta para evitar IDs diferentes entre abas concorrentes.
+          const tankCycleKey = existingLowTank?.resolved
+            ? (existingLowTank.resolvedAt || existingLowTank.pushNotifiedAt || new Date().toISOString())
+            : `${new Date().toISOString().slice(0, 10)}-${Math.round(tankStatus.currentStock)}`;
+          const tankEventId = `tank-alert-${tank.id}-${isCritical ? 'crit' : 'low'}-${String(tankCycleKey).replace(/[^a-zA-Z0-9]/g, '')}`;
           const alertObj: SmartAlert = cleanUndefined({
             ...(existingLowTank || {}),
             id: lowTankAlertId,

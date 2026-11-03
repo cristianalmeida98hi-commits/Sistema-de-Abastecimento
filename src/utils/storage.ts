@@ -166,8 +166,10 @@ export function clearFirestoreListeners() {
 
 // Internal Firestore Listeners Setup
 function setupFirestoreListeners() {
-  // Prevent duplicate listeners
+  // Prevent duplicate listeners and establish a fresh silent baseline after reconnect/resume.
   clearFirestoreListeners();
+  loadedCollections.clear();
+  initialAlertBaselineEstablished = false;
 
   try {
     // 1. Users Subscription
@@ -179,14 +181,14 @@ function setupFirestoreListeners() {
       loadedCollections.add('users');
       firestoreLoadError = null;
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => {
       console.warn('[Firestore Users Connection]', err?.message || err);
       if (cache.users.length === 0 && cache.vehicles.length === 0) {
         firestoreLoadError = 'Falha ao sincronizar usuários com o banco de dados.';
         storageLoadingState = 'ERROR';
       }
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     });
     activeFirestoreUnsubscribers.push(unsubUsers);
 
@@ -196,17 +198,18 @@ function setupFirestoreListeners() {
       if (items.length > 0 || cache.vehicles.length === 0) {
         cache.vehicles = items;
       }
+      const isFirstVehiclesSnapshot = !loadedCollections.has('vehicles');
       loadedCollections.add('vehicles');
       firestoreLoadError = null;
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(!isFirstVehiclesSnapshot);
     }, (err) => {
       console.warn('[Firestore Vehicles Connection]', err?.message || err);
       if (cache.vehicles.length === 0 && cache.users.length === 0) {
         firestoreLoadError = 'Falha ao sincronizar máquinas e equipamentos com o banco de dados.';
         storageLoadingState = 'ERROR';
       }
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     });
     activeFirestoreUnsubscribers.push(unsubVehicles);
 
@@ -216,9 +219,10 @@ function setupFirestoreListeners() {
       if (items.length > 0 || cache.centralTanks.length === 0) {
         cache.centralTanks = items;
       }
+      const isFirstCentralTanksSnapshot = !loadedCollections.has('central_tanks');
       loadedCollections.add('central_tanks');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(!isFirstCentralTanksSnapshot);
     }, (err) => console.warn('[Firestore CentralTanks Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubCentralTanks);
 
@@ -231,7 +235,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('tank_movements');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore TankMovements Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubTankMovements);
 
@@ -243,7 +247,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('gas_stations');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore GasStations Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubGasStations);
 
@@ -256,7 +260,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('fuel_logs');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore FuelLogs Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubFuelLogs);
 
@@ -269,7 +273,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('fuel_refills');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore FuelRefills Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubFuelRefills);
 
@@ -282,7 +286,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('maintenance_logs');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore MaintenanceLogs Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubMaintenanceLogs);
 
@@ -295,7 +299,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('machine_issues');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore Issues Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubIssues);
 
@@ -307,7 +311,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('preventive_items');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore Preventive Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubPreventive);
 
@@ -319,9 +323,9 @@ function setupFirestoreListeners() {
         cache.alerts = items;
       }
       const isFirstAlertsSnapshot = !loadedCollections.has('alerts');
+      // A coleção de alertas é saída da avaliação, nunca gatilho de uma nova avaliação.
       loadedCollections.add('alerts');
-      // Na primeira carga, aguarda os dados históricos de alertas antes de avaliar novos eventos.
-      notifyDataUpdated(!isFirstAlertsSnapshot);
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore Alerts Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubAlerts);
 
@@ -358,7 +362,7 @@ function setupFirestoreListeners() {
         if (configDoc) {
           cache.settings = configDoc.data() as SystemSettings;
           loadedCollections.add('settings');
-          notifyDataUpdated();
+          notifyDataUpdated(false);
         }
       }
     }, (err) => console.warn('[Firestore Settings Connection]', err?.message || err));
@@ -465,24 +469,23 @@ export function notifyDataUpdated(shouldCheckAlerts: boolean = true) {
       persistLocalCacheDebounced();
     }, 120);
 
-    // Aguarda os primeiros snapshots essenciais e faz uma reconciliação silenciosa.
-    // Só depois dessa linha de base a reavaliação automática pode emitir push.
-    const canCheckAlerts =
+    // A primeira carga (inclusive após reconexão/retorno do segundo plano) apenas estabelece
+    // a linha de base. Não avalia alertas nem escreve na coleção "alerts".
+    const canEstablishAlertBaseline =
       isStorageReady() &&
       loadedCollections.has('alerts') &&
       loadedCollections.has('central_tanks') &&
-      loadedCollections.has('vehicles') &&
-      cache.vehicles.length > 0;
+      loadedCollections.has('vehicles');
 
-    if (canCheckAlerts && (!initialAlertBaselineEstablished || shouldCheckAlerts)) {
+    if (canEstablishAlertBaseline && !initialAlertBaselineEstablished) {
+      initialAlertBaselineEstablished = true;
+    }
+
+    // Só snapshots posteriores de veículos/tanques e ações explícitas reavaliam alertas.
+    if (canEstablishAlertBaseline && initialAlertBaselineEstablished && shouldCheckAlerts) {
       if (alertCheckDebounceTimer) clearTimeout(alertCheckDebounceTimer);
       alertCheckDebounceTimer = setTimeout(() => {
-        if (!initialAlertBaselineEstablished) {
-          checkAutomatedAlerts(false);
-          initialAlertBaselineEstablished = true;
-        } else {
-          checkAutomatedAlerts(true);
-        }
+        checkAutomatedAlerts(true);
       }, 1500);
     }
   }
@@ -2447,8 +2450,11 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = true) {
         const title = isCritical ? `🔴 Estoque crítico - ${tank.name}` : `⚠️ Estoque baixo - ${tank.name}`;
         const desc = `O ${tank.name} (${tank.location}) está com ${Math.round(tankStatus.currentStock).toLocaleString('pt-BR')} L. Nível ${isCritical ? 'crítico' : 'abaixo do estoque mínimo'} de ${minStock.toLocaleString('pt-BR')} L. Reabastecimento recomendado.`;
 
-        if (!existingLowTank) {
+        if (!existingLowTank || existingLowTank.resolved) {
+          // Um alerta resolvido que volta a ficar abaixo do limite representa um novo ciclo.
+          const tankEventId = `tank-alert-${tank.id}-${isCritical ? 'crit' : 'low'}-${Date.now()}`;
           const alertObj: SmartAlert = cleanUndefined({
+            ...(existingLowTank || {}),
             id: lowTankAlertId,
             type: 'LOW_TANK_LEVEL',
             severity: isCritical ? 'ALTA' : 'MEDIA',
@@ -2456,14 +2462,15 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = true) {
             description: desc,
             date: new Date().toISOString().slice(0, 10),
             resolved: false,
+            resolvedAt: undefined,
+            resolvedBy: undefined,
             pushNotified: true,
             pushNotifiedAt: new Date().toISOString()
           });
           cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== lowTankAlertId)];
           setDoc(doc(db, 'alerts', lowTankAlertId), alertObj).catch(console.error);
 
-          // Disparo de Web Push para nível de tanque baixo
-          const tankEventId = `tank-alert-${tank.id}-${isCritical ? 'crit' : 'low'}-${Math.round(tankStatus.currentStock)}`;
+          // Notifica um alerta novo ou a reativação após normalização do estoque.
           triggerPushOnNewAlert && dispatchPushNotificationEvent({
             eventType: 'LOW_TANK_LEVEL',
             eventId: tankEventId,
@@ -2472,7 +2479,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = true) {
             customTitle: title,
             description: desc
           }).catch(() => {});
-        } else if (!existingLowTank.resolved || existingLowTank.description !== desc) {
+        } else if (existingLowTank.description !== desc || existingLowTank.severity !== (isCritical ? 'ALTA' : 'MEDIA')) {
           const transitionToCritical = isCritical && existingLowTank.severity !== 'ALTA';
           const updated: SmartAlert = cleanUndefined({
             ...existingLowTank,

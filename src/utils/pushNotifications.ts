@@ -840,18 +840,31 @@ export async function clearPushEventDeduplication(prefix?: string): Promise<void
  * Offline queue management for push events during network instability
  */
 const PENDING_QUEUE_KEY = 'andradeagro_pending_push_queue';
+const PENDING_QUEUE_TTL_MS = 30 * 60 * 1000; // 30 minutos: eventos antigos não devem ser reproduzidos após novo login/dispositivo.
+type PendingPushEvent = PushNotificationPayload & { queuedAt: number };
 
-function getPendingPushQueue(): PushNotificationPayload[] {
+function getPendingPushQueue(): PendingPushEvent[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(PENDING_QUEUE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+
+    const now = Date.now();
+    // Itens antigos sem queuedAt são descartados intencionalmente: não há como provar que ainda são eventos recentes.
+    return parsed.filter((item: any): item is PendingPushEvent =>
+      item &&
+      typeof item.eventId === 'string' &&
+      typeof item.queuedAt === 'number' &&
+      item.queuedAt <= now + 60_000 &&
+      now - item.queuedAt <= PENDING_QUEUE_TTL_MS
+    );
   } catch {
     return [];
   }
 }
 
-function savePendingPushQueue(queue: PushNotificationPayload[]): void {
+function savePendingPushQueue(queue: PendingPushEvent[]): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(PENDING_QUEUE_KEY, JSON.stringify(queue.slice(-50)));
@@ -863,9 +876,9 @@ function savePendingPushQueue(queue: PushNotificationPayload[]): void {
 function queuePendingPushEvent(payload: PushNotificationPayload): void {
   const queue = getPendingPushQueue();
   if (!queue.some(p => p.eventId === payload.eventId)) {
-    queue.push(payload);
+    queue.push({ ...payload, queuedAt: Date.now() });
     savePendingPushQueue(queue);
-    console.log(`[Push Notification Queue] Queued event for offline retry: ${payload.eventId}`);
+    console.log(`[Push Notification Queue] Queued recent event for offline retry: ${payload.eventId}`);
   }
 }
 
@@ -879,7 +892,7 @@ export async function flushPendingPushEvents(): Promise<void> {
   if (queue.length === 0) return;
 
   console.log(`[Push Notification Queue] Flusing ${queue.length} pending push events...`);
-  const remaining: PushNotificationPayload[] = [];
+  const remaining: PendingPushEvent[] = [];
 
   for (const item of queue) {
     try {
@@ -895,11 +908,14 @@ export async function flushPendingPushEvents(): Promise<void> {
           customTitle: item.customTitle
         })
       });
-      if (!result.ok) {
+      const completed = result.ok && result.data && (
+        result.data.success === true || result.data.duplicate === true
+      );
+      if (!completed) {
         remaining.push(item);
       } else {
         clientDispatchedEventIds.add(item.eventId);
-        console.log(`[Push Notification Queue] Successfully flushed event: ${item.eventId}`);
+        console.log(`[Push Notification Queue] Completed recent event: ${item.eventId}`);
       }
     } catch {
       remaining.push(item);
@@ -992,6 +1008,12 @@ export async function dispatchPushNotificationEvent(payload: PushNotificationPay
       return { success: false, message: result.error || `Falha na requisição: ${result.status}` };
     }
 
+    // HTTP 200 sozinho não significa que o servidor entregou a notificação.
+    if (result.data.success !== true && result.data.duplicate !== true) {
+      queuePendingPushEvent(payload);
+      return { success: false, message: result.data.message || 'O servidor não confirmou a entrega da notificação.' };
+    }
+
     clientDispatchedEventIds.add(payload.eventId);
     return result.data;
   } catch (err: any) {
@@ -1070,8 +1092,8 @@ export async function autoSyncPushDevice(currentUser?: User | null): Promise<voi
     }
   }
 
-  // Also check if there are pending events to flush
-  flushPendingPushEvents().catch(() => {});
+  // A sincronização de um dispositivo NÃO pode reproduzir eventos antigos.
+  // A fila offline é processada somente pelo evento de reconexão e respeita o prazo de validade.
 }
 
 /**

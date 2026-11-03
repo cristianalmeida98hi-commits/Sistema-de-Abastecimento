@@ -78,6 +78,8 @@ export type StorageLoadingState = 'LOADING' | 'LOADED_EMPTY' | 'LOADED_WITH_DATA
 let storageLoadingState: StorageLoadingState = 'LOADING';
 let firestoreLoadError: string | null = null;
 const loadedCollections = new Set<string>();
+// Indica que os dados iniciais já foram reconciliados sem disparar notificações antigas.
+let initialAlertBaselineEstablished = false;
 
 // Pre-load persistent local cache to guarantee zero-latency rendering and offline protection
 function loadInitialCacheFromStorage() {
@@ -164,8 +166,11 @@ export function clearFirestoreListeners() {
 
 // Internal Firestore Listeners Setup
 function setupFirestoreListeners() {
-  // Prevent duplicate listeners
+  // Prevent duplicate listeners and establish a fresh silent baseline after reconnect/resume.
   clearFirestoreListeners();
+  if (alertCheckDebounceTimer) clearTimeout(alertCheckDebounceTimer);
+  loadedCollections.clear();
+  initialAlertBaselineEstablished = false;
 
   try {
     // 1. Users Subscription
@@ -177,14 +182,14 @@ function setupFirestoreListeners() {
       loadedCollections.add('users');
       firestoreLoadError = null;
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => {
       console.warn('[Firestore Users Connection]', err?.message || err);
       if (cache.users.length === 0 && cache.vehicles.length === 0) {
         firestoreLoadError = 'Falha ao sincronizar usuários com o banco de dados.';
         storageLoadingState = 'ERROR';
       }
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     });
     activeFirestoreUnsubscribers.push(unsubUsers);
 
@@ -194,17 +199,18 @@ function setupFirestoreListeners() {
       if (items.length > 0 || cache.vehicles.length === 0) {
         cache.vehicles = items;
       }
+      const isFirstVehiclesSnapshot = !loadedCollections.has('vehicles');
       loadedCollections.add('vehicles');
       firestoreLoadError = null;
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(!isFirstVehiclesSnapshot);
     }, (err) => {
       console.warn('[Firestore Vehicles Connection]', err?.message || err);
       if (cache.vehicles.length === 0 && cache.users.length === 0) {
         firestoreLoadError = 'Falha ao sincronizar máquinas e equipamentos com o banco de dados.';
         storageLoadingState = 'ERROR';
       }
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     });
     activeFirestoreUnsubscribers.push(unsubVehicles);
 
@@ -214,9 +220,10 @@ function setupFirestoreListeners() {
       if (items.length > 0 || cache.centralTanks.length === 0) {
         cache.centralTanks = items;
       }
+      const isFirstCentralTanksSnapshot = !loadedCollections.has('central_tanks');
       loadedCollections.add('central_tanks');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(!isFirstCentralTanksSnapshot);
     }, (err) => console.warn('[Firestore CentralTanks Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubCentralTanks);
 
@@ -229,7 +236,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('tank_movements');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore TankMovements Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubTankMovements);
 
@@ -241,7 +248,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('gas_stations');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore GasStations Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubGasStations);
 
@@ -254,7 +261,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('fuel_logs');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore FuelLogs Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubFuelLogs);
 
@@ -267,7 +274,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('fuel_refills');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore FuelRefills Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubFuelRefills);
 
@@ -280,7 +287,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('maintenance_logs');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore MaintenanceLogs Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubMaintenanceLogs);
 
@@ -293,7 +300,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('machine_issues');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore Issues Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubIssues);
 
@@ -305,7 +312,7 @@ function setupFirestoreListeners() {
       }
       loadedCollections.add('preventive_items');
       updateLoadingStatus();
-      notifyDataUpdated();
+      notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore Preventive Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubPreventive);
 
@@ -316,6 +323,7 @@ function setupFirestoreListeners() {
       if (items.length > 0 || cache.alerts.length === 0) {
         cache.alerts = items;
       }
+      // A coleção de alertas é saída da avaliação, nunca gatilho de uma nova avaliação.
       loadedCollections.add('alerts');
       notifyDataUpdated(false);
     }, (err) => console.warn('[Firestore Alerts Connection]', err?.message || err));
@@ -354,7 +362,7 @@ function setupFirestoreListeners() {
         if (configDoc) {
           cache.settings = configDoc.data() as SystemSettings;
           loadedCollections.add('settings');
-          notifyDataUpdated();
+          notifyDataUpdated(false);
         }
       }
     }, (err) => console.warn('[Firestore Settings Connection]', err?.message || err));
@@ -461,10 +469,23 @@ export function notifyDataUpdated(shouldCheckAlerts: boolean = true) {
       persistLocalCacheDebounced();
     }, 120);
 
-    if (shouldCheckAlerts && isStorageReady() && cache.vehicles.length > 0) {
+    // A primeira carga (inclusive após reconexão/retorno do segundo plano) apenas estabelece
+    // a linha de base. Não avalia alertas nem escreve na coleção "alerts".
+    const canEstablishAlertBaseline =
+      isStorageReady() &&
+      loadedCollections.has('alerts') &&
+      loadedCollections.has('central_tanks') &&
+      loadedCollections.has('vehicles');
+
+    if (canEstablishAlertBaseline && !initialAlertBaselineEstablished) {
+      initialAlertBaselineEstablished = true;
+    }
+
+    // Só snapshots posteriores de veículos/tanques e ações explícitas reavaliam alertas.
+    if (canEstablishAlertBaseline && initialAlertBaselineEstablished && shouldCheckAlerts) {
       if (alertCheckDebounceTimer) clearTimeout(alertCheckDebounceTimer);
       alertCheckDebounceTimer = setTimeout(() => {
-        checkAutomatedAlerts();
+        checkAutomatedAlerts(true);
       }, 1500);
     }
   }
@@ -2411,7 +2432,7 @@ export async function setOilChangeConfigAndReference(
 }
 
 // Automated Intelligence Checker for Alerts (Multi-tank & Multi-interval maintenance)
-export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
+export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = true) {
   try {
     const settings = getSettings();
     if (!settings.autoAlertsEnabled) return;
@@ -2429,8 +2450,14 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
         const title = isCritical ? `🔴 Estoque crítico - ${tank.name}` : `⚠️ Estoque baixo - ${tank.name}`;
         const desc = `O ${tank.name} (${tank.location}) está com ${Math.round(tankStatus.currentStock).toLocaleString('pt-BR')} L. Nível ${isCritical ? 'crítico' : 'abaixo do estoque mínimo'} de ${minStock.toLocaleString('pt-BR')} L. Reabastecimento recomendado.`;
 
-        if (!existingLowTank) {
+        if (!existingLowTank || existingLowTank.resolved) {
+          // Usa uma chave compartilhada pelo alerta para evitar IDs diferentes entre abas concorrentes.
+          const tankCycleKey = existingLowTank?.resolved
+            ? (existingLowTank.resolvedAt || existingLowTank.pushNotifiedAt || new Date().toISOString())
+            : `${new Date().toISOString().slice(0, 10)}-${Math.round(tankStatus.currentStock)}`;
+          const tankEventId = `tank-alert-${tank.id}-${isCritical ? 'crit' : 'low'}-${String(tankCycleKey).replace(/[^a-zA-Z0-9]/g, '')}`;
           const alertObj: SmartAlert = cleanUndefined({
+            ...(existingLowTank || {}),
             id: lowTankAlertId,
             type: 'LOW_TANK_LEVEL',
             severity: isCritical ? 'ALTA' : 'MEDIA',
@@ -2438,15 +2465,16 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
             description: desc,
             date: new Date().toISOString().slice(0, 10),
             resolved: false,
+            resolvedAt: undefined,
+            resolvedBy: undefined,
             pushNotified: true,
             pushNotifiedAt: new Date().toISOString()
           });
           cache.alerts = [alertObj, ...cache.alerts.filter(a => a.id !== lowTankAlertId)];
           setDoc(doc(db, 'alerts', lowTankAlertId), alertObj).catch(console.error);
 
-          // Disparo de Web Push para nível de tanque baixo
-          const tankEventId = `tank-alert-${tank.id}-${isCritical ? 'crit' : 'low'}-${Math.round(tankStatus.currentStock)}`;
-          dispatchPushNotificationEvent({
+          // Notifica um alerta novo ou a reativação após normalização do estoque.
+          triggerPushOnNewAlert && dispatchPushNotificationEvent({
             eventType: 'LOW_TANK_LEVEL',
             eventId: tankEventId,
             equipmentName: tank.name,
@@ -2454,7 +2482,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
             customTitle: title,
             description: desc
           }).catch(() => {});
-        } else if (!existingLowTank.resolved || existingLowTank.description !== desc) {
+        } else if (existingLowTank.description !== desc || existingLowTank.severity !== (isCritical ? 'ALTA' : 'MEDIA')) {
           const transitionToCritical = isCritical && existingLowTank.severity !== 'ALTA';
           const updated: SmartAlert = cleanUndefined({
             ...existingLowTank,
@@ -2472,7 +2500,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
 
           if (transitionToCritical) {
             const tankCritEventId = `tank-alert-${tank.id}-crit-${Math.round(tankStatus.currentStock)}`;
-            dispatchPushNotificationEvent({
+            triggerPushOnNewAlert && dispatchPushNotificationEvent({
               eventType: 'LOW_TANK_LEVEL',
               eventId: tankCritEventId,
               equipmentName: tank.name,
@@ -2575,7 +2603,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               setDoc(doc(db, 'alerts', mntAlertId), alertObj).catch(console.error);
 
               // Dispatch real push notification to authorized users
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: v.model,
@@ -2599,7 +2627,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               cache.alerts = cache.alerts.map(a => a.id === openAlert.id ? updated : a);
               setDoc(doc(db, 'alerts', openAlert.id), updated).catch(console.error);
 
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: v.model,
@@ -2616,7 +2644,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               cache.alerts = cache.alerts.map(a => a.id === openAlert.id ? { ...openAlert } : a);
               setDoc(doc(db, 'alerts', openAlert.id), openAlert).catch(console.error);
 
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: v.model,
@@ -2663,7 +2691,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
 
               // Disparo de Web Push para aviso de troca de óleo próxima
               const warningEventId = `oil-warning-${v.id}-${nextMnt}`;
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: warningEventId,
                 equipmentName: v.model,
@@ -2770,7 +2798,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               setDoc(doc(db, 'alerts', kmAlertId), alertObj).catch(console.error);
 
               // Dispatch real push notification to authorized users
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
@@ -2794,7 +2822,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               cache.alerts = cache.alerts.map(a => a.id === openKmAlert.id ? updated : a);
               setDoc(doc(db, 'alerts', openKmAlert.id), updated).catch(console.error);
 
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
@@ -2810,7 +2838,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
               cache.alerts = cache.alerts.map(a => a.id === openKmAlert.id ? { ...openKmAlert } : a);
               setDoc(doc(db, 'alerts', openKmAlert.id), openKmAlert).catch(console.error);
 
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: cycleEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,
@@ -2856,7 +2884,7 @@ export function checkAutomatedAlerts(triggerPushOnNewAlert: boolean = false) {
 
               // Disparo de Web Push para aviso de troca de óleo próxima em km
               const warningEventId = `oil-warning-${v.id}-${nextKm}`;
-              dispatchPushNotificationEvent({
+              triggerPushOnNewAlert && dispatchPushNotificationEvent({
                 eventType: 'OIL_CHANGE_DUE',
                 eventId: warningEventId,
                 equipmentName: `${v.model} (${v.licensePlate || 'Veículo'})`,

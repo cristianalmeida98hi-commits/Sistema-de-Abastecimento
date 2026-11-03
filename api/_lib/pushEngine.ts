@@ -539,8 +539,10 @@ export function isValidPushSubscription(sub: any): boolean {
   }
 }
 
-// Deduplicação em memória volátil de eventos no mesmo ciclo de vida (sem persistência em disco)
+// Deduplicação e bloqueio de concorrência no ciclo de vida atual da função serverless.
+// Um evento só é marcado como processado depois de ao menos uma entrega confirmada.
 const processedEventIds = new Set<string>();
+const processingEventIds = new Set<string>();
 
 function toFirestoreRestValue(val: any): any {
   if (val === null || val === undefined) return { nullValue: null };
@@ -1118,6 +1120,14 @@ export function resetEventDeduplication(params: { prefix?: string; eventId?: str
     }
   } else {
     processedEventIds.clear();
+    processingEventIds.clear();
+  }
+
+  if (eventId) processingEventIds.delete(eventId);
+  if (prefix) {
+    for (const id of Array.from(processingEventIds)) {
+      if (id.startsWith(prefix)) processingEventIds.delete(id);
+    }
   }
 
   return {
@@ -1193,7 +1203,12 @@ export async function dispatchPushToAuthorizedUsers(event: {
   const cleanIssueId = issueId || (eventId.startsWith('issue-') ? eventId.slice(6) : eventId);
   const dedupKey = (eventType === 'NEW_ISSUE' || eventType === 'MACHINE_ISSUE') ? `issue-${cleanIssueId}` : eventId;
 
-  if (processedEventIds.has(dedupKey) || processedEventIds.has(eventId)) {
+  if (
+    processedEventIds.has(dedupKey) ||
+    processedEventIds.has(eventId) ||
+    processingEventIds.has(dedupKey) ||
+    processingEventIds.has(eventId)
+  ) {
     console.log(`[AndradeAgro PushEngine] Evento ${dedupKey} já processado anteriormente. Descartando duplicata.`);
     return {
       ok: false,
@@ -1209,13 +1224,6 @@ export async function dispatchPushToAuthorizedUsers(event: {
       stage: 'inicio',
       message: 'Evento duplicado já processado anteriormente.'
     } as any;
-  }
-
-  processedEventIds.add(dedupKey);
-  if (eventId !== dedupKey) processedEventIds.add(eventId);
-  if (processedEventIds.size > 500) {
-    const first = processedEventIds.values().next().value;
-    if (first) processedEventIds.delete(first);
   }
 
   const effectivePhoto = photoUrl || image || undefined;
@@ -1377,6 +1385,32 @@ export async function dispatchPushToAuthorizedUsers(event: {
     };
   }
 
+  // Reserva o evento somente quando há dispositivos e VAPID válidos.
+  // A segunda verificação cobre duas requisições concorrentes que passaram pela primeira checagem.
+  if (
+    processedEventIds.has(dedupKey) ||
+    processedEventIds.has(eventId) ||
+    processingEventIds.has(dedupKey) ||
+    processingEventIds.has(eventId)
+  ) {
+    return {
+      ok: false,
+      success: false,
+      duplicate: true,
+      sent: 0,
+      sentCount: 0,
+      failed: 0,
+      failedCount: 0,
+      removed: 0,
+      removedCount: 0,
+      totalDevices: 0,
+      stage: 'inicio',
+      message: 'Evento já processado ou em processamento.'
+    } as any;
+  }
+  processingEventIds.add(dedupKey);
+  if (eventId !== dedupKey) processingEventIds.add(eventId);
+
   // [ETAPA 7/10] web-push inicializado
   const vapidOptions = {
     vapidDetails: {
@@ -1434,6 +1468,19 @@ export async function dispatchPushToAuthorizedUsers(event: {
 
   // [ETAPA 9/10] Envio concluído
   const isSuccess = sentCount > 0;
+  processingEventIds.delete(dedupKey);
+  if (eventId !== dedupKey) processingEventIds.delete(eventId);
+
+  // Falhas totais permanecem elegíveis a uma nova tentativa. Entregas confirmadas ficam deduplicadas.
+  if (isSuccess) {
+    processedEventIds.add(dedupKey);
+    if (eventId !== dedupKey) processedEventIds.add(eventId);
+    if (processedEventIds.size > 500) {
+      const first = processedEventIds.values().next().value;
+      if (first) processedEventIds.delete(first);
+    }
+  }
+
   console.log(`[AndradeAgro PushEngine] [ETAPA 9/10] Envio concluído: ${sentCount} enviado(s) com sucesso, ${failedCount} falha(s).`);
 
   return {

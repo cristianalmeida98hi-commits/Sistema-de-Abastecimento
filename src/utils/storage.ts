@@ -323,7 +323,6 @@ function setupFirestoreListeners() {
       if (items.length > 0 || cache.alerts.length === 0) {
         cache.alerts = items;
       }
-      const isFirstAlertsSnapshot = !loadedCollections.has('alerts');
       // A coleção de alertas é saída da avaliação, nunca gatilho de uma nova avaliação.
       loadedCollections.add('alerts');
       notifyDataUpdated(false);

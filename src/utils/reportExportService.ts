@@ -673,7 +673,7 @@ export async function exportReportPDF(options: ReportExportOptions) {
       row.push(formatCurrency(log.totalValue));
     }
 
-    row.push(log.calculatedAverageKmPerLiter ? `${log.calculatedAverageKmPerLiter} km/L` : log.calculatedAverageLitersPerHour ? `${log.calculatedAverageLitersPerHour} L/h` : '-');
+    row.push(log.isFullTank && log.calculatedAverageKmPerLiter ? `${log.calculatedAverageKmPerLiter} km/L` : log.isFullTank && log.calculatedAverageLitersPerHour ? `${log.calculatedAverageLitersPerHour} L/h` : '-');
     return row;
   });
 
@@ -899,8 +899,8 @@ export async function exportReportExcel(options: ReportExportOptions) {
     values.push(
       log.kmAtFueling ?? '',
       log.hourmeterAtFueling ?? '',
-      log.calculatedAverageKmPerLiter ?? '',
-      log.calculatedAverageLitersPerHour ?? ''
+      log.isFullTank ? (log.calculatedAverageKmPerLiter ?? '') : '',
+      log.isFullTank ? (log.calculatedAverageLitersPerHour ?? '') : ''
     );
 
     if (canViewFinancial) {

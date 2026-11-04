@@ -1393,7 +1393,14 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
       suspiciousReason: deleteField()
     };
 
-    let recalculatedLog: FuelLog = log;
+    const recalculatedLogBase: FuelLog = { ...log };
+    const derivedKeys = [
+      'previousKmOrHour', 'calculatedAverageKmPerLiter', 'calculatedAverageLitersPerHour',
+      'costPerKm', 'costPerHour', 'estimatedAutonomyKmOrHours', 'flaggedSuspicious', 'suspiciousReason'
+    ] as const;
+    for (const key of derivedKeys) delete (recalculatedLogBase as any)[key];
+    let recalculatedLog: FuelLog = recalculatedLogBase;
+    let derivedFields: Record<string, any> = {};
     if (typeof meter === 'number' && Number.isFinite(meter)) {
       const metrics = calculateFuelLogMetrics(
         log.liters,
@@ -1416,8 +1423,9 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
         flaggedSuspicious: metrics.flaggedSuspicious,
         suspiciousReason: metrics.suspiciousReason
       });
+      derivedFields = derived;
       Object.assign(fields, derived);
-      recalculatedLog = { ...log, ...derived };
+      recalculatedLog = { ...recalculatedLog, ...derived };
     }
 
     if (log.id === id) {
@@ -1427,16 +1435,9 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
         totalValue: editedLog.totalValue,
         updatedAt: editedLog.updatedAt
       });
-      recalculatedLog = { ...recalculatedLog, ...editedLog, ...cleanUndefined({
-        previousKmOrHour: recalculatedLog.previousKmOrHour,
-        calculatedAverageKmPerLiter: recalculatedLog.calculatedAverageKmPerLiter,
-        calculatedAverageLitersPerHour: recalculatedLog.calculatedAverageLitersPerHour,
-        costPerKm: recalculatedLog.costPerKm,
-        costPerHour: recalculatedLog.costPerHour,
-        estimatedAutonomyKmOrHours: recalculatedLog.estimatedAutonomyKmOrHours,
-        flaggedSuspicious: recalculatedLog.flaggedSuspicious,
-        suspiciousReason: recalculatedLog.suspiciousReason
-      }) };
+      recalculatedLog = { ...recalculatedLog, ...editedLog };
+      for (const key of derivedKeys) delete (recalculatedLog as any)[key];
+      Object.assign(recalculatedLog, derivedFields);
     }
 
     patches.push({ id: log.id, fields });

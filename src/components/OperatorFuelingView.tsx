@@ -489,6 +489,9 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
               <input type="checkbox" checked={isFullTank} onChange={(e) => setIsFullTank(e.target.checked)} className="mt-0.5 h-4 w-4 accent-yellow-400" />
               <span>Tanque completado neste abastecimento
                 <span className={`block pt-0.5 text-[10px] font-medium ${darkMode ? 'text-emerald-300/80' : 'text-slate-500'}`}>Marque somente quando o tanque realmente ficar cheio. Os abastecimentos parciais serão acumulados.</span>
+                {isFullTank && !userLogs.some(log => log.equipmentId === selectedVehicleId && log.isFullTank === true) && (
+                  <span className="block pt-1 text-[10px] font-bold text-amber-600 dark:text-[#FACC15]">Este será o primeiro marco de tanque cheio. A média será calculada a partir do próximo tanque cheio.</span>
+                )}
               </span>
             </label>
           </div>

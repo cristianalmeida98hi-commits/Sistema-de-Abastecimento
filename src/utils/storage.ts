@@ -1445,20 +1445,100 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
     precedingLogs.push(recalculatedLog);
   }
 
-  if (patches.length > 450) {
-    throw new Error('Este equipamento possui muitos abastecimentos para recalcular com segurança em uma única operação. Nenhum registro foi alterado.');
+  // Sincroniza o alerta de consumo anômalo com o resultado recalculado.
+  // Mantém no máximo um alerta aberto por equipamento.
+  const finalEquipmentLogs = equipmentLogs.map(log => recalculatedById.get(log.id) || log);
+  const latestSuspiciousLog = finalEquipmentLogs
+    .filter(log => log.flaggedSuspicious)
+    .sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime())[0];
+  const unresolvedFuelAlerts = cache.alerts.filter(alert =>
+    alert.type === 'SUSPICIOUS_FUEL' &&
+    alert.equipmentId === current.equipmentId &&
+    !alert.resolved
+  );
+  const alertWrites: Array<{ id: string; mode: 'update' | 'create'; data: Record<string, any> }> = [];
+  const alertNow = new Date().toISOString();
+
+  if (latestSuspiciousLog) {
+    const alertTitle = 'Consumo Anômalo no Abastecimento';
+    const alertDesc = `${latestSuspiciousLog.equipmentName} (${latestSuspiciousLog.equipmentPlateOrCode}): ${latestSuspiciousLog.suspiciousReason || 'Consumo fora do padrão registrado.'}`;
+    const primaryAlert = unresolvedFuelAlerts[0];
+    if (primaryAlert) {
+      alertWrites.push({
+        id: primaryAlert.id,
+        mode: 'update',
+        data: {
+          title: alertTitle,
+          description: alertDesc,
+          fuelLogId: latestSuspiciousLog.id,
+          date: latestSuspiciousLog.dateTime.slice(0, 10)
+        }
+      });
+      for (const duplicate of unresolvedFuelAlerts.slice(1)) {
+        alertWrites.push({
+          id: duplicate.id,
+          mode: 'update',
+          data: { resolved: true, resolvedAt: alertNow, resolvedBy: 'Sistema: recálculo de consumo' }
+        });
+      }
+    } else {
+      const alertId = `alt-susp-${latestSuspiciousLog.id}`;
+      alertWrites.push({
+        id: alertId,
+        mode: 'create',
+        data: {
+          id: alertId,
+          type: 'SUSPICIOUS_FUEL',
+          severity: 'ALTA',
+          title: alertTitle,
+          description: alertDesc,
+          equipmentId: latestSuspiciousLog.equipmentId,
+          equipmentName: latestSuspiciousLog.equipmentName,
+          fuelLogId: latestSuspiciousLog.id,
+          date: latestSuspiciousLog.dateTime.slice(0, 10),
+          resolved: false,
+          pushNotified: false
+        }
+      });
+    }
+  } else {
+    for (const alert of unresolvedFuelAlerts) {
+      alertWrites.push({
+        id: alert.id,
+        mode: 'update',
+        data: { resolved: true, resolvedAt: alertNow, resolvedBy: 'Sistema: recálculo de consumo' }
+      });
+    }
+  }
+
+  if (patches.length + alertWrites.length > 450) {
+    throw new Error('Este equipamento possui muitos registros e alertas para recalcular com segurança em uma única operação. Nenhum registro foi alterado.');
   }
 
   const batch = writeBatch(db);
   for (const patch of patches) {
     batch.update(doc(db, 'fuel_logs', patch.id), patch.fields);
   }
+  for (const alertWrite of alertWrites) {
+    const alertRef = doc(db, 'alerts', alertWrite.id);
+    if (alertWrite.mode === 'create') batch.set(alertRef, alertWrite.data);
+    else batch.update(alertRef, alertWrite.data);
+  }
   await batch.commit();
 
   cache.fuelLogs = cache.fuelLogs.map(log => recalculatedById.get(log.id) || log);
+  for (const alertWrite of alertWrites) {
+    if (alertWrite.mode === 'create') {
+      cache.alerts = [{ ...alertWrite.data } as SmartAlert, ...cache.alerts];
+    } else {
+      cache.alerts = cache.alerts.map(alert =>
+        alert.id === alertWrite.id ? { ...alert, ...alertWrite.data } as SmartAlert : alert
+      );
+    }
+  }
   notifyDataUpdated();
 
-  logAuditEvent('EDITAR', 'Abastecimento', `${caller.name} (${caller.role}) atualizou o abastecimento ID ${id} (${current.equipmentName}). Preço: R$ ${finalPrice.toFixed(3)}, Total: R$ ${editedLog.totalValue.toFixed(2)}. Ciclos posteriores recalculados.`);
+  logAuditEvent('EDITAR', 'Abastecimento', `${caller.name} (${caller.role}) atualizou o abastecimento ID ${id} (${current.equipmentName}). Preço: R$ ${finalPrice.toFixed(3)}, Total: R$ ${editedLog.totalValue.toFixed(2)}. Ciclos posteriores e alertas recalculados.`);
 }
 export async function deleteFuelLog(id: string): Promise<void> {
   cache.fuelLogs = cache.fuelLogs.filter(l => l.id !== id);

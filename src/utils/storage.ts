@@ -1,5 +1,5 @@
 import { 
-  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch,
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch, deleteField,
   query, orderBy, limit
 } from 'firebase/firestore';
 import { db, safeSetDoc, safeUpdateDoc, ensureFirebaseAuth } from '../lib/firebase';
@@ -1342,46 +1342,137 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
   if (!current) {
     throw new Error('Registro de abastecimento não encontrado.');
   }
-
-  // Recalculate dependent values strictly for this edited record
-  const finalLiters = updatedFields.liters !== undefined ? Number(updatedFields.liters) : current.liters;
-  const finalPrice = updatedFields.pricePerLiter !== undefined ? Number(updatedFields.pricePerLiter) : current.pricePerLiter;
-  const recalculatedTotalValue = Number((finalLiters * finalPrice).toFixed(2));
-
-  let recalculatedCostPerKm = current.costPerKm;
-  let recalculatedCostPerHour = current.costPerHour;
-
-  if (current.equipmentCategory === 'VEICULO') {
-    if (current.kmAtFueling !== undefined && current.previousKmOrHour !== undefined && current.kmAtFueling > current.previousKmOrHour) {
-      const diff = current.kmAtFueling - current.previousKmOrHour;
-      if (diff > 0) {
-        recalculatedCostPerKm = Number((recalculatedTotalValue / diff).toFixed(3));
-      }
-    }
-  } else {
-    if (current.hourmeterAtFueling !== undefined && current.previousKmOrHour !== undefined && current.hourmeterAtFueling > current.previousKmOrHour) {
-      const diff = current.hourmeterAtFueling - current.previousKmOrHour;
-      if (diff > 0) {
-        recalculatedCostPerHour = Number((recalculatedTotalValue / diff).toFixed(2));
-      }
-    }
+  if (updatedFields.equipmentId !== undefined && updatedFields.equipmentId !== current.equipmentId) {
+    throw new Error('Não é permitido transferir um abastecimento para outro equipamento durante a edição.');
   }
 
-  const cleaned = cleanUndefined({
+  const equipment = cache.vehicles.find(vehicle => vehicle.id === current.equipmentId);
+  if (!equipment) {
+    throw new Error('Equipamento do abastecimento não encontrado. Nenhum registro foi alterado.');
+  }
+
+  const finalLiters = updatedFields.liters !== undefined ? Number(updatedFields.liters) : current.liters;
+  const finalPrice = updatedFields.pricePerLiter !== undefined ? Number(updatedFields.pricePerLiter) : current.pricePerLiter;
+  if (!Number.isFinite(finalLiters) || finalLiters <= 0 || !Number.isFinite(finalPrice) || finalPrice < 0) {
+    throw new Error('Litros ou preço por litro inválido. Nenhum registro foi alterado.');
+  }
+
+  const editedLog: FuelLog = {
+    ...current,
     ...updatedFields,
+    equipmentId: current.equipmentId,
     liters: finalLiters,
     pricePerLiter: finalPrice,
-    totalValue: recalculatedTotalValue,
-    costPerKm: recalculatedCostPerKm,
-    costPerHour: recalculatedCostPerHour,
+    totalValue: Number((finalLiters * finalPrice).toFixed(2)),
     updatedAt: new Date().toISOString()
-  });
+  };
 
-  cache.fuelLogs = cache.fuelLogs.map(l => l.id === id ? { ...l, ...cleaned } : l);
+  // A edição de um abastecimento altera o ciclo full-to-full que o contém e
+  // pode afetar todos os ciclos posteriores do mesmo equipamento. Recalcula
+  // somente os campos derivados, em ordem cronológica, sem tocar nos demais dados.
+  const equipmentLogs = cache.fuelLogs
+    .filter(log => log.equipmentId === current.equipmentId)
+    .map(log => log.id === id ? editedLog : log)
+    .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
+
+  const editedTime = new Date(editedLog.dateTime).getTime();
+  const originalTime = new Date(current.dateTime).getTime();
+  const recalculationStart = Math.min(editedTime, originalTime);
+  const precedingLogs = equipmentLogs.filter(log => new Date(log.dateTime).getTime() < recalculationStart);
+  const patches: Array<{ id: string; fields: Record<string, any> }> = [];
+
+  for (const log of equipmentLogs) {
+    const logTime = new Date(log.dateTime).getTime();
+    if (logTime < recalculationStart) {
+      continue;
+    }
+
+    const meter = equipment.category === 'VEICULO' ? log.kmAtFueling : log.hourmeterAtFueling;
+    const baseFields: Record<string, any> = {
+      calculatedAverageKmPerLiter: deleteField(),
+      calculatedAverageLitersPerHour: deleteField(),
+      costPerKm: deleteField(),
+      costPerHour: deleteField(),
+      estimatedAutonomyKmOrHours: deleteField(),
+      previousKmOrHour: deleteField(),
+      flaggedSuspicious: false,
+      suspiciousReason: deleteField()
+    };
+
+    let recalculatedLog: FuelLog = log;
+    if (typeof meter === 'number' && Number.isFinite(meter)) {
+      const metrics = calculateFuelLogMetrics(
+        log.liters,
+        log.pricePerLiter,
+        equipment,
+        meter,
+        precedingLogs,
+        Number(cache.settings.suspiciousFuelMarginPercentage) || 25,
+        Boolean(log.isFullTank),
+        log.dateTime
+      );
+      Object.assign(baseFields, {
+        totalValue: log.id === id ? editedLog.totalValue : log.totalValue,
+        previousKmOrHour: metrics.previousKmOrHour,
+        calculatedAverageKmPerLiter: metrics.calculatedAverageKmPerLiter,
+        calculatedAverageLitersPerHour: metrics.calculatedAverageLitersPerHour,
+        costPerKm: metrics.costPerKm,
+        costPerHour: metrics.costPerHour,
+        estimatedAutonomyKmOrHours: metrics.estimatedAutonomyKmOrHours,
+        flaggedSuspicious: metrics.flaggedSuspicious,
+        suspiciousReason: metrics.suspiciousReason
+      });
+      recalculatedLog = cleanUndefined({
+        ...log,
+        ...Object.fromEntries(Object.entries(baseFields).filter(([, value]) => value !== deleteField()))
+      }) as FuelLog;
+    } else if (log.id === id) {
+      Object.assign(baseFields, { totalValue: editedLog.totalValue });
+      recalculatedLog = editedLog;
+    }
+
+    if (log.id === id) {
+      Object.assign(baseFields, {
+        liters: editedLog.liters,
+        pricePerLiter: editedLog.pricePerLiter,
+        totalValue: editedLog.totalValue,
+        updatedAt: editedLog.updatedAt
+      });
+    }
+
+    patches.push({ id: log.id, fields: baseFields });
+    precedingLogs.push(recalculatedLog);
+  }
+
+  if (patches.length > 450) {
+    throw new Error('Este equipamento possui muitos abastecimentos para recalcular com segurança em uma única operação. Nenhum registro foi alterado.');
+  }
+
+  const batch = writeBatch(db);
+  for (const patch of patches) {
+    batch.update(doc(db, 'fuel_logs', patch.id), patch.fields);
+  }
+  await batch.commit();
+
+  const patchById = new Map(patches.map(patch => [patch.id, patch.fields]));
+  cache.fuelLogs = cache.fuelLogs.map(log => {
+    const fields = patchById.get(log.id);
+    if (!fields) return log;
+    const merged = { ...log, ...(log.id === id ? editedLog : {}), ...Object.fromEntries(
+      Object.entries(fields).filter(([, value]) => value !== deleteField())
+    ) } as FuelLog;
+    for (const key of [
+      'calculatedAverageKmPerLiter', 'calculatedAverageLitersPerHour',
+      'costPerKm', 'costPerHour', 'estimatedAutonomyKmOrHours',
+      'previousKmOrHour', 'suspiciousReason'
+    ]) {
+      if (fields[key] === deleteField()) delete (merged as any)[key];
+    }
+    return merged;
+  });
   notifyDataUpdated();
 
-  await updateDoc(doc(db, 'fuel_logs', id), cleaned);
-  logAuditEvent('EDITAR', 'Abastecimento', `${caller.name} (${caller.role}) atualizou o abastecimento ID ${id} (${current.equipmentName}). Preço: R$ ${finalPrice.toFixed(3)}, Total: R$ ${recalculatedTotalValue.toFixed(2)}.`);
+  logAuditEvent('EDITAR', 'Abastecimento', `${caller.name} (${caller.role}) atualizou o abastecimento ID ${id} (${current.equipmentName}). Preço: R$ ${finalPrice.toFixed(3)}, Total: R$ ${editedLog.totalValue.toFixed(2)}. Médias dos ciclos posteriores recalculadas.`);
 }
 
 export async function deleteFuelLog(id: string): Promise<void> {

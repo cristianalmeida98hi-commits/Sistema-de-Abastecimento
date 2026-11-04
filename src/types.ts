@@ -240,6 +240,7 @@ export interface FuelLog {
   kmAtFueling?: number;
   hourmeterAtFueling?: number;
   previousKmOrHour?: number;
+  isFullTank?: boolean; // Confirma que o tanque foi completado neste abastecimento
   calculatedAverageKmPerLiter?: number; // km/L
   calculatedAverageLitersPerHour?: number; // L/h
   costPerKm?: number; // R$/km

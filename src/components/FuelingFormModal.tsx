@@ -305,6 +305,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
       });
 
       setSavedLiters(numLiters);
+      setIsFullTank(false);
       setIsSavedSuccess(true);
 
       setTimeout(() => {

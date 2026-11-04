@@ -241,6 +241,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
 
       // Reset fields for next quick entry
       setObservations('');
+      setIsFullTank(false);
       setTimeout(() => {
         setShowSuccessToast(false);
       }, 5000);

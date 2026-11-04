@@ -1338,18 +1338,14 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
     throw new Error('Acesso negado: Somente os perfis Administrador e Manutenção possuem permissão para editar registros de abastecimento.');
   }
 
-  const current = cache.fuelLogs.find(l => l.id === id);
-  if (!current) {
-    throw new Error('Registro de abastecimento não encontrado.');
-  }
+  const current = cache.fuelLogs.find(log => log.id === id);
+  if (!current) throw new Error('Registro de abastecimento não encontrado.');
   if (updatedFields.equipmentId !== undefined && updatedFields.equipmentId !== current.equipmentId) {
     throw new Error('Não é permitido transferir um abastecimento para outro equipamento durante a edição.');
   }
 
   const equipment = cache.vehicles.find(vehicle => vehicle.id === current.equipmentId);
-  if (!equipment) {
-    throw new Error('Equipamento do abastecimento não encontrado. Nenhum registro foi alterado.');
-  }
+  if (!equipment) throw new Error('Equipamento do abastecimento não encontrado. Nenhum registro foi alterado.');
 
   const finalLiters = updatedFields.liters !== undefined ? Number(updatedFields.liters) : current.liters;
   const finalPrice = updatedFields.pricePerLiter !== undefined ? Number(updatedFields.pricePerLiter) : current.pricePerLiter;
@@ -1367,28 +1363,26 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
     updatedAt: new Date().toISOString()
   };
 
-  // A edição de um abastecimento altera o ciclo full-to-full que o contém e
-  // pode afetar todos os ciclos posteriores do mesmo equipamento. Recalcula
-  // somente os campos derivados, em ordem cronológica, sem tocar nos demais dados.
+  // Uma edição pode alterar o ciclo full-to-full atual e todos os ciclos posteriores.
+  // Recalcula apenas os campos derivados, preservando os demais dados dos registros.
   const equipmentLogs = cache.fuelLogs
     .filter(log => log.equipmentId === current.equipmentId)
     .map(log => log.id === id ? editedLog : log)
     .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
 
-  const editedTime = new Date(editedLog.dateTime).getTime();
-  const originalTime = new Date(current.dateTime).getTime();
-  const recalculationStart = Math.min(editedTime, originalTime);
+  const recalculationStart = Math.min(
+    new Date(current.dateTime).getTime(),
+    new Date(editedLog.dateTime).getTime()
+  );
   const precedingLogs = equipmentLogs.filter(log => new Date(log.dateTime).getTime() < recalculationStart);
   const patches: Array<{ id: string; fields: Record<string, any> }> = [];
+  const recalculatedById = new Map<string, FuelLog>();
 
   for (const log of equipmentLogs) {
-    const logTime = new Date(log.dateTime).getTime();
-    if (logTime < recalculationStart) {
-      continue;
-    }
+    if (new Date(log.dateTime).getTime() < recalculationStart) continue;
 
     const meter = equipment.category === 'VEICULO' ? log.kmAtFueling : log.hourmeterAtFueling;
-    const baseFields: Record<string, any> = {
+    const fields: Record<string, any> = {
       calculatedAverageKmPerLiter: deleteField(),
       calculatedAverageLitersPerHour: deleteField(),
       costPerKm: deleteField(),
@@ -1411,8 +1405,8 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
         Boolean(log.isFullTank),
         log.dateTime
       );
-      Object.assign(baseFields, {
-        totalValue: log.id === id ? editedLog.totalValue : log.totalValue,
+
+      const derived = cleanUndefined({
         previousKmOrHour: metrics.previousKmOrHour,
         calculatedAverageKmPerLiter: metrics.calculatedAverageKmPerLiter,
         calculatedAverageLitersPerHour: metrics.calculatedAverageLitersPerHour,
@@ -1422,25 +1416,31 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
         flaggedSuspicious: metrics.flaggedSuspicious,
         suspiciousReason: metrics.suspiciousReason
       });
-      recalculatedLog = cleanUndefined({
-        ...log,
-        ...Object.fromEntries(Object.entries(baseFields).filter(([, value]) => value !== deleteField()))
-      }) as FuelLog;
-    } else if (log.id === id) {
-      Object.assign(baseFields, { totalValue: editedLog.totalValue });
-      recalculatedLog = editedLog;
+      Object.assign(fields, derived);
+      recalculatedLog = { ...log, ...derived };
     }
 
     if (log.id === id) {
-      Object.assign(baseFields, {
+      Object.assign(fields, {
         liters: editedLog.liters,
         pricePerLiter: editedLog.pricePerLiter,
         totalValue: editedLog.totalValue,
         updatedAt: editedLog.updatedAt
       });
+      recalculatedLog = { ...recalculatedLog, ...editedLog, ...cleanUndefined({
+        previousKmOrHour: recalculatedLog.previousKmOrHour,
+        calculatedAverageKmPerLiter: recalculatedLog.calculatedAverageKmPerLiter,
+        calculatedAverageLitersPerHour: recalculatedLog.calculatedAverageLitersPerHour,
+        costPerKm: recalculatedLog.costPerKm,
+        costPerHour: recalculatedLog.costPerHour,
+        estimatedAutonomyKmOrHours: recalculatedLog.estimatedAutonomyKmOrHours,
+        flaggedSuspicious: recalculatedLog.flaggedSuspicious,
+        suspiciousReason: recalculatedLog.suspiciousReason
+      }) };
     }
 
-    patches.push({ id: log.id, fields: baseFields });
+    patches.push({ id: log.id, fields });
+    recalculatedById.set(log.id, recalculatedLog);
     precedingLogs.push(recalculatedLog);
   }
 
@@ -1454,27 +1454,11 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
   }
   await batch.commit();
 
-  const patchById = new Map(patches.map(patch => [patch.id, patch.fields]));
-  cache.fuelLogs = cache.fuelLogs.map(log => {
-    const fields = patchById.get(log.id);
-    if (!fields) return log;
-    const merged = { ...log, ...(log.id === id ? editedLog : {}), ...Object.fromEntries(
-      Object.entries(fields).filter(([, value]) => value !== deleteField())
-    ) } as FuelLog;
-    for (const key of [
-      'calculatedAverageKmPerLiter', 'calculatedAverageLitersPerHour',
-      'costPerKm', 'costPerHour', 'estimatedAutonomyKmOrHours',
-      'previousKmOrHour', 'suspiciousReason'
-    ]) {
-      if (fields[key] === deleteField()) delete (merged as any)[key];
-    }
-    return merged;
-  });
+  cache.fuelLogs = cache.fuelLogs.map(log => recalculatedById.get(log.id) || log);
   notifyDataUpdated();
 
-  logAuditEvent('EDITAR', 'Abastecimento', `${caller.name} (${caller.role}) atualizou o abastecimento ID ${id} (${current.equipmentName}). Preço: R$ ${finalPrice.toFixed(3)}, Total: R$ ${editedLog.totalValue.toFixed(2)}. Médias dos ciclos posteriores recalculadas.`);
+  logAuditEvent('EDITAR', 'Abastecimento', `${caller.name} (${caller.role}) atualizou o abastecimento ID ${id} (${current.equipmentName}). Preço: R$ ${finalPrice.toFixed(3)}, Total: R$ ${editedLog.totalValue.toFixed(2)}. Ciclos posteriores recalculados.`);
 }
-
 export async function deleteFuelLog(id: string): Promise<void> {
   cache.fuelLogs = cache.fuelLogs.filter(l => l.id !== id);
   notifyDataUpdated();

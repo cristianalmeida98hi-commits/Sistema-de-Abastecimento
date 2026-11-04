@@ -54,7 +54,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
   };
 
   const [liters, setLiters] = useState<string>('80');
-  const [isFullTank, setIsFullTank] = useState(false);
+  const [isFullTank, setIsFullTank] = useState(true);
   const [hourmeter, setHourmeter] = useState<string>('');
   const [odometer, setOdometer] = useState<string>('');
   const [observations, setObservations] = useState<string>('');
@@ -131,7 +131,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
       }
       setIsAuthorizedCorrection(false);
       setCorrectionJustification('');
-      setIsFullTank(false);
+      setIsFullTank(true);
     }
   }, [selectedVehicleId, activeVehicle]);
 
@@ -241,7 +241,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
 
       // Reset fields for next quick entry
       setObservations('');
-      setIsFullTank(false);
+      setIsFullTank(true);
       setTimeout(() => {
         setShowSuccessToast(false);
       }, 5000);
@@ -489,7 +489,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
             <label className={`mt-3 flex items-start gap-2 rounded-xl border p-3 text-[11px] font-semibold cursor-pointer ${darkMode ? 'border-emerald-800 bg-emerald-950/50 text-emerald-100' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
               <input type="checkbox" checked={isFullTank} onChange={(e) => setIsFullTank(e.target.checked)} className="mt-0.5 h-4 w-4 accent-yellow-400" />
               <span>Tanque completado neste abastecimento
-                <span className={`block pt-0.5 text-[10px] font-medium ${darkMode ? 'text-emerald-300/80' : 'text-slate-500'}`}>Marque somente quando o tanque realmente ficar cheio. Os abastecimentos parciais serão acumulados.</span>
+                <span className={`block pt-0.5 text-[10px] font-medium ${darkMode ? 'text-emerald-300/80' : 'text-slate-500'}`}>Desmarque somente quando o abastecimento for parcial. Os abastecimentos parciais serão acumulados.</span>
                 {isFullTank && !userLogs.some(log => log.equipmentId === selectedVehicleId && log.isFullTank === true) && (
                   <span className="block pt-1 text-[10px] font-bold text-amber-600 dark:text-[#FACC15]">Este será o primeiro marco de tanque cheio. A média será calculada a partir do próximo tanque cheio.</span>
                 )}

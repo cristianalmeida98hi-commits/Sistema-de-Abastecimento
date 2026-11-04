@@ -475,6 +475,9 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                   <input type="checkbox" checked={isFullTank} onChange={(e) => setIsFullTank(e.target.checked)} className="mt-0.5 h-4 w-4 accent-yellow-400" />
                   <span>Tanque completado neste abastecimento
                     <span className="block pt-0.5 text-[10px] font-medium text-emerald-300/80">Marque somente quando o tanque realmente ficar cheio. Abastecimentos parciais serão acumulados até o próximo tanque cheio.</span>
+                    {isFullTank && !previousLogs.some(log => log.equipmentId === equipmentId && log.isFullTank === true && new Date(log.dateTime).getTime() < new Date(dateTime).getTime()) && (
+                      <span className="block pt-1 text-[10px] font-bold text-[#FACC15]">Este será o primeiro marco de tanque cheio. A média será calculada a partir do próximo tanque cheio.</span>
+                    )}
                   </span>
                 </label>
               </div>

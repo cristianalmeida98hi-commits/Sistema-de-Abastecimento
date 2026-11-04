@@ -1267,37 +1267,59 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
       await updateDoc(doc(db, 'vehicles', targetVehicle.id), vehicleUpdates);
     }
 
-    // If flagged suspicious, create automated Alert in Firestore
-    if (log.flaggedSuspicious) {
-      const alertId = `alt-susp-${Date.now()}`;
+    // Keep one unresolved suspicious-consumption alert per equipment to avoid alert spam.
+    if (cleanedLog.flaggedSuspicious) {
       const alertTitle = 'Consumo Anômalo no Abastecimento';
-      const alertDesc = `${log.equipmentName} (${log.equipmentPlateOrCode}): ${log.suspiciousReason || 'Consumo fora do padrão registrado.'}`;
-      const newAlert: SmartAlert = cleanUndefined({
-        id: alertId,
-        type: 'SUSPICIOUS_FUEL',
-        severity: 'ALTA',
-        title: alertTitle,
-        description: alertDesc,
-        equipmentId: log.equipmentId,
-        equipmentName: log.equipmentName,
-        fuelLogId: newLog.id,
-        date: log.dateTime.slice(0, 10),
-        resolved: false,
-        pushNotified: true,
-        pushNotifiedAt: new Date().toISOString()
-      });
-      cache.alerts = [newAlert, ...cache.alerts];
-      await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
+      const alertDesc = `${cleanedLog.equipmentName} (${cleanedLog.equipmentPlateOrCode}): ${cleanedLog.suspiciousReason || 'Consumo fora do padrão registrado.'}`;
+      const existingAlert = cache.alerts.find(alert =>
+        alert.type === 'SUSPICIOUS_FUEL' &&
+        alert.equipmentId === cleanedLog.equipmentId &&
+        !alert.resolved
+      );
 
-      // Conectar alerta interno de consumo anômalo ao mecanismo Web Push
-      dispatchPushNotificationEvent({
-        eventType: 'SUSPICIOUS_FUEL',
-        eventId: newAlert.id,
-        equipmentName: log.equipmentName,
-        equipmentId: log.equipmentId,
-        customTitle: `⚠️ ${alertTitle}`,
-        description: alertDesc
-      }).catch(() => {});
+      if (existingAlert) {
+        const updatedAlert = cleanUndefined({
+          ...existingAlert,
+          title: alertTitle,
+          description: alertDesc,
+          fuelLogId: cleanedLog.id,
+          date: cleanedLog.dateTime.slice(0, 10)
+        });
+        cache.alerts = cache.alerts.map(alert => alert.id === existingAlert.id ? updatedAlert : alert);
+        await updateDoc(doc(db, 'alerts', existingAlert.id), {
+          title: alertTitle,
+          description: alertDesc,
+          fuelLogId: cleanedLog.id,
+          date: cleanedLog.dateTime.slice(0, 10)
+        });
+      } else {
+        const alertId = `alt-susp-${cleanedLog.id}`;
+        const newAlert: SmartAlert = cleanUndefined({
+          id: alertId,
+          type: 'SUSPICIOUS_FUEL',
+          severity: 'ALTA',
+          title: alertTitle,
+          description: alertDesc,
+          equipmentId: cleanedLog.equipmentId,
+          equipmentName: cleanedLog.equipmentName,
+          fuelLogId: cleanedLog.id,
+          date: cleanedLog.dateTime.slice(0, 10),
+          resolved: false,
+          pushNotified: true,
+          pushNotifiedAt: new Date().toISOString()
+        });
+        cache.alerts = [newAlert, ...cache.alerts];
+        await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
+
+        dispatchPushNotificationEvent({
+          eventType: 'SUSPICIOUS_FUEL',
+          eventId: newAlert.id,
+          equipmentName: cleanedLog.equipmentName,
+          equipmentId: cleanedLog.equipmentId,
+          customTitle: `⚠️ ${alertTitle}`,
+          description: alertDesc
+        }).catch(() => {});
+      }
     }
 
     logAuditEvent('CRIAR', 'Abastecimento', `Registrou ${newLog.liters}L em ${newLog.equipmentName} (${newLog.equipmentPlateOrCode}) via ${newLog.gasStationName}.`);

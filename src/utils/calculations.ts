@@ -389,7 +389,9 @@ export function calculateFuelLogMetrics(
   equipment: Vehicle,
   currentKmOrHour: number,
   previousLogsForEquipment: FuelLog[],
-  suspiciousMarginPercent: number = 25
+  suspiciousMarginPercent: number = 25,
+  isFullTank: boolean = false,
+  currentDateTime?: string
 ): {
   totalValue: number;
   calculatedAverageKmPerLiter?: number;
@@ -402,16 +404,15 @@ export function calculateFuelLogMetrics(
   suspiciousReason?: string;
 } {
   const totalValue = Number((liters * pricePerLiter).toFixed(2));
-  
-  // Find last previous fuel log for this equipment
-  const sortedLogs = [...previousLogsForEquipment].sort(
-    (a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime()
-  );
-  
-  const lastLog = sortedLogs[0];
   const isKmBased = equipment.category === 'VEICULO';
-  let previousKmOrHour = lastLog 
-    ? (isKmBased ? lastLog.kmAtFueling : lastLog.hourmeterAtFueling)
+  const getMeter = (log: FuelLog) => isKmBased ? log.kmAtFueling : log.hourmeterAtFueling;
+  const transactionTime = currentDateTime ? new Date(currentDateTime).getTime() : Number.POSITIVE_INFINITY;
+  const eligibleLogs = previousLogsForEquipment
+    .filter(log => new Date(log.dateTime).getTime() < transactionTime)
+    .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
+  const lastLog = eligibleLogs[eligibleLogs.length - 1];
+  const previousKmOrHour = lastLog
+    ? getMeter(lastLog)
     : (isKmBased ? equipment.currentKm : equipment.currentHourmeter);
 
   let calculatedAverageKmPerLiter: number | undefined;
@@ -422,47 +423,72 @@ export function calculateFuelLogMetrics(
   let flaggedSuspicious = false;
   let suspiciousReason: string | undefined;
 
-  if (previousKmOrHour !== undefined && currentKmOrHour > previousKmOrHour && liters > 0) {
-    const diff = currentKmOrHour - previousKmOrHour;
+  // A reliable consumption cycle starts at a confirmed full tank and ends at
+  // the next confirmed full tank. Partial refuels are accumulated in between.
+  if (isFullTank && liters > 0) {
+    const previousFullIndex = eligibleLogs.reduce(
+      (found, log, index) => log.isFullTank === true && getMeter(log) !== undefined ? index : found,
+      -1
+    );
 
-    if (isKmBased) {
-      // km per Liter
-      calculatedAverageKmPerLiter = Number((diff / liters).toFixed(2));
-      costPerKm = Number((totalValue / diff).toFixed(3));
-      estimatedAutonomyKmOrHours = Number((equipment.tankCapacityLiters * calculatedAverageKmPerLiter).toFixed(0));
+    if (previousFullIndex >= 0) {
+      const baseline = eligibleLogs[previousFullIndex];
+      const baselineMeter = getMeter(baseline);
+      const diff = baselineMeter !== undefined ? currentKmOrHour - baselineMeter : 0;
+      const cycleLogs = eligibleLogs.slice(previousFullIndex + 1);
+      const cycleLiters = cycleLogs.reduce((sum, log) => sum + Math.max(0, Number(log.liters) || 0), 0) + liters;
+      const cycleValue = cycleLogs.reduce((sum, log) => sum + Math.max(0, Number(log.totalValue) || 0), 0) + totalValue;
 
-      // Historical average
-      const prevAverages = sortedLogs
-        .map(l => l.calculatedAverageKmPerLiter)
-        .filter((val): val is number => val !== undefined && val > 0);
-
-      if (prevAverages.length > 0) {
-        const avgKmL = prevAverages.reduce((acc, v) => acc + v, 0) / prevAverages.length;
-        // If km/L dropped significantly (e.g. consuming way more fuel per km)
-        if (calculatedAverageKmPerLiter < avgKmL * (1 - suspiciousMarginPercent / 100)) {
-          flaggedSuspicious = true;
-          suspiciousReason = `Rendimento de ${calculatedAverageKmPerLiter} km/L está ${suspiciousMarginPercent}% abaixo da média histórica (${avgKmL.toFixed(2)} km/L).`;
+      if (diff > 0 && cycleLiters > 0) {
+        if (isKmBased) {
+          calculatedAverageKmPerLiter = Number((diff / cycleLiters).toFixed(2));
+          costPerKm = Number((cycleValue / diff).toFixed(3));
+          estimatedAutonomyKmOrHours = Number((equipment.tankCapacityLiters * calculatedAverageKmPerLiter).toFixed(0));
+        } else {
+          calculatedAverageLitersPerHour = Number((cycleLiters / diff).toFixed(2));
+          costPerHour = Number((cycleValue / diff).toFixed(2));
+          estimatedAutonomyKmOrHours = calculatedAverageLitersPerHour > 0
+            ? Number((equipment.tankCapacityLiters / calculatedAverageLitersPerHour).toFixed(1))
+            : undefined;
         }
-      }
-    } else {
-      // Liters per Hour
-      calculatedAverageLitersPerHour = Number((liters / diff).toFixed(2));
-      costPerHour = Number((totalValue / diff).toFixed(2));
-      if (calculatedAverageLitersPerHour > 0) {
-        estimatedAutonomyKmOrHours = Number((equipment.tankCapacityLiters / calculatedAverageLitersPerHour).toFixed(1));
-      }
 
-      // Historical average
-      const prevAverages = sortedLogs
-        .map(l => l.calculatedAverageLitersPerHour)
-        .filter((val): val is number => val !== undefined && val > 0);
+        // Build a weighted historical baseline from completed full-to-full cycles only.
+        const fullIndexes = eligibleLogs
+          .map((log, index) => log.isFullTank === true && getMeter(log) !== undefined ? index : -1)
+          .filter(index => index >= 0);
+        let historicalLiters = 0;
+        let historicalMeterDelta = 0;
 
-      if (prevAverages.length > 0) {
-        const avgLh = prevAverages.reduce((acc, v) => acc + v, 0) / prevAverages.length;
-        // If Liters per hour spiked
-        if (calculatedAverageLitersPerHour > avgLh * (1 + suspiciousMarginPercent / 100)) {
-          flaggedSuspicious = true;
-          suspiciousReason = `Consumo de ${calculatedAverageLitersPerHour} L/h está ${suspiciousMarginPercent}% acima da média histórica (${avgLh.toFixed(1)} L/h).`;
+        for (let i = 0; i < fullIndexes.length - 1; i++) {
+          const startIndex = fullIndexes[i];
+          const endIndex = fullIndexes[i + 1];
+          const startMeter = getMeter(eligibleLogs[startIndex]);
+          const endMeter = getMeter(eligibleLogs[endIndex]);
+          if (startMeter === undefined || endMeter === undefined || endMeter <= startMeter) continue;
+          const intervalLiters = eligibleLogs
+            .slice(startIndex + 1, endIndex + 1)
+            .reduce((sum, log) => sum + Math.max(0, Number(log.liters) || 0), 0);
+          if (intervalLiters <= 0) continue;
+          historicalLiters += intervalLiters;
+          historicalMeterDelta += endMeter - startMeter;
+        }
+
+        if (historicalLiters > 0 && historicalMeterDelta > 0) {
+          if (isKmBased) {
+            const historicalKmPerLiter = historicalMeterDelta / historicalLiters;
+            if (calculatedAverageKmPerLiter !== undefined &&
+                calculatedAverageKmPerLiter < historicalKmPerLiter * (1 - suspiciousMarginPercent / 100)) {
+              flaggedSuspicious = true;
+              suspiciousReason = `Rendimento de ${calculatedAverageKmPerLiter} km/L está mais de ${suspiciousMarginPercent}% abaixo da média histórica ponderada (${historicalKmPerLiter.toFixed(2)} km/L).`;
+            }
+          } else {
+            const historicalLitersPerHour = historicalLiters / historicalMeterDelta;
+            if (calculatedAverageLitersPerHour !== undefined &&
+                calculatedAverageLitersPerHour > historicalLitersPerHour * (1 + suspiciousMarginPercent / 100)) {
+              flaggedSuspicious = true;
+              suspiciousReason = `Consumo de ${calculatedAverageLitersPerHour} L/h está mais de ${suspiciousMarginPercent}% acima da média histórica ponderada (${historicalLitersPerHour.toFixed(2)} L/h).`;
+            }
+          }
         }
       }
     }

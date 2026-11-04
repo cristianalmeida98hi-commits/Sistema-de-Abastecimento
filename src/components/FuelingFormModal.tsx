@@ -98,6 +98,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
   }, [selectedEquipment?.id, selectedEquipment?.fuelType]);
 
   const [liters, setLiters] = useState<number | string>(50);
+  const [isFullTank, setIsFullTank] = useState(false);
 
   const isFuncionario = currentUser.role === 'FUNCIONARIO';
   const isPrivileged = canEditSystemData(currentUser.role);
@@ -185,6 +186,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
       setCurrentKmOrHour(nextMeter);
       setIsAuthorizedCorrection(false);
       setCorrectionJustification('');
+      setIsFullTank(false);
     }
   }, [equipmentId]);
 
@@ -214,7 +216,9 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
     selectedEquipment,
     numKmOrHour,
     previousLogs.filter(l => l.equipmentId === equipmentId),
-    settings.suspiciousFuelMarginPercentage
+    settings.suspiciousFuelMarginPercentage,
+    isFullTank,
+    dateTime
   ) : {
     totalValue: numLiters * pricePerLiter,
     flaggedSuspicious: false
@@ -277,6 +281,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
         gasStationName: selectedStation.name,
         fuelType,
         liters: numLiters,
+        isFullTank,
         pricePerLiter,
         totalValue: metrics.totalValue,
         operationType,
@@ -300,6 +305,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
       });
 
       setSavedLiters(numLiters);
+      setIsFullTank(false);
       setIsSavedSuccess(true);
 
       setTimeout(() => {
@@ -466,6 +472,15 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                     </button>
                   ) : null}
                 </div>
+                <label className="flex items-start gap-2.5 rounded-xl border border-emerald-700/70 bg-emerald-950/40 p-3 text-xs font-semibold text-emerald-100 cursor-pointer">
+                  <input type="checkbox" checked={isFullTank} onChange={(e) => setIsFullTank(e.target.checked)} className="mt-0.5 h-4 w-4 accent-yellow-400" />
+                  <span>Tanque completado neste abastecimento
+                    <span className="block pt-0.5 text-[10px] font-medium text-emerald-300/80">Marque somente quando o tanque realmente ficar cheio. Abastecimentos parciais serão acumulados até o próximo tanque cheio.</span>
+                    {isFullTank && !previousLogs.some(log => log.equipmentId === equipmentId && log.isFullTank === true && new Date(log.dateTime).getTime() < new Date(dateTime).getTime()) && (
+                      <span className="block pt-1 text-[10px] font-bold text-[#FACC15]">Este será o primeiro marco de tanque cheio. A média será calculada a partir do próximo tanque cheio.</span>
+                    )}
+                  </span>
+                </label>
               </div>
 
               {/* Meter Input (Km or Hourmeter) */}

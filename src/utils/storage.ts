@@ -1,5 +1,5 @@
 import { 
-  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch,
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, writeBatch, deleteField,
   query, orderBy, limit
 } from 'firebase/firestore';
 import { db, safeSetDoc, safeUpdateDoc, ensureFirebaseAuth } from '../lib/firebase';
@@ -21,7 +21,7 @@ import {
   dispatchPushNotificationEvent, cleanupPushOnLogout, clearPushEventDeduplication 
 } from './pushNotifications';
 import { 
-  getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO 
+  getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO, calculateFuelLogMetrics 
 } from './calculations';
 import { deleteDefectPhotos } from './defectPhotoService';
 import { validateHourmeterReading } from './hourmeterValidation';
@@ -1150,16 +1150,7 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
     safeDateTime = `${safeDateTime.trim()}-03:00`;
   }
 
-  const newLog: FuelLog = {
-    ...log,
-    dateTime: safeDateTime,
-    id: `log-${Date.now()}`,
-    createdAt: getNowSaoPauloISO()
-  };
-
-  const cleanedLog = cleanUndefined(newLog);
-
-  // Validar consistência do horímetro ANTES de gravar no Firestore ou alterar o cache
+  // Resolve equipamento e valida o horímetro antes de calcular ou persistir o registro.
   const vehicles = getVehicles();
   const targetVehicle = vehicles.find(v => v.id === log.equipmentId);
   const isKm = targetVehicle?.category === 'VEICULO';
@@ -1171,7 +1162,7 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
       newHourmeter: log.hourmeterAtFueling,
       equipment: targetVehicle,
       previousLogs: cache.fuelLogs,
-      currentDate: log.dateTime,
+      currentDate: safeDateTime,
       userRole,
       isAuthorizedCorrection: Boolean(log.isAuthorizedCorrection),
       justification: log.correctionReason
@@ -1181,6 +1172,29 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
       throw new Error(validation.message || 'Horímetro inconsistente para este equipamento.');
     }
   }
+
+  const currentMeter = isKm ? log.kmAtFueling : log.hourmeterAtFueling;
+  const calculatedMetrics = targetVehicle && typeof currentMeter === 'number'
+    ? calculateFuelLogMetrics(
+        Number(log.liters) || 0,
+        Number(log.pricePerLiter) || 0,
+        targetVehicle,
+        currentMeter,
+        cache.fuelLogs.filter(item => item.equipmentId === log.equipmentId),
+        Number(cache.settings.suspiciousFuelMarginPercentage) || 25,
+        Boolean(log.isFullTank),
+        safeDateTime
+      )
+    : undefined;
+
+  const newLog: FuelLog = {
+    ...log,
+    ...(calculatedMetrics || {}),
+    dateTime: safeDateTime,
+    id: `log-${Date.now()}`,
+    createdAt: getNowSaoPauloISO()
+  };
+  const cleanedLog = cleanUndefined(newLog);
 
   // Optimistically update local memory cache
   cache.fuelLogs = [cleanedLog, ...cache.fuelLogs.filter(l => l.id !== cleanedLog.id)];
@@ -1253,37 +1267,59 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
       await updateDoc(doc(db, 'vehicles', targetVehicle.id), vehicleUpdates);
     }
 
-    // If flagged suspicious, create automated Alert in Firestore
-    if (log.flaggedSuspicious) {
-      const alertId = `alt-susp-${Date.now()}`;
+    // Keep one unresolved suspicious-consumption alert per equipment to avoid alert spam.
+    if (cleanedLog.flaggedSuspicious) {
       const alertTitle = 'Consumo Anômalo no Abastecimento';
-      const alertDesc = `${log.equipmentName} (${log.equipmentPlateOrCode}): ${log.suspiciousReason || 'Consumo fora do padrão registrado.'}`;
-      const newAlert: SmartAlert = cleanUndefined({
-        id: alertId,
-        type: 'SUSPICIOUS_FUEL',
-        severity: 'ALTA',
-        title: alertTitle,
-        description: alertDesc,
-        equipmentId: log.equipmentId,
-        equipmentName: log.equipmentName,
-        fuelLogId: newLog.id,
-        date: log.dateTime.slice(0, 10),
-        resolved: false,
-        pushNotified: true,
-        pushNotifiedAt: new Date().toISOString()
-      });
-      cache.alerts = [newAlert, ...cache.alerts];
-      await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
+      const alertDesc = `${cleanedLog.equipmentName} (${cleanedLog.equipmentPlateOrCode}): ${cleanedLog.suspiciousReason || 'Consumo fora do padrão registrado.'}`;
+      const existingAlert = cache.alerts.find(alert =>
+        alert.type === 'SUSPICIOUS_FUEL' &&
+        alert.equipmentId === cleanedLog.equipmentId &&
+        !alert.resolved
+      );
 
-      // Conectar alerta interno de consumo anômalo ao mecanismo Web Push
-      dispatchPushNotificationEvent({
-        eventType: 'SUSPICIOUS_FUEL',
-        eventId: newAlert.id,
-        equipmentName: log.equipmentName,
-        equipmentId: log.equipmentId,
-        customTitle: `⚠️ ${alertTitle}`,
-        description: alertDesc
-      }).catch(() => {});
+      if (existingAlert) {
+        const updatedAlert = cleanUndefined({
+          ...existingAlert,
+          title: alertTitle,
+          description: alertDesc,
+          fuelLogId: cleanedLog.id,
+          date: cleanedLog.dateTime.slice(0, 10)
+        });
+        cache.alerts = cache.alerts.map(alert => alert.id === existingAlert.id ? updatedAlert : alert);
+        await updateDoc(doc(db, 'alerts', existingAlert.id), {
+          title: alertTitle,
+          description: alertDesc,
+          fuelLogId: cleanedLog.id,
+          date: cleanedLog.dateTime.slice(0, 10)
+        });
+      } else {
+        const alertId = `alt-susp-${cleanedLog.id}`;
+        const newAlert: SmartAlert = cleanUndefined({
+          id: alertId,
+          type: 'SUSPICIOUS_FUEL',
+          severity: 'ALTA',
+          title: alertTitle,
+          description: alertDesc,
+          equipmentId: cleanedLog.equipmentId,
+          equipmentName: cleanedLog.equipmentName,
+          fuelLogId: cleanedLog.id,
+          date: cleanedLog.dateTime.slice(0, 10),
+          resolved: false,
+          pushNotified: true,
+          pushNotifiedAt: new Date().toISOString()
+        });
+        cache.alerts = [newAlert, ...cache.alerts];
+        await setDoc(doc(db, 'alerts', newAlert.id), newAlert);
+
+        dispatchPushNotificationEvent({
+          eventType: 'SUSPICIOUS_FUEL',
+          eventId: newAlert.id,
+          equipmentName: cleanedLog.equipmentName,
+          equipmentId: cleanedLog.equipmentId,
+          customTitle: `⚠️ ${alertTitle}`,
+          description: alertDesc
+        }).catch(() => {});
+      }
     }
 
     logAuditEvent('CRIAR', 'Abastecimento', `Registrou ${newLog.liters}L em ${newLog.equipmentName} (${newLog.equipmentPlateOrCode}) via ${newLog.gasStationName}.`);
@@ -1302,52 +1338,208 @@ export async function updateFuelLog(id: string, updatedFields: Partial<FuelLog>)
     throw new Error('Acesso negado: Somente os perfis Administrador e Manutenção possuem permissão para editar registros de abastecimento.');
   }
 
-  const current = cache.fuelLogs.find(l => l.id === id);
-  if (!current) {
-    throw new Error('Registro de abastecimento não encontrado.');
+  const current = cache.fuelLogs.find(log => log.id === id);
+  if (!current) throw new Error('Registro de abastecimento não encontrado.');
+  if (updatedFields.equipmentId !== undefined && updatedFields.equipmentId !== current.equipmentId) {
+    throw new Error('Não é permitido transferir um abastecimento para outro equipamento durante a edição.');
   }
 
-  // Recalculate dependent values strictly for this edited record
+  const equipment = cache.vehicles.find(vehicle => vehicle.id === current.equipmentId);
+  if (!equipment) throw new Error('Equipamento do abastecimento não encontrado. Nenhum registro foi alterado.');
+
   const finalLiters = updatedFields.liters !== undefined ? Number(updatedFields.liters) : current.liters;
   const finalPrice = updatedFields.pricePerLiter !== undefined ? Number(updatedFields.pricePerLiter) : current.pricePerLiter;
-  const recalculatedTotalValue = Number((finalLiters * finalPrice).toFixed(2));
+  if (!Number.isFinite(finalLiters) || finalLiters <= 0 || !Number.isFinite(finalPrice) || finalPrice < 0) {
+    throw new Error('Litros ou preço por litro inválido. Nenhum registro foi alterado.');
+  }
 
-  let recalculatedCostPerKm = current.costPerKm;
-  let recalculatedCostPerHour = current.costPerHour;
+  const editedLog: FuelLog = {
+    ...current,
+    ...updatedFields,
+    equipmentId: current.equipmentId,
+    liters: finalLiters,
+    pricePerLiter: finalPrice,
+    totalValue: Number((finalLiters * finalPrice).toFixed(2)),
+    updatedAt: new Date().toISOString()
+  };
 
-  if (current.equipmentCategory === 'VEICULO') {
-    if (current.kmAtFueling !== undefined && current.previousKmOrHour !== undefined && current.kmAtFueling > current.previousKmOrHour) {
-      const diff = current.kmAtFueling - current.previousKmOrHour;
-      if (diff > 0) {
-        recalculatedCostPerKm = Number((recalculatedTotalValue / diff).toFixed(3));
+  // Uma edição pode alterar o ciclo full-to-full atual e todos os ciclos posteriores.
+  // Recalcula apenas os campos derivados, preservando os demais dados dos registros.
+  const equipmentLogs = cache.fuelLogs
+    .filter(log => log.equipmentId === current.equipmentId)
+    .map(log => log.id === id ? editedLog : log)
+    .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
+
+  const recalculationStart = Math.min(
+    new Date(current.dateTime).getTime(),
+    new Date(editedLog.dateTime).getTime()
+  );
+  const precedingLogs = equipmentLogs.filter(log => new Date(log.dateTime).getTime() < recalculationStart);
+  const patches: Array<{ id: string; fields: Record<string, any> }> = [];
+  const recalculatedById = new Map<string, FuelLog>();
+
+  for (const log of equipmentLogs) {
+    if (new Date(log.dateTime).getTime() < recalculationStart) continue;
+
+    const meter = equipment.category === 'VEICULO' ? log.kmAtFueling : log.hourmeterAtFueling;
+    const fields: Record<string, any> = {
+      calculatedAverageKmPerLiter: deleteField(),
+      calculatedAverageLitersPerHour: deleteField(),
+      costPerKm: deleteField(),
+      costPerHour: deleteField(),
+      estimatedAutonomyKmOrHours: deleteField(),
+      previousKmOrHour: deleteField(),
+      flaggedSuspicious: false,
+      suspiciousReason: deleteField()
+    };
+
+    const recalculatedLogBase: FuelLog = { ...log };
+    const derivedKeys = [
+      'previousKmOrHour', 'calculatedAverageKmPerLiter', 'calculatedAverageLitersPerHour',
+      'costPerKm', 'costPerHour', 'estimatedAutonomyKmOrHours', 'flaggedSuspicious', 'suspiciousReason'
+    ] as const;
+    for (const key of derivedKeys) delete (recalculatedLogBase as any)[key];
+    let recalculatedLog: FuelLog = recalculatedLogBase;
+    let derivedFields: Record<string, any> = {};
+    if (typeof meter === 'number' && Number.isFinite(meter)) {
+      const metrics = calculateFuelLogMetrics(
+        log.liters,
+        log.pricePerLiter,
+        equipment,
+        meter,
+        precedingLogs,
+        Number(cache.settings.suspiciousFuelMarginPercentage) || 25,
+        Boolean(log.isFullTank),
+        log.dateTime
+      );
+
+      const derived = cleanUndefined({
+        previousKmOrHour: metrics.previousKmOrHour,
+        calculatedAverageKmPerLiter: metrics.calculatedAverageKmPerLiter,
+        calculatedAverageLitersPerHour: metrics.calculatedAverageLitersPerHour,
+        costPerKm: metrics.costPerKm,
+        costPerHour: metrics.costPerHour,
+        estimatedAutonomyKmOrHours: metrics.estimatedAutonomyKmOrHours,
+        flaggedSuspicious: metrics.flaggedSuspicious,
+        suspiciousReason: metrics.suspiciousReason
+      });
+      derivedFields = derived;
+      Object.assign(fields, derived);
+      recalculatedLog = { ...recalculatedLog, ...derived };
+    }
+
+    if (log.id === id) {
+      Object.assign(fields, {
+        liters: editedLog.liters,
+        pricePerLiter: editedLog.pricePerLiter,
+        totalValue: editedLog.totalValue,
+        updatedAt: editedLog.updatedAt
+      });
+      recalculatedLog = { ...recalculatedLog, ...editedLog };
+      for (const key of derivedKeys) delete (recalculatedLog as any)[key];
+      Object.assign(recalculatedLog, derivedFields);
+    }
+
+    patches.push({ id: log.id, fields });
+    recalculatedById.set(log.id, recalculatedLog);
+    precedingLogs.push(recalculatedLog);
+  }
+
+  // Sincroniza o alerta de consumo anômalo com o resultado recalculado.
+  // Mantém no máximo um alerta aberto por equipamento.
+  const finalEquipmentLogs = equipmentLogs.map(log => recalculatedById.get(log.id) || log);
+  const latestSuspiciousLog = finalEquipmentLogs
+    .filter(log => log.flaggedSuspicious)
+    .sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime())[0];
+  const unresolvedFuelAlerts = cache.alerts.filter(alert =>
+    alert.type === 'SUSPICIOUS_FUEL' &&
+    alert.equipmentId === current.equipmentId &&
+    !alert.resolved
+  );
+  const alertWrites: Array<{ id: string; mode: 'update' | 'create'; data: Record<string, any> }> = [];
+  const alertNow = new Date().toISOString();
+
+  if (latestSuspiciousLog) {
+    const alertTitle = 'Consumo Anômalo no Abastecimento';
+    const alertDesc = `${latestSuspiciousLog.equipmentName} (${latestSuspiciousLog.equipmentPlateOrCode}): ${latestSuspiciousLog.suspiciousReason || 'Consumo fora do padrão registrado.'}`;
+    const primaryAlert = unresolvedFuelAlerts[0];
+    if (primaryAlert) {
+      alertWrites.push({
+        id: primaryAlert.id,
+        mode: 'update',
+        data: {
+          title: alertTitle,
+          description: alertDesc,
+          fuelLogId: latestSuspiciousLog.id,
+          date: latestSuspiciousLog.dateTime.slice(0, 10)
+        }
+      });
+      for (const duplicate of unresolvedFuelAlerts.slice(1)) {
+        alertWrites.push({
+          id: duplicate.id,
+          mode: 'update',
+          data: { resolved: true, resolvedAt: alertNow, resolvedBy: 'Sistema: recálculo de consumo' }
+        });
       }
+    } else {
+      const alertId = `alt-susp-${latestSuspiciousLog.id}`;
+      alertWrites.push({
+        id: alertId,
+        mode: 'create',
+        data: {
+          id: alertId,
+          type: 'SUSPICIOUS_FUEL',
+          severity: 'ALTA',
+          title: alertTitle,
+          description: alertDesc,
+          equipmentId: latestSuspiciousLog.equipmentId,
+          equipmentName: latestSuspiciousLog.equipmentName,
+          fuelLogId: latestSuspiciousLog.id,
+          date: latestSuspiciousLog.dateTime.slice(0, 10),
+          resolved: false,
+          pushNotified: false
+        }
+      });
     }
   } else {
-    if (current.hourmeterAtFueling !== undefined && current.previousKmOrHour !== undefined && current.hourmeterAtFueling > current.previousKmOrHour) {
-      const diff = current.hourmeterAtFueling - current.previousKmOrHour;
-      if (diff > 0) {
-        recalculatedCostPerHour = Number((recalculatedTotalValue / diff).toFixed(2));
-      }
+    for (const alert of unresolvedFuelAlerts) {
+      alertWrites.push({
+        id: alert.id,
+        mode: 'update',
+        data: { resolved: true, resolvedAt: alertNow, resolvedBy: 'Sistema: recálculo de consumo' }
+      });
     }
   }
 
-  const cleaned = cleanUndefined({
-    ...updatedFields,
-    liters: finalLiters,
-    pricePerLiter: finalPrice,
-    totalValue: recalculatedTotalValue,
-    costPerKm: recalculatedCostPerKm,
-    costPerHour: recalculatedCostPerHour,
-    updatedAt: new Date().toISOString()
-  });
+  if (patches.length + alertWrites.length > 450) {
+    throw new Error('Este equipamento possui muitos registros e alertas para recalcular com segurança em uma única operação. Nenhum registro foi alterado.');
+  }
 
-  cache.fuelLogs = cache.fuelLogs.map(l => l.id === id ? { ...l, ...cleaned } : l);
+  const batch = writeBatch(db);
+  for (const patch of patches) {
+    batch.update(doc(db, 'fuel_logs', patch.id), patch.fields);
+  }
+  for (const alertWrite of alertWrites) {
+    const alertRef = doc(db, 'alerts', alertWrite.id);
+    if (alertWrite.mode === 'create') batch.set(alertRef, alertWrite.data);
+    else batch.update(alertRef, alertWrite.data);
+  }
+  await batch.commit();
+
+  cache.fuelLogs = cache.fuelLogs.map(log => recalculatedById.get(log.id) || log);
+  for (const alertWrite of alertWrites) {
+    if (alertWrite.mode === 'create') {
+      cache.alerts = [{ ...alertWrite.data } as SmartAlert, ...cache.alerts];
+    } else {
+      cache.alerts = cache.alerts.map(alert =>
+        alert.id === alertWrite.id ? { ...alert, ...alertWrite.data } as SmartAlert : alert
+      );
+    }
+  }
   notifyDataUpdated();
 
-  await updateDoc(doc(db, 'fuel_logs', id), cleaned);
-  logAuditEvent('EDITAR', 'Abastecimento', `${caller.name} (${caller.role}) atualizou o abastecimento ID ${id} (${current.equipmentName}). Preço: R$ ${finalPrice.toFixed(3)}, Total: R$ ${recalculatedTotalValue.toFixed(2)}.`);
+  logAuditEvent('EDITAR', 'Abastecimento', `${caller.name} (${caller.role}) atualizou o abastecimento ID ${id} (${current.equipmentName}). Preço: R$ ${finalPrice.toFixed(3)}, Total: R$ ${editedLog.totalValue.toFixed(2)}. Ciclos posteriores e alertas recalculados.`);
 }
-
 export async function deleteFuelLog(id: string): Promise<void> {
   cache.fuelLogs = cache.fuelLogs.filter(l => l.id !== id);
   notifyDataUpdated();

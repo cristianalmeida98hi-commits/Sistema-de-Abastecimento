@@ -431,9 +431,9 @@ export const FuelLogsViewComponent: React.FC<FuelLogsViewProps> = ({
                     <td className="p-3">{formatCurrency(log.pricePerLiter)}</td>
                     <td className="p-3 font-black text-gray-900 dark:text-emerald-100">{formatCurrency(log.totalValue)}</td>
                     <td className="p-3">
-                      {log.calculatedAverageKmPerLiter ? (
+                      {log.isFullTank && log.calculatedAverageKmPerLiter ? (
                         <span className="font-bold text-emerald-700 dark:text-emerald-400">{log.calculatedAverageKmPerLiter} km/L</span>
-                      ) : log.calculatedAverageLitersPerHour ? (
+                      ) : log.isFullTank && log.calculatedAverageLitersPerHour ? (
                         <span className="font-bold text-amber-600 dark:text-amber-400">{log.calculatedAverageLitersPerHour} L/h</span>
                       ) : (
                         <span className="opacity-50">-</span>

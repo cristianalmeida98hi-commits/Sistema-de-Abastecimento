@@ -21,7 +21,7 @@ import {
   dispatchPushNotificationEvent, cleanupPushOnLogout, clearPushEventDeduplication 
 } from './pushNotifications';
 import { 
-  getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO 
+  getTodayDateSaoPaulo, createTimestampForDateSaoPaulo, getNowSaoPauloISO, calculateFuelLogMetrics 
 } from './calculations';
 import { deleteDefectPhotos } from './defectPhotoService';
 import { validateHourmeterReading } from './hourmeterValidation';
@@ -1150,16 +1150,7 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
     safeDateTime = `${safeDateTime.trim()}-03:00`;
   }
 
-  const newLog: FuelLog = {
-    ...log,
-    dateTime: safeDateTime,
-    id: `log-${Date.now()}`,
-    createdAt: getNowSaoPauloISO()
-  };
-
-  const cleanedLog = cleanUndefined(newLog);
-
-  // Validar consistência do horímetro ANTES de gravar no Firestore ou alterar o cache
+  // Resolve equipamento e valida o horímetro antes de calcular ou persistir o registro.
   const vehicles = getVehicles();
   const targetVehicle = vehicles.find(v => v.id === log.equipmentId);
   const isKm = targetVehicle?.category === 'VEICULO';
@@ -1171,7 +1162,7 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
       newHourmeter: log.hourmeterAtFueling,
       equipment: targetVehicle,
       previousLogs: cache.fuelLogs,
-      currentDate: log.dateTime,
+      currentDate: safeDateTime,
       userRole,
       isAuthorizedCorrection: Boolean(log.isAuthorizedCorrection),
       justification: log.correctionReason
@@ -1181,6 +1172,29 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
       throw new Error(validation.message || 'Horímetro inconsistente para este equipamento.');
     }
   }
+
+  const currentMeter = isKm ? log.kmAtFueling : log.hourmeterAtFueling;
+  const calculatedMetrics = targetVehicle && typeof currentMeter === 'number'
+    ? calculateFuelLogMetrics(
+        Number(log.liters) || 0,
+        Number(log.pricePerLiter) || 0,
+        targetVehicle,
+        currentMeter,
+        cache.fuelLogs.filter(item => item.equipmentId === log.equipmentId),
+        Number(cache.settings.suspiciousFuelMarginPercentage) || 25,
+        Boolean(log.isFullTank),
+        safeDateTime
+      )
+    : undefined;
+
+  const newLog: FuelLog = {
+    ...log,
+    ...(calculatedMetrics || {}),
+    dateTime: safeDateTime,
+    id: `log-${Date.now()}`,
+    createdAt: getNowSaoPauloISO()
+  };
+  const cleanedLog = cleanUndefined(newLog);
 
   // Optimistically update local memory cache
   cache.fuelLogs = [cleanedLog, ...cache.fuelLogs.filter(l => l.id !== cleanedLog.id)];

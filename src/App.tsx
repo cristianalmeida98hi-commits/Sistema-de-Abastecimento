@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   initStorage, getCurrentUser, getUsers, getVehicles, getGasStations, 
   getFuelLogs, getMaintenanceLogs, getAlerts, getAuditLogs, getSettings,
-  getMachineIssues, getPreventiveItems, addMachineIssue, resolveMachineIssue, recordPreventiveService,
+  getMachineIssues, getPreventiveItems, addMachineIssue, resolveMachineIssue, deleteMachineIssue, recordPreventiveService,
   addFuelLog, updateFuelLog, deleteFuelLog, addVehicle, updateVehicle, deleteVehicle,
   addMaintenance, updateMaintenance, deleteMaintenance, addGasStation, updateGasStation, deleteGasStation, addUser,
   updateUser, deleteUser, resetUserPassword, resolveAlert, updateSettings, logoutUser,
@@ -1115,6 +1115,13 @@ export default function App() {
             onReportProblemSubmit={(issueData) => { addMachineIssue(issueData); refreshState(); }}
             onRecordPreventiveService={(equipmentId, itemKey, currentHourmeter, notes) => { recordPreventiveService(equipmentId, itemKey, currentHourmeter, notes); refreshState(); }}
             onResolveIssue={(issueId) => { resolveMachineIssue(issueId); refreshState(); }}
+            onDeleteIssue={async (issueId) => {
+              if (currentUser?.role !== 'MANUTENCAO') {
+                throw new Error('Acesso negado: Somente o perfil MANUTENÇÃO pode excluir problemas e defeitos.');
+              }
+              await deleteMachineIssue(issueId);
+              refreshState();
+            }}
             onUpdateVehicleStatus={(vehicleId, newStatus) => { updateVehicle(vehicleId, { status: newStatus }); refreshState(); }}
             darkMode={darkMode}
           />

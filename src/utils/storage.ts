@@ -2050,6 +2050,41 @@ export async function addMachineIssue(issueData: Omit<MachineIssue, 'id' | 'date
   return cleaned;
 }
 
+export async function deleteMachineIssue(issueId: string): Promise<void> {
+  const caller = getCurrentUser();
+  if (!caller || caller.role !== 'MANUTENCAO') {
+    throw new Error('Acesso negado: Somente usuários com perfil de MANUTENÇÃO podem excluir problemas e defeitos.');
+  }
+
+  const targetIssue = cache.machineIssues.find(issue => issue.id === issueId);
+  if (!targetIssue) {
+    throw new Error('Problema/defeito não encontrado. Atualize a ficha técnica e tente novamente.');
+  }
+
+  // Exclui somente o registro selecionado. Fotos/anexos externos e demais dados do equipamento são preservados.
+  await deleteDoc(doc(db, 'machine_issues', issueId));
+  cache.machineIssues = cache.machineIssues.filter(issue => issue.id !== issueId);
+
+  // Remove somente o alerta gerado para este ID de problema, sem tocar em outros alertas do equipamento.
+  const linkedAlertId = `alt-iss-${issueId}`;
+  const linkedAlert = cache.alerts.find(alert => alert.id === linkedAlertId);
+  if (linkedAlert) {
+    try {
+      await deleteDoc(doc(db, 'alerts', linkedAlertId));
+      cache.alerts = cache.alerts.filter(alert => alert.id !== linkedAlertId);
+    } catch (error) {
+      console.warn('[deleteMachineIssue] O problema foi excluído, mas o alerta vinculado não pôde ser removido:', error);
+    }
+  }
+
+  notifyDataUpdated(false);
+  logAuditEvent(
+    'EXCLUIR',
+    'Problema',
+    `Usuário da MANUTENÇÃO (${caller.name}) excluiu o problema/defeito "${targetIssue.description}" do equipamento ${targetIssue.equipmentName} (ID ${issueId}).`
+  );
+}
+
 export async function resolveMachineIssue(issueId: string, notes?: string): Promise<void> {
   const user = getCurrentUser();
   const targetIssue = cache.machineIssues.find(i => i.id === issueId);

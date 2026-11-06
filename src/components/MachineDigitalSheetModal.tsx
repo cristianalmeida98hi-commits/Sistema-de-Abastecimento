@@ -42,6 +42,7 @@ interface MachineDigitalSheetModalProps {
   onReportProblemSubmit: (issueData: Omit<MachineIssue, 'id' | 'dateTime' | 'status'>) => void;
   onRecordPreventiveService: (equipmentId: string, itemKey: PreventiveItemKey, currentHourmeter: number, notes?: string) => void;
   onResolveIssue?: (issueId: string) => void;
+  onDeleteIssue?: (issueId: string) => Promise<void> | void;
   onUpdateVehicleStatus?: (vehicleId: string, newStatus: 'ATIVO' | 'EM_MANUTENCAO' | 'INATIVO') => void;
   initialTab?: 'PREVENTIVE' | 'HISTORY' | 'TIMELINE' | 'OVERVIEW' | 'ISSUES';
   initialIssueId?: string;
@@ -71,6 +72,7 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
   onReportProblemSubmit,
   onRecordPreventiveService,
   onResolveIssue,
+  onDeleteIssue,
   onUpdateVehicleStatus,
   initialTab = 'HISTORY',
   initialIssueId,
@@ -734,6 +736,26 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
         setActionSuccessMsg('Registro de manutenção removido.');
         setTimeout(() => setActionSuccessMsg(null), 3000);
       }
+    }
+  };
+
+  const handleDeleteIssue = async (issueId: string) => {
+    if (!canManageTimeline) {
+      alert('Acesso negado: Somente o perfil MANUTENÇÃO pode excluir problemas e defeitos.');
+      return;
+    }
+    if (!onDeleteIssue) {
+      alert('A exclusão de problemas não está disponível no momento.');
+      return;
+    }
+    if (!confirm('Tem certeza que deseja excluir este problema/defeito da linha do tempo?')) return;
+    try {
+      await onDeleteIssue(issueId);
+      setActionSuccessMsg('Problema/defeito removido da linha do tempo.');
+      setTimeout(() => setActionSuccessMsg(null), 3000);
+    } catch (error) {
+      console.error('[MachineDigitalSheetModal] Falha ao excluir problema:', error);
+      alert(error instanceof Error ? error.message : 'Não foi possível excluir o problema. Tente novamente.');
     }
   };
 
@@ -2252,6 +2274,18 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
                             >
                               <Trash2 className="w-3 h-3 text-red-400" />
                               <span>Excluir</span>
+                            </button>
+                          </div>
+                        )}
+                        {item.type === 'ISSUE' && canManageTimeline && (
+                          <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-slate-200/60 dark:border-emerald-900">
+                            <button
+                              onClick={() => handleDeleteIssue((item.rawObj as MachineIssue).id)}
+                              className="px-2.5 py-1 rounded-lg bg-red-100 dark:bg-red-950/80 hover:bg-red-200 text-red-600 dark:text-red-300 flex items-center gap-1 text-[10px] font-bold shadow-xs active:scale-95 transition-all"
+                              title="Excluir problema/defeito da linha do tempo"
+                            >
+                              <Trash2 className="w-3 h-3 text-red-400" />
+                              <span>Excluir problema</span>
                             </button>
                           </div>
                         )}

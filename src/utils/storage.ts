@@ -182,10 +182,15 @@ function setupFirestoreListeners() {
     // 1. Users Subscription
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
-      if (items.length > 0 || cache.users.length === 0) {
+      if (!snapshot.metadata.fromCache) {
+        // Confirmado pelo servidor: substitui o cache (inclusive por [] quando a coleção está vazia)
+        // e só então a coleção conta como sincronizada.
+        cache.users = items;
+        loadedCollections.add('users');
+      } else if (items.length > 0 || cache.users.length === 0) {
+        // Snapshot vindo do cache local: serve apenas como dado provisório e NÃO marca a coleção como sincronizada.
         cache.users = items;
       }
-      loadedCollections.add('users');
       firestoreLoadError = null;
       updateLoadingStatus();
       notifyDataUpdated(false);
@@ -202,11 +207,16 @@ function setupFirestoreListeners() {
     // 2. Vehicles / Machines Subscription
     const unsubVehicles = onSnapshot(collection(db, 'vehicles'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Vehicle));
-      if (items.length > 0 || cache.vehicles.length === 0) {
+      const isFirstVehiclesSnapshot = !loadedCollections.has('vehicles');
+      if (!snapshot.metadata.fromCache) {
+        // Confirmado pelo servidor: substitui o cache (inclusive por [] quando a coleção está vazia)
+        // e só então a coleção conta como sincronizada.
+        cache.vehicles = items;
+        loadedCollections.add('vehicles');
+      } else if (items.length > 0 || cache.vehicles.length === 0) {
+        // Snapshot vindo do cache local: serve apenas como dado provisório e NÃO marca a coleção como sincronizada.
         cache.vehicles = items;
       }
-      const isFirstVehiclesSnapshot = !loadedCollections.has('vehicles');
-      loadedCollections.add('vehicles');
       firestoreLoadError = null;
       updateLoadingStatus();
       notifyDataUpdated(!isFirstVehiclesSnapshot);

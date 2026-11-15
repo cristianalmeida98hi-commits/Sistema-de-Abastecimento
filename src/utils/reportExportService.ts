@@ -1218,9 +1218,84 @@ function drawFuelAndStationClosingTables(
   return (doc as any).lastAutoTable?.finalY || nextY;
 }
 
+function drawChartsGridSection(
+  doc: any,
+  metrics: ReportMetrics,
+  options: {
+    headingTitle: string;
+    headingSubtitle: string;
+    headingY: number;
+    panelH: number;
+    rowGap?: number;
+  }
+): number {
+  const { headingTitle, headingSubtitle, headingY, panelH, rowGap = 4 } = options;
+
+  drawSectionHeading(doc, headingTitle, headingY, headingSubtitle);
+
+  const panelW = 132.5;
+  const row1Y = headingY + 3.0;
+  const row2Y = row1Y + panelH + rowGap;
+
+  drawHorizontalBarChartPanel(doc, {
+    x: PDF_MARGIN_L,
+    y: row1Y,
+    w: panelW,
+    h: panelH,
+    title: 'CONSUMO POR EQUIPAMENTO / MÁQUINA',
+    subtitle: 'Top 5 Máquinas',
+    accentRgb: [217, 119, 6],
+    totalLiters: metrics.totalLiters,
+    items: metrics.sortedEq.map(e => ({
+      label: e.code ? `${e.name} (${e.code})` : e.name,
+      liters: e.liters
+    }))
+  });
+
+  drawHorizontalBarChartPanel(doc, {
+    x: PDF_MARGIN_L + panelW + 4,
+    y: row1Y,
+    w: panelW,
+    h: panelH,
+    title: 'CONSUMO POR ATIVIDADE',
+    subtitle: 'Top 5 Atividades',
+    accentRgb: [16, 140, 75],
+    totalLiters: metrics.totalLiters,
+    items: metrics.sortedAct.map(a => ({
+      label: a.name,
+      liters: a.liters
+    }))
+  });
+
+  drawHorizontalBarChartPanel(doc, {
+    x: PDF_MARGIN_L,
+    y: row2Y,
+    w: panelW,
+    h: panelH,
+    title: 'CONSUMO POR OPERADOR / MOTORISTA',
+    subtitle: 'Top 5 Operadores',
+    accentRgb: [37, 99, 235],
+    totalLiters: metrics.totalLiters,
+    items: metrics.sortedOp.map(o => ({
+      label: o.name,
+      liters: o.liters
+    }))
+  });
+
+  drawTimelineChartPanel(doc, {
+    x: PDF_MARGIN_L + panelW + 4,
+    y: row2Y,
+    w: panelW,
+    h: panelH,
+    sortedTime: metrics.sortedTime
+  });
+
+  return row2Y + panelH;
+}
+
 /**
  * EXPORTAÇÃO EM PDF — DUAL VARIANT:
- * - 'OFFICIAL' (Relatório Oficial / Operacional): Foco em conferência e auditoria cronológica crescente + fechamento por combustível e posto/tanque.
+ * - 'OFFICIAL' (Relatório Oficial / Operacional): Foco em conferência e auditoria cronológica crescente + fechamento por combustível/posto + Resumo Gráfico do Período ao final.
  * - 'EXECUTIVE' (Relatório Executivo Gerencial): Foco em análise gerencial com KPIs e gráficos na abertura, seguido de resumo por combustível/posto e detalhamento cronológico.
  */
 export async function exportReportPDF(options: ReportExportOptions) {
@@ -1298,69 +1373,12 @@ export async function exportReportPDF(options: ReportExportOptions) {
     drawSectionHeading(doc, 'Indicadores Gerais de Consumo e Abastecimento', 34.5);
     drawExecutiveKpiCards(doc, metrics, 37.5, canViewFinancial);
 
-    drawSectionHeading(
-      doc,
-      'Análise Gráfica do Consumo no Período',
-      62.5,
-      'Top 5 categorias em volume e evolução diária'
-    );
-
-    const panelW = 132.5;
-    const panelH = 62;
-    const row1Y = 65.5;
-    const row2Y = row1Y + panelH + 4; // 131.5 -> termina em 193.5 (acima de MAX_CONTENT_Y=194.5)
-
-    drawHorizontalBarChartPanel(doc, {
-      x: PDF_MARGIN_L,
-      y: row1Y,
-      w: panelW,
-      h: panelH,
-      title: 'CONSUMO POR EQUIPAMENTO / MÁQUINA',
-      subtitle: 'Top 5 Máquinas',
-      accentRgb: [217, 119, 6],
-      totalLiters: metrics.totalLiters,
-      items: metrics.sortedEq.map(e => ({
-        label: e.code ? `${e.name} (${e.code})` : e.name,
-        liters: e.liters
-      }))
-    });
-
-    drawHorizontalBarChartPanel(doc, {
-      x: PDF_MARGIN_L + panelW + 4,
-      y: row1Y,
-      w: panelW,
-      h: panelH,
-      title: 'CONSUMO POR ATIVIDADE',
-      subtitle: 'Top 5 Atividades',
-      accentRgb: [16, 140, 75],
-      totalLiters: metrics.totalLiters,
-      items: metrics.sortedAct.map(a => ({
-        label: a.name,
-        liters: a.liters
-      }))
-    });
-
-    drawHorizontalBarChartPanel(doc, {
-      x: PDF_MARGIN_L,
-      y: row2Y,
-      w: panelW,
-      h: panelH,
-      title: 'CONSUMO POR OPERADOR / MOTORISTA',
-      subtitle: 'Top 5 Operadores',
-      accentRgb: [37, 99, 235],
-      totalLiters: metrics.totalLiters,
-      items: metrics.sortedOp.map(o => ({
-        label: o.name,
-        liters: o.liters
-      }))
-    });
-
-    drawTimelineChartPanel(doc, {
-      x: PDF_MARGIN_L + panelW + 4,
-      y: row2Y,
-      w: panelW,
-      h: panelH,
-      sortedTime: metrics.sortedTime
+    drawChartsGridSection(doc, metrics, {
+      headingTitle: 'Análise Gráfica do Consumo no Período',
+      headingSubtitle: 'Top 5 categorias em volume e evolução diária',
+      headingY: 62.5,
+      panelH: 62,
+      rowGap: 4
     });
 
     // Página 2: Resumo por Combustível e Posto/Tanque + Detalhamento Cronológico
@@ -1417,7 +1435,7 @@ export async function exportReportPDF(options: ReportExportOptions) {
     );
   } else {
     // =========================================================================
-    // MODELO 2: PDF OFICIAL / OPERACIONAL (CONFERÊNCIA E AUDITORIA)
+    // MODELO 2: PDF OFICIAL / OPERACIONAL (CONFERÊNCIA, AUDITORIA E RESUMO GRÁFICO)
     // =========================================================================
     drawOfficialSummaryStrip(doc, metrics, 30.5, canViewFinancial);
 
@@ -1472,6 +1490,7 @@ export async function exportReportPDF(options: ReportExportOptions) {
       ensureHeaderOnPage
     );
 
+    let lastOperationalY = closingEndY;
     if (metrics.suspiciousCount > 0 && closingEndY + 8 <= PDF_MAX_CONTENT_Y) {
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(7.0);
@@ -1481,6 +1500,32 @@ export async function exportReportPDF(options: ReportExportOptions) {
         PDF_MARGIN_L,
         closingEndY + 6
       );
+      lastOperationalY = closingEndY + 8;
+    }
+
+    // Seção Final: Resumo Gráfico do Período (4 gráficos analíticos preservados no Oficial)
+    const minChartsBlockH = 118; // heading (3mm) + 2*55mm + gap (4mm)
+    const availableForCharts = PDF_MAX_CONTENT_Y - (lastOperationalY + 9);
+
+    if (availableForCharts >= minChartsBlockH) {
+      const fittedPanelH = Math.min(72, Math.floor((availableForCharts - 8) / 2));
+      drawChartsGridSection(doc, metrics, {
+        headingTitle: 'Resumo Gráfico do Período',
+        headingSubtitle: 'Top 5 categorias em volume e evolução diária',
+        headingY: lastOperationalY + 9,
+        panelH: fittedPanelH,
+        rowGap: 4
+      });
+    } else {
+      doc.addPage('a4', 'landscape');
+      ensureHeaderOnPage();
+      drawChartsGridSection(doc, metrics, {
+        headingTitle: 'Resumo Gráfico do Período',
+        headingSubtitle: 'Top 5 categorias em volume e evolução diária',
+        headingY: 34.5,
+        panelH: 72,
+        rowGap: 5
+      });
     }
   }
 

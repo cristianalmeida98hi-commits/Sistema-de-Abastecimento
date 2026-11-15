@@ -78,6 +78,10 @@ export type StorageLoadingState = 'LOADING' | 'LOADED_EMPTY' | 'LOADED_WITH_DATA
 let storageLoadingState: StorageLoadingState = 'LOADING';
 let firestoreLoadError: string | null = null;
 const loadedCollections = new Set<string>();
+// Indica que a configuração (settings) já foi confirmada por um snapshot do SERVIDOR nesta sessão.
+// Diferente de loadedCollections, NÃO é zerada quando os listeners são recriados (retorno do segundo plano):
+// a última configuração confirmada continua válida até o próximo snapshot do servidor substituí-la.
+let settingsConfirmedInSession = false;
 // Indica que os dados iniciais já foram reconciliados sem disparar notificações antigas.
 let initialAlertBaselineEstablished = false;
 
@@ -102,9 +106,8 @@ function loadInitialCacheFromStorage() {
         if (Array.isArray(parsed.alerts)) cache.alerts = parsed.alerts;
         if (parsed.settings) cache.settings = { ...INITIAL_SETTINGS, ...parsed.settings };
 
-        if (cache.vehicles.length > 0 || cache.users.length > 0) {
-          storageLoadingState = 'LOADED_WITH_DATA';
-        }
+        // Os dados em cache NÃO liberam mais a tela por conta própria: a liberação exige a sincronização
+        // de users, vehicles e settings (updateLoadingStatus) ou o tempo limite de recuperação (initStorage).
       }
     }
   } catch (e) {
@@ -130,13 +133,16 @@ function persistLocalCacheDebounced() {
 }
 
 function updateLoadingStatus() {
-  const hasCore = loadedCollections.has('vehicles') && loadedCollections.has('users');
+  // A tela só é liberada quando users, vehicles e settings foram sincronizados com o servidor.
+  // A recuperação com dados em cache acontece apenas após o tempo limite (ver initStorage).
+  const hasCore =
+    loadedCollections.has('vehicles') &&
+    loadedCollections.has('users') &&
+    loadedCollections.has('settings');
   if (hasCore) {
     const hasData = cache.vehicles.length > 0 || cache.users.length > 0;
     storageLoadingState = hasData ? 'LOADED_WITH_DATA' : 'LOADED_EMPTY';
     firestoreLoadError = null;
-  } else if (cache.vehicles.length > 0 || cache.users.length > 0) {
-    storageLoadingState = 'LOADED_WITH_DATA';
   }
 }
 
@@ -176,10 +182,15 @@ function setupFirestoreListeners() {
     // 1. Users Subscription
     const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
-      if (items.length > 0 || cache.users.length === 0) {
+      if (!snapshot.metadata.fromCache) {
+        // Confirmado pelo servidor: substitui o cache (inclusive por [] quando a coleção está vazia)
+        // e só então a coleção conta como sincronizada.
+        cache.users = items;
+        loadedCollections.add('users');
+      } else if (items.length > 0 || cache.users.length === 0) {
+        // Snapshot vindo do cache local: serve apenas como dado provisório e NÃO marca a coleção como sincronizada.
         cache.users = items;
       }
-      loadedCollections.add('users');
       firestoreLoadError = null;
       updateLoadingStatus();
       notifyDataUpdated(false);
@@ -196,11 +207,16 @@ function setupFirestoreListeners() {
     // 2. Vehicles / Machines Subscription
     const unsubVehicles = onSnapshot(collection(db, 'vehicles'), (snapshot) => {
       const items = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Vehicle));
-      if (items.length > 0 || cache.vehicles.length === 0) {
+      const isFirstVehiclesSnapshot = !loadedCollections.has('vehicles');
+      if (!snapshot.metadata.fromCache) {
+        // Confirmado pelo servidor: substitui o cache (inclusive por [] quando a coleção está vazia)
+        // e só então a coleção conta como sincronizada.
+        cache.vehicles = items;
+        loadedCollections.add('vehicles');
+      } else if (items.length > 0 || cache.vehicles.length === 0) {
+        // Snapshot vindo do cache local: serve apenas como dado provisório e NÃO marca a coleção como sincronizada.
         cache.vehicles = items;
       }
-      const isFirstVehiclesSnapshot = !loadedCollections.has('vehicles');
-      loadedCollections.add('vehicles');
       firestoreLoadError = null;
       updateLoadingStatus();
       notifyDataUpdated(!isFirstVehiclesSnapshot);
@@ -361,9 +377,22 @@ function setupFirestoreListeners() {
         const configDoc = snapshot.docs.find(d => d.id === 'config') || snapshot.docs[0];
         if (configDoc) {
           cache.settings = configDoc.data() as SystemSettings;
-          loadedCollections.add('settings');
-          notifyDataUpdated(false);
         }
+      } else if (!snapshot.metadata.fromCache && cache.settings.quickAccessUserIds !== undefined) {
+        // O servidor confirmou que não existe configuração: descarta lista de atalhos vinda de cache antigo.
+        const { quickAccessUserIds: _staleQuickAccess, ...settingsWithoutQuickAccess } = cache.settings;
+        cache.settings = settingsWithoutQuickAccess as SystemSettings;
+      }
+
+      // Somente um snapshot vindo do servidor confirma a configuração (inclusive quando o documento não existe).
+      // Snapshots originados do cache local nunca contam como confirmação.
+      if (!snapshot.metadata.fromCache) {
+        settingsConfirmedInSession = true;
+        loadedCollections.add('settings');
+        updateLoadingStatus();
+        notifyDataUpdated(false);
+      } else if (!snapshot.empty) {
+        notifyDataUpdated(false);
       }
     }, (err) => console.warn('[Firestore Settings Connection]', err?.message || err));
     activeFirestoreUnsubscribers.push(unsubSettings);
@@ -459,6 +488,19 @@ export function initStorage() {
   // Attempt to ensure Firebase Auth session asynchronously without blocking real-time subscriptions
   ensureFirebaseAuth().catch(() => {});
   setupFirestoreListeners();
+
+  // Recuperação com cache após o tempo limite (7,5 s), alinhada ao fallback de App.tsx.
+  // Mantém o estado do módulo coerente com a tela (evita voltar para "Sincronizando" no próximo evento).
+  // O cache NÃO é tratado como confirmado pelo servidor: settingsConfirmedInSession permanece como está.
+  if (typeof window !== 'undefined') {
+    setTimeout(() => {
+      if (storageLoadingState === 'LOADING' && (cache.vehicles.length > 0 || cache.users.length > 0)) {
+        console.warn('[Andrade Agro] Sincronização demorada. Liberando com dados do cache local (não confirmados pelo servidor).');
+        storageLoadingState = 'LOADED_WITH_DATA';
+        notifyDataUpdated(false);
+      }
+    }, 7500);
+  }
 }
 
 export function notifyDataUpdated(shouldCheckAlerts: boolean = true) {
@@ -943,22 +985,23 @@ export function getTankStatus(targetTankId?: string) {
 // Quick Access Shortcuts helpers (ADMs e Funcionários na tela de login)
 export function getQuickAccessUserIds(): string[] {
   try {
-    const settings = getSettings();
-    if (settings.quickAccessUserIds && Array.isArray(settings.quickAccessUserIds) && settings.quickAccessUserIds.length > 0) {
-      return settings.quickAccessUserIds;
+    const configured = getSettings().quickAccessUserIds;
+
+    // Lista configurada (inclusive vazia []) é uma configuração válida e intencional: vale exatamente como está.
+    if (Array.isArray(configured)) {
+      return configured;
     }
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('andradeagro_quick_access_user_ids');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
+
+    // Servidor confirmou a configuração, mas nenhuma lista foi definida: mantém o padrão histórico.
+    if (settingsConfirmedInSession) {
+      return cache.users.filter(u => u.active !== false).map(u => u.id);
     }
-    // Default: all active users
-    return cache.users.filter(u => u.active !== false).map(u => u.id);
+
+    // Configuração ainda pendente: não exibir perfis com base em suposição.
+    return [];
   } catch (e) {
     console.error('Error loading quick access user ids:', e);
-    return cache.users.filter(u => u.active !== false).map(u => u.id);
+    return [];
   }
 }
 
@@ -974,6 +1017,11 @@ export async function setQuickAccessUserIds(userIds: string[]): Promise<void> {
 }
 
 export async function toggleQuickAccessUser(userId: string): Promise<void> {
+  if (!settingsConfirmedInSession) {
+    // Evita gravar uma lista calculada sobre dados não confirmados e sobrescrever a configuração real.
+    console.warn('[QuickAccess] Configuração de atalhos ainda não confirmada pelo servidor; alteração ignorada.');
+    return;
+  }
   const currentIds = getQuickAccessUserIds();
   const nextIds = currentIds.includes(userId)
     ? currentIds.filter(id => id !== userId)

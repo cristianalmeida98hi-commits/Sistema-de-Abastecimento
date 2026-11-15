@@ -25,6 +25,7 @@ interface DashboardViewProps {
   onOpenFuelingModal: () => void;
   onNavigate: (tab: string) => void;
   darkMode?: boolean;
+  currentUser?: User | null;
 }
 
 const SECTOR_COLORS: Record<string, string> = {
@@ -43,12 +44,14 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
   settings,
   onOpenFuelingModal,
   onNavigate,
-  darkMode = true
+  darkMode = true,
+  currentUser: authenticatedUser
 }) => {
   const [selectedTankForConfig, setSelectedTankForConfig] = useState<CentralTank | null>(null);
   const [selectedCategoryForActivity, setSelectedCategoryForActivity] = useState<string>('ALL');
   const [areChartsReady, setAreChartsReady] = useState<boolean>(false);
-  const currentUser = getCurrentUser() || { id: 'usr-admin', name: 'Administrador', role: 'ADMIN' } as User;
+  const currentUser = authenticatedUser || getCurrentUser();
+  const canViewFinancial = currentUser?.role === 'ADMIN' || currentUser?.role === 'MANUTENCAO';
 
   React.useEffect(() => {
     // Delay heavy chart mounting by 1 frame to let Bento metrics and tank cards paint at 60fps on mobile
@@ -315,7 +318,9 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
   // Executive summary narrative line: all figures must come from the current month.
   const executiveSummaryText = useMemo(() => {
     if (fuelLogs.length === 0) {
-      return "Nova Empresa: Nenhum abastecimento registrado ainda. Os custos estão zerados (R$ 0,00). Faça um lançamento de teste no sistema para validar os cálculos.";
+      return canViewFinancial
+        ? "Nenhum abastecimento registrado ainda. Os custos estão zerados (R$ 0,00)."
+        : "Nenhum abastecimento registrado ainda.";
     }
 
     const totalMonthLiters = monthLiters;
@@ -353,7 +358,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
     const activityName = topMonthlyGroup.activityName;
 
     return `Este mês foram consumidos ${totalMonthLiters.toLocaleString('pt-BR')} litros de combustível, sendo ${topMonthlyGroup.liters.toLocaleString('pt-BR')} litros utilizados na operação ${operationName}, atividade ${activityName}, pelo operador ${topMonthlyGroup.operatorName}.`;
-  }, [fuelLogs.length, monthLiters, monthLogs]);
+  }, [fuelLogs.length, monthLiters, monthLogs, canViewFinancial]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -385,7 +390,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         
         {/* Bento Stat 1: Abastecimentos Hoje */}
-        <div className="p-5 rounded-3xl border shadow-sm transition-all flex flex-col justify-between bg-[#042d23] border-emerald-900/60 text-slate-100">
+        <div className="group p-5 rounded-3xl border shadow-sm transition-all duration-200 flex flex-col justify-between bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70 text-slate-100 hover:-translate-y-0.5 hover:border-emerald-500/70 hover:shadow-lg hover:shadow-emerald-950/30">
           <div>
             <p className="text-emerald-300 text-xs font-bold uppercase tracking-wider mb-2">
               Abastecimentos (Hoje)
@@ -398,12 +403,12 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-emerald-300/90 mt-3 font-semibold">
-            {todaySpent > 0 ? `Gasto hoje: ${formatCurrency(todaySpent)}` : 'Nenhum lançamento hoje'}
+              {canViewFinancial ? (todaySpent > 0 ? `Gasto hoje: ${formatCurrency(todaySpent)}` : 'Nenhum lançamento hoje') : `${todayLogs.length} abastecimento(s) registrado(s) hoje`}
           </p>
         </div>
 
         {/* Bento Stat 2: Total Litros (Semana) */}
-        <div className="p-5 rounded-3xl border shadow-sm transition-all flex flex-col justify-between bg-[#042d23] border-emerald-900/60 text-slate-100">
+        <div className="group p-5 rounded-3xl border shadow-sm transition-all duration-200 flex flex-col justify-between bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70 text-slate-100 hover:-translate-y-0.5 hover:border-emerald-500/70 hover:shadow-lg hover:shadow-emerald-950/30">
           <div>
             <p className="text-emerald-300 text-xs font-bold uppercase tracking-wider mb-2">
               Total Litros (Semana)
@@ -421,16 +426,19 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Bento Stat 3: Gasto Mensal */}
-        <div className="p-5 rounded-3xl border shadow-sm transition-all flex flex-col justify-between bg-[#042d23] border-emerald-900/60 text-slate-100">
+        <div className="group p-5 rounded-3xl border shadow-sm transition-all duration-200 flex flex-col justify-between bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70 text-slate-100 hover:-translate-y-0.5 hover:border-emerald-500/70 hover:shadow-lg hover:shadow-emerald-950/30">
           <div>
             <p className="text-emerald-300 text-xs font-bold uppercase tracking-wider mb-2">
-              Gasto Mensal
+              {canViewFinancial ? 'Gasto Mensal' : 'Consumo no Mês'}
             </p>
             <div className="flex items-baseline gap-1">
-              <span className="text-xs font-bold text-emerald-300">R$</span>
+              {canViewFinancial ? <span className="text-xs font-bold text-emerald-300">R$</span> : null}
               <span className="text-3xl font-bold text-slate-100">
-                {monthSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                {canViewFinancial
+                  ? monthSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                  : monthLiters.toLocaleString('pt-BR')}
               </span>
+              {!canViewFinancial && <span className="text-sm font-bold text-emerald-300">L</span>}
             </div>
           </div>
           <p className="text-[11px] text-emerald-300 font-bold mt-3">
@@ -468,7 +476,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Main Chart Section - 8 cols */}
-        <div className="lg:col-span-8 rounded-3xl border shadow-sm p-6 flex flex-col bg-[#042d23] border-emerald-900/60">
+        <div className="lg:col-span-8 rounded-3xl border shadow-sm p-6 flex flex-col bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70 hover:border-emerald-600/60 transition-colors">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
             <div>
               <h3 className="font-bold text-lg text-slate-100">Fluxo de Consumo</h3>
@@ -479,7 +487,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
             </span>
           </div>
 
-          <div className="h-64 sm:h-72 w-full flex items-center justify-center">
+          <div className="h-64 sm:h-72 w-full flex items-center justify-center" role="img" aria-label={canViewFinancial ? 'Gráfico de gastos mensais' : 'Gráfico de consumo mensal em litros'}>
             {areChartsReady ? (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={monthlyHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -491,9 +499,9 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#064e3b" />
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} />
-                  <YAxis tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} tickFormatter={(v) => `R$${v/1000}k`} />
+                  <YAxis tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} tickFormatter={(v) => canViewFinancial ? `R$${v/1000}k` : `${Number(v).toLocaleString('pt-BR')} L`} />
                   <Tooltip 
-                    formatter={(val: any) => [formatCurrency(Number(val)), 'Total Gasto']}
+                    formatter={(val: any) => [canViewFinancial ? formatCurrency(Number(val)) : `${Number(val).toLocaleString('pt-BR')} L`, canViewFinancial ? 'Total Gasto' : 'Consumo']}
                     contentStyle={{
                       backgroundColor: '#022c22',
                       borderColor: '#065f46',
@@ -504,7 +512,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                       boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'
                     }}
                   />
-                  <Area type="monotone" dataKey="Gasto" stroke="#FACC15" strokeWidth={3} fillOpacity={1} fill="url(#colorGastoBento)" />
+                  <Area type="monotone" dataKey={canViewFinancial ? 'Gasto' : 'Litros'} stroke="#FACC15" strokeWidth={3} fillOpacity={1} fill="url(#colorGastoBento)" activeDot={{ r: 6, stroke: '#f8fafc', strokeWidth: 2 }} animationDuration={700} />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
@@ -513,18 +521,18 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* Sector Bars Preview inside Bento Card */}
-          <div className="mt-6 pt-4 border-t border-emerald-900/40 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {canViewFinancial && <div className="mt-6 pt-4 border-t border-emerald-900/40 grid grid-cols-2 sm:grid-cols-4 gap-3">
             {sectorChartData.slice(0, 4).map((sec, idx) => (
               <div key={idx} className="bg-emerald-950/60 p-3 rounded-2xl border border-emerald-900/40">
                 <p className="text-[10px] font-extrabold text-emerald-300 uppercase truncate">{sec.name}</p>
                 <p className="text-sm font-bold text-slate-100 mt-0.5">{formatCurrency(sec.value)}</p>
               </div>
             ))}
-          </div>
+          </div>}
         </div>
 
         {/* Recent Registrations Bento Card - 4 cols */}
-        <div className="lg:col-span-4 rounded-3xl border shadow-sm p-6 flex flex-col justify-between bg-[#042d23] border-emerald-900/60">
+        <div className="lg:col-span-4 rounded-3xl border shadow-sm p-6 flex flex-col justify-between bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70">
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-lg text-slate-100">Últimos Registros</h3>
@@ -567,7 +575,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Tanques Centrais Section - Side by Side (Quadra & Itapeva) */}
-      <div className="rounded-3xl border p-6 shadow-sm bg-[#042d23] border-emerald-900/60">
+      <div className="rounded-3xl border p-6 shadow-sm bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div>
             <div className="flex items-center gap-2">
@@ -747,7 +755,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                 <p className="font-extrabold text-sm text-slate-100">{todayTopOperator.name}</p>
                 <div className="flex items-center justify-between text-[11px] text-emerald-200 border-t border-emerald-900/40 pt-1.5 mt-1">
                   <span>{todayTopOperator.count} abastecimento(s) hoje</span>
-                  <span className="font-bold text-slate-200">{formatCurrency(todayTopOperator.cost)}</span>
+                  {canViewFinancial && <span className="font-bold text-slate-200">{formatCurrency(todayTopOperator.cost)}</span>}
                 </div>
                 {todayTopEquipment && (
                   <p className="text-[10px] text-emerald-400/80 truncate">
@@ -775,7 +783,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Operation Breakdown Row */}
-      <div className="rounded-3xl border p-6 shadow-sm bg-[#042d23] border-emerald-900/60">
+      <div className="rounded-3xl border p-6 shadow-sm bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-extrabold text-base text-slate-100">Consumo por Tipo de Operação</h3>
@@ -802,7 +810,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                     {op.liters.toLocaleString('pt-BR')} <span className="text-xs font-bold text-emerald-400">L</span>
                   </p>
                   <p className="text-[11px] text-emerald-300 font-semibold">
-                    {formatCurrency(op.cost)} • {op.count} abastecimentos
+                    {canViewFinancial ? `${formatCurrency(op.cost)} • ` : ''}{op.count} abastecimentos
                   </p>
                 </div>
                 <div className="w-full h-1.5 bg-emerald-900 rounded-full overflow-hidden">
@@ -865,6 +873,8 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                       <RechartsPieChart>
                         <Pie
                           data={categoryConsumption}
+                          activeShape={{ outerRadius: 82 }}
+                          animationDuration={650}
                           cx="50%"
                           cy="50%"
                           innerRadius={50}
@@ -1029,7 +1039,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                             color: '#f8fafc',
                           }}
                         />
-                        <Bar dataKey="liters" fill="#FACC15" radius={[0, 8, 8, 0]} />
+                        <Bar dataKey="liters" fill="#FACC15" radius={[0, 8, 8, 0]} activeBar={{ fill: '#fde047', stroke: '#f8fafc', strokeWidth: 1 }} cursor="pointer" />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (

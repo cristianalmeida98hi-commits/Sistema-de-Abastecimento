@@ -312,21 +312,51 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
     return activityConsumption.reduce((acc, a) => acc + a.liters, 0);
   }, [activityConsumption]);
 
-  // Executive summary narrative line
+  // Executive summary narrative line: all figures must come from the current month.
   const executiveSummaryText = useMemo(() => {
     if (fuelLogs.length === 0) {
       return "Nova Empresa: Nenhum abastecimento registrado ainda. Os custos estão zerados (R$ 0,00). Faça um lançamento de teste no sistema para validar os cálculos.";
     }
+
     const totalMonthLiters = monthLiters;
-    const topOp = operationTypeData[0];
-    if (!topOp) {
+    if (monthLogs.length === 0 || totalMonthLiters <= 0) {
+      return "Ainda não há abastecimentos registrados neste mês.";
+    }
+
+    const operationLabels: Record<string, string> = {
+      GRAMA: 'grama',
+      COLHEITA: 'colheita',
+      PLANTIO: 'plantio',
+      TRANSPORTE: 'transporte',
+      OUTROS: 'outros'
+    };
+
+    // Group by operation AND operator from the same monthly fuel records.
+    const monthlyGroups = new Map<string, { operationType: string; operatorName: string; liters: number }>();
+    monthLogs.forEach(log => {
+      const operationType = log.operationType || 'GRAMA';
+      const operatorId = log.driverOrOperatorId || log.driverOrOperatorName || 'Operador';
+      const key = `${operationType}::${operatorId}`;
+      const existing = monthlyGroups.get(key) || {
+        operationType,
+        operatorName: log.driverOrOperatorName || 'Operador',
+        liters: 0
+      };
+      existing.liters += Number(log.liters) || 0;
+      monthlyGroups.set(key, existing);
+    });
+
+    const topMonthlyGroup = Array.from(monthlyGroups.values())
+      .sort((a, b) => b.liters - a.liters)[0];
+
+    if (!topMonthlyGroup) {
       return `Este mês foram consumidos ${totalMonthLiters.toLocaleString('pt-BR')} litros de combustível.`;
     }
-    const topOpName = topOp.label.replace(/^[^\s]+\s*/, '').toLowerCase();
-    const opName = topOperator?.name || 'Operador';
 
-    return `Este mês foram consumidos ${totalMonthLiters.toLocaleString('pt-BR')} litros de combustível, sendo ${topOp.liters.toLocaleString('pt-BR')} litros utilizados em ${topOpName} pelo operador ${opName}.`;
-  }, [fuelLogs.length, monthLiters, operationTypeData, topOperator]);
+    const operationName = operationLabels[topMonthlyGroup.operationType] || topMonthlyGroup.operationType.toLowerCase();
+
+    return `Este mês foram consumidos ${totalMonthLiters.toLocaleString('pt-BR')} litros de combustível, sendo ${topMonthlyGroup.liters.toLocaleString('pt-BR')} litros utilizados em ${operationName} pelo operador ${topMonthlyGroup.operatorName}.`;
+  }, [fuelLogs.length, monthLiters, monthLogs]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">

@@ -10,7 +10,7 @@ import {
   getTodayDateSaoPaulo, getCurrentTimeSaoPaulo, createTimestampForDateSaoPaulo
 } from '../utils/calculations';
 import { getTankStatus } from '../utils/storage';
-import { validateHourmeterReading } from '../utils/hourmeterValidation';
+import { validateHourmeterReading, validateOdometerReading } from '../utils/hourmeterValidation';
 import { VehicleSelector } from './VehicleSelector';
 
 interface FuelingFormModalProps {
@@ -245,7 +245,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
       return;
     }
 
-    if (!isKmBased && hourmeterValidation.isBlocking) {
+    if (hourmeterValidation.isBlocking) {
       alert(hourmeterValidation.message || 'Por favor, confira e corrija o horímetro no painel físico antes de continuar.');
       return;
     }
@@ -288,9 +288,9 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
         activityType,
         kmAtFueling: isKmBased ? numKmOrHour : undefined,
         hourmeterAtFueling: !isKmBased ? numKmOrHour : undefined,
-        isAuthorizedCorrection: !isKmBased && isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? true : undefined,
-        correctionReason: !isKmBased && isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? correctionJustification.trim() : undefined,
-        previousHourmeterAtCorrection: !isKmBased && isAuthorizedCorrection ? hourmeterValidation.details?.previous : undefined,
+        isAuthorizedCorrection: isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? true : undefined,
+        correctionReason: isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? correctionJustification.trim() : undefined,
+        previousHourmeterAtCorrection: isAuthorizedCorrection ? hourmeterValidation.details?.previous : undefined,
         previousKmOrHour: metrics.previousKmOrHour,
         calculatedAverageKmPerLiter: metrics.calculatedAverageKmPerLiter,
         calculatedAverageLitersPerHour: metrics.calculatedAverageLitersPerHour,
@@ -505,9 +505,9 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                     onChange={(e) => setCurrentKmOrHour(e.target.value)}
                     placeholder={isKmBased ? 'Ex: 68100' : 'Ex: 1450.5'}
                     className={`w-full pl-11 pr-4 py-3 rounded-2xl border-2 text-lg font-black outline-none transition-all ${
-                      !isKmBased && hourmeterValidation.isBlocking
+                      hourmeterValidation.isBlocking
                         ? 'border-red-500 bg-red-950/40 text-red-200 focus:ring-2 focus:ring-red-400'
-                        : !isKmBased && hourmeterValidation.warningType === 'EQUAL_READING'
+                        : hourmeterValidation.warningType === 'EQUAL_READING'
                         ? 'border-amber-500 bg-[#063327] text-amber-200 focus:ring-2 focus:ring-amber-400'
                         : 'border-emerald-700/80 bg-[#063327] text-[#FACC15] focus:border-[#FACC15] focus:ring-2 focus:ring-[#FACC15]/20'
                     }`}
@@ -517,8 +517,8 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                   </span>
                 </div>
 
-                {/* Validação Inteligente do Horímetro (Regras A, B, C, D e Exceção de Manutenção) */}
-                {!isKmBased && (
+                {/* Validação Inteligente de Odômetro / Horímetro */}
+                {selectedEquipment && (
                   <div className="space-y-2 pt-1">
                     {hourmeterValidation.isBlocking && (
                       <div className="p-3.5 rounded-2xl bg-red-950/90 border-2 border-red-500/80 text-white space-y-2.5 animate-in fade-in duration-200">
@@ -530,9 +530,9 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                             </p>
                             {hourmeterValidation.details && (
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-[11px] text-red-300 font-semibold">
-                                <span>Última válida: <strong className="text-white">{hourmeterValidation.details.previous} h</strong></span>
-                                <span>Digitada: <strong className="text-white">{hourmeterValidation.details.current} h</strong></span>
-                                <span>Variação: <strong className="text-white">{hourmeterValidation.details.diff > 0 ? '+' : ''}{hourmeterValidation.details.diff} h</strong></span>
+                                <span>Última válida: <strong className="text-white">{hourmeterValidation.details.previous} {isKmBased ? 'km' : 'h'}</strong></span>
+                                <span>Digitada: <strong className="text-white">{hourmeterValidation.details.current} {isKmBased ? 'km' : 'h'}</strong></span>
+                                <span>Variação: <strong className="text-white">{hourmeterValidation.details.diff > 0 ? '+' : ''}{hourmeterValidation.details.diff} {isKmBased ? 'km' : 'h'}</strong></span>
                               </div>
                             )}
                           </div>
@@ -596,7 +596,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                       <div className="flex items-center justify-between text-[11px] text-emerald-300 font-semibold pt-0.5">
                         <span>Variação calculada:</span>
                         <span className="text-[#FACC15] font-black">
-                          +{hourmeterValidation.details?.diff} horas
+                          +{hourmeterValidation.details?.diff} {isKmBased ? 'km' : 'horas'}
                         </span>
                       </div>
                     )}
@@ -942,9 +942,9 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={isSubmitting || (!isKmBased && hourmeterValidation.isBlocking)}
+                disabled={isSubmitting || (hourmeterValidation.isBlocking)}
                 className={`px-6 py-3 min-h-[48px] rounded-2xl text-xs font-black shadow-lg flex items-center justify-center gap-2 transition-all ${
-                  isSubmitting || (!isKmBased && hourmeterValidation.isBlocking)
+                  isSubmitting || (hourmeterValidation.isBlocking)
                     ? 'bg-slate-700 text-slate-400 border border-slate-600 cursor-not-allowed opacity-75'
                     : 'bg-[#FACC15] hover:bg-yellow-400 text-[#064E3B] shadow-yellow-500/20 active:scale-95 cursor-pointer'
                 }`}
@@ -954,7 +954,7 @@ export const FuelingFormModalComponent: React.FC<FuelingFormModalProps> = ({
                     <Clock className="w-4 h-4 animate-spin text-[#064E3B]" />
                     <span>Salvando Abastecimento...</span>
                   </>
-                ) : !isKmBased && hourmeterValidation.isBlocking ? (
+                ) : hourmeterValidation.isBlocking ? (
                   <>
                     <AlertTriangle className="w-4 h-4 text-red-300" />
                     <span>Corrija o Horímetro para Salvar</span>

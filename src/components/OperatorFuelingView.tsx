@@ -9,7 +9,7 @@ import {
   getActivityTypeName 
 } from '../utils/operations';
 import { getStationFuelPrice, getFuelTypeName, formatCurrency } from '../utils/calculations';
-import { validateHourmeterReading } from '../utils/hourmeterValidation';
+import { validateHourmeterReading, validateOdometerReading } from '../utils/hourmeterValidation';
 import { VehicleSelector } from './VehicleSelector';
 
 interface OperatorFuelingViewProps {
@@ -173,7 +173,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
       return;
     }
 
-    if (!isVehicleKm && hourmeterValidation.isBlocking) {
+    if (hourmeterValidation.isBlocking) {
       alert(hourmeterValidation.message || 'Por favor, confira o painel físico e corrija o horímetro antes de continuar.');
       return;
     }
@@ -219,9 +219,9 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
         activityType,
         hourmeterAtFueling: isVehicleKm ? undefined : (Number(hourmeter) || undefined),
         kmAtFueling: isVehicleKm ? (Number(odometer) || undefined) : undefined,
-        isAuthorizedCorrection: !isVehicleKm && isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? true : undefined,
-        correctionReason: !isVehicleKm && isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? correctionJustification.trim() : undefined,
-        previousHourmeterAtCorrection: !isVehicleKm && isAuthorizedCorrection ? hourmeterValidation.details?.previous : undefined,
+        isAuthorizedCorrection: isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? true : undefined,
+        correctionReason: isAuthorizedCorrection && hourmeterValidation.details?.canAuthorizeCorrection ? correctionJustification.trim() : undefined,
+        previousHourmeterAtCorrection: isAuthorizedCorrection ? hourmeterValidation.details?.previous : undefined,
         observations: observations.trim() || undefined,
         createdById: currentUser.id,
         createdByName: currentUser.name,
@@ -502,9 +502,9 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
               <label className="block text-xs font-extrabold text-slate-800 dark:text-emerald-200 uppercase tracking-wider">
                 {isVehicleKm ? 'Quilometragem (KM) *' : 'Horímetro Atual (Horas) *'}
               </label>
-              {!isVehicleKm && hourmeterValidation.details?.previous !== undefined && (
+              {hourmeterValidation.details?.previous !== undefined && (
                 <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
-                  Anterior: {hourmeterValidation.details.previous} h
+                  Anterior: {hourmeterValidation.details.previous} {isVehicleKm ? 'km' : 'h'}
                 </span>
               )}
             </div>
@@ -516,9 +516,9 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
                 onChange={(e) => isVehicleKm ? setOdometer(e.target.value) : setHourmeter(e.target.value)}
                 placeholder={isVehicleKm ? 'Ex: 68100' : 'Ex: 1520'}
                 className={`w-full pl-4 pr-12 py-3.5 text-base font-black rounded-2xl border outline-none transition-all ${
-                  !isVehicleKm && hourmeterValidation.isBlocking
+                  hourmeterValidation.isBlocking
                     ? 'border-red-500 bg-red-50 text-red-900 focus:ring-2 focus:ring-red-400 dark:bg-red-950/40 dark:text-red-100'
-                    : !isVehicleKm && hourmeterValidation.warningType === 'EQUAL_READING'
+                    : hourmeterValidation.warningType === 'EQUAL_READING'
                     ? 'border-amber-500 bg-amber-50 text-amber-900 focus:ring-2 focus:ring-amber-400 dark:bg-amber-950/40 dark:text-amber-100'
                     : darkMode 
                     ? 'bg-emerald-950 border-emerald-800 text-slate-100 focus:ring-2 focus:ring-[#FACC15]' 
@@ -543,9 +543,9 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
                         </p>
                         {hourmeterValidation.details && (
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-[11px] text-red-700 dark:text-red-300 font-semibold">
-                            <span>Última válida: <strong className="text-red-900 dark:text-white">{hourmeterValidation.details.previous} h</strong></span>
-                            <span>Digitada: <strong className="text-red-900 dark:text-white">{hourmeterValidation.details.current} h</strong></span>
-                            <span>Variação: <strong className="text-red-900 dark:text-white">{hourmeterValidation.details.diff > 0 ? '+' : ''}{hourmeterValidation.details.diff} h</strong></span>
+                            <span>Última válida: <strong className="text-red-900 dark:text-white">{hourmeterValidation.details.previous} {isVehicleKm ? 'km' : 'h'}</strong></span>
+                            <span>Digitada: <strong className="text-red-900 dark:text-white">{hourmeterValidation.details.current} {isVehicleKm ? 'km' : 'h'}</strong></span>
+                            <span>Variação: <strong className="text-red-900 dark:text-white">{hourmeterValidation.details.diff > 0 ? '+' : ''}{hourmeterValidation.details.diff} {isVehicleKm ? 'km' : 'h'}</strong></span>
                           </div>
                         )}
                       </div>
@@ -602,7 +602,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
                   <div className="flex items-center justify-between text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold pt-0.5">
                     <span>Variação calculada:</span>
                     <span className="font-extrabold text-emerald-800 dark:text-[#FACC15]">
-                      +{hourmeterValidation.details?.diff} horas
+                      +{hourmeterValidation.details?.diff} {isVehicleKm ? 'km' : 'horas'}
                     </span>
                   </div>
                 )}
@@ -787,9 +787,9 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
         {/* Main Big Submit Button */}
         <button
           type="submit"
-          disabled={isSubmitting || (!isVehicleKm && hourmeterValidation.isBlocking)}
+          disabled={isSubmitting || (hourmeterValidation.isBlocking)}
           className={`w-full py-4 text-white font-black text-sm rounded-2xl shadow-xl flex items-center justify-center gap-2 transition-all border-2 ${
-            isSubmitting || (!isVehicleKm && hourmeterValidation.isBlocking)
+            isSubmitting || (hourmeterValidation.isBlocking)
               ? 'bg-slate-700 border-slate-600 text-slate-400 cursor-not-allowed opacity-75'
               : 'bg-[#064E3B] hover:bg-[#043327] border-[#FACC15] shadow-emerald-900/20 active:scale-98 cursor-pointer'
           }`}
@@ -799,7 +799,7 @@ export const OperatorFuelingView: React.FC<OperatorFuelingViewProps> = ({
               <Clock className="w-5 h-5 text-[#FACC15] animate-spin" />
               <span>Salvando no Firestore...</span>
             </>
-          ) : !isVehicleKm && hourmeterValidation.isBlocking ? (
+          ) : hourmeterValidation.isBlocking ? (
             <>
               <AlertTriangle className="w-5 h-5 text-red-300" />
               <span>Corrija o Horímetro para Salvar</span>

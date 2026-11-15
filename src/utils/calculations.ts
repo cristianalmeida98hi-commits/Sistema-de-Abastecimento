@@ -408,8 +408,23 @@ export function calculateFuelLogMetrics(
   const getMeter = (log: FuelLog) => isKmBased ? log.kmAtFueling : log.hourmeterAtFueling;
   const transactionTime = currentDateTime ? new Date(currentDateTime).getTime() : Number.POSITIVE_INFINITY;
   const eligibleLogs = previousLogsForEquipment
-    .filter(log => new Date(log.dateTime).getTime() < transactionTime)
-    .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
+    .filter(log => {
+      const logTime = new Date(log.dateTime).getTime();
+      if (!Number.isFinite(transactionTime)) return true;
+      if (logTime < transactionTime) return true;
+      if (logTime === transactionTime) {
+        const logMeter = getMeter(log);
+        return typeof logMeter === 'number' && typeof currentKmOrHour === 'number' && logMeter < currentKmOrHour;
+      }
+      return false;
+    })
+    .sort((a, b) => {
+      const timeDiff = new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      const meterA = getMeter(a) ?? 0;
+      const meterB = getMeter(b) ?? 0;
+      return meterA - meterB;
+    });
   const lastLog = eligibleLogs[eligibleLogs.length - 1];
   const previousKmOrHour = lastLog
     ? getMeter(lastLog)
@@ -476,17 +491,25 @@ export function calculateFuelLogMetrics(
         if (historicalLiters > 0 && historicalMeterDelta > 0) {
           if (isKmBased) {
             const historicalKmPerLiter = historicalMeterDelta / historicalLiters;
-            if (calculatedAverageKmPerLiter !== undefined &&
-                calculatedAverageKmPerLiter < historicalKmPerLiter * (1 - suspiciousMarginPercent / 100)) {
-              flaggedSuspicious = true;
-              suspiciousReason = `Rendimento de ${calculatedAverageKmPerLiter} km/L está mais de ${suspiciousMarginPercent}% abaixo da média histórica ponderada (${historicalKmPerLiter.toFixed(2)} km/L).`;
+            if (calculatedAverageKmPerLiter !== undefined) {
+              if (calculatedAverageKmPerLiter < historicalKmPerLiter * (1 - suspiciousMarginPercent / 100)) {
+                flaggedSuspicious = true;
+                suspiciousReason = `Rendimento de ${calculatedAverageKmPerLiter} km/L está mais de ${suspiciousMarginPercent}% abaixo da média histórica ponderada (${historicalKmPerLiter.toFixed(2)} km/L).`;
+              } else if (calculatedAverageKmPerLiter > historicalKmPerLiter * (1 + (suspiciousMarginPercent * 2) / 100) && calculatedAverageKmPerLiter > 35) {
+                flaggedSuspicious = true;
+                suspiciousReason = `Rendimento de ${calculatedAverageKmPerLiter} km/L está muito acima da média histórica ponderada (${historicalKmPerLiter.toFixed(2)} km/L). Verifique se o odômetro foi digitado corretamente.`;
+              }
             }
           } else {
             const historicalLitersPerHour = historicalLiters / historicalMeterDelta;
-            if (calculatedAverageLitersPerHour !== undefined &&
-                calculatedAverageLitersPerHour > historicalLitersPerHour * (1 + suspiciousMarginPercent / 100)) {
-              flaggedSuspicious = true;
-              suspiciousReason = `Consumo de ${calculatedAverageLitersPerHour} L/h está mais de ${suspiciousMarginPercent}% acima da média histórica ponderada (${historicalLitersPerHour.toFixed(2)} L/h).`;
+            if (calculatedAverageLitersPerHour !== undefined) {
+              if (calculatedAverageLitersPerHour > historicalLitersPerHour * (1 + suspiciousMarginPercent / 100)) {
+                flaggedSuspicious = true;
+                suspiciousReason = `Consumo de ${calculatedAverageLitersPerHour} L/h está mais de ${suspiciousMarginPercent}% acima da média histórica ponderada (${historicalLitersPerHour.toFixed(2)} L/h).`;
+              } else if (calculatedAverageLitersPerHour < historicalLitersPerHour * (1 - suspiciousMarginPercent / 100) && calculatedAverageLitersPerHour < 1.0) {
+                flaggedSuspicious = true;
+                suspiciousReason = `Consumo de ${calculatedAverageLitersPerHour} L/h está muito abaixo da média histórica ponderada (${historicalLitersPerHour.toFixed(2)} L/h). Verifique se o horímetro ou litros foram digitados corretamente.`;
+              }
             }
           }
         }

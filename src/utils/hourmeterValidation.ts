@@ -170,7 +170,6 @@ export function validateHourmeterReading({
   // REGRA A: Impedir horímetro inferior ao anterior
   if (diff < 0) {
     const formattedLastDate = lastDate ? formatDateTimeBR(lastDate) : 'último registro';
-    const absDiff = Math.abs(diff);
 
     // Se o perfil for MANUTENCAO ou ADMIN e acionou a correção autorizada com justificativa válida
     if (canAuthorizeCorrection && isAuthorizedCorrection) {
@@ -365,6 +364,336 @@ export function validateHourmeterReading({
     details: {
       current: currentVal,
       previous: lastHourmeter,
+      diff,
+      previousDate: lastDate,
+      hoursElapsed,
+      daysElapsed,
+      maxAllowedIncrease,
+      canAuthorizeCorrection
+    }
+  };
+}
+
+export interface OdometerValidationParams {
+  newOdometer: number | string | undefined | null;
+  equipment: Vehicle | null | undefined;
+  previousLogs?: FuelLog[];
+  currentDate?: string | Date;
+  userRole?: UserRole | string;
+  isAuthorizedCorrection?: boolean;
+  justification?: string;
+}
+
+export interface OdometerValidationResult {
+  isValid: boolean;
+  isBlocking: boolean;
+  warningType: 'NONE' | 'LOWER_THAN_PREVIOUS' | 'IMPOSSIBLE_INCREASE' | 'SUSPICIOUS_HIGH' | 'EQUAL_READING' | 'EMPTY' | 'INVALID_NUMBER';
+  message?: string;
+  details?: {
+    current: number;
+    previous: number;
+    diff: number;
+    previousDate?: string;
+    hoursElapsed?: number;
+    daysElapsed?: number;
+    maxAllowedIncrease?: number;
+    isAuthorizedCorrection?: boolean;
+    canAuthorizeCorrection?: boolean;
+  };
+}
+
+/**
+ * Encontra a última leitura válida de odômetro (KM) para um veículo rodoviário,
+ * considerando a ficha técnica do veículo e o histórico de abastecimentos.
+ */
+export function getLastValidOdometer(
+  equipment: Vehicle | null | undefined,
+  previousLogs: FuelLog[] = [],
+  currentDate?: string | Date
+): {
+  lastOdometer: number;
+  lastDate?: string;
+  source: 'fuel_log' | 'equipment' | 'none';
+} {
+  if (!equipment) {
+    return { lastOdometer: 0, source: 'none' };
+  }
+
+  const relevantLogs = previousLogs
+    .filter(l => l.equipmentId === equipment.id && typeof l.kmAtFueling === 'number' && l.kmAtFueling > 0)
+    .sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime());
+
+  const refTime = currentDate ? new Date(currentDate).getTime() : Date.now();
+  const priorLogs = relevantLogs.filter(l => new Date(l.dateTime).getTime() <= refTime + 60000);
+
+  const latestLog = priorLogs[0] || relevantLogs[0];
+
+  if (latestLog && typeof latestLog.kmAtFueling === 'number') {
+    return {
+      lastOdometer: latestLog.kmAtFueling,
+      lastDate: latestLog.dateTime,
+      source: 'fuel_log'
+    };
+  }
+
+  if (equipment.currentKm && equipment.currentKm > 0) {
+    return {
+      lastOdometer: equipment.currentKm,
+      lastDate: equipment.lastFuelingDate || undefined,
+      source: 'equipment'
+    };
+  }
+
+  return { lastOdometer: 0, source: 'none' };
+}
+
+/**
+ * Validação inteligente do odômetro/KM conforme as Regras de Frotas da Andrade Agro:
+ * - Regra A: Impedir hodômetro inferior ao anterior (bloqueante para funcionário).
+ * - Regra B: Detectar aumentos impossíveis pelo tempo transcorrido (máx 120 km/h médios).
+ * - Regra C: Detectar saltos suspeitos por digitação de zero extra.
+ * - Exceção Perfil Manutenção/Admin: Liberação autorizada com justificativa obrigatória e auditoria.
+ */
+export function validateOdometerReading({
+  newOdometer,
+  equipment,
+  previousLogs = [],
+  currentDate,
+  userRole,
+  isAuthorizedCorrection = false,
+  justification = ''
+}: OdometerValidationParams): OdometerValidationResult {
+  // Apenas aplicável a veículos com medição por KM
+  if (equipment && equipment.category !== 'VEICULO') {
+    return { isValid: true, isBlocking: false, warningType: 'NONE' };
+  }
+
+  if (newOdometer === undefined || newOdometer === null || String(newOdometer).trim() === '') {
+    return {
+      isValid: false,
+      isBlocking: true,
+      warningType: 'EMPTY',
+      message: 'Informe a quilometragem atual constante no painel/odômetro do veículo.'
+    };
+  }
+
+  const cleanVal = String(newOdometer).replace(',', '.').trim();
+  const currentVal = parseFloat(cleanVal);
+
+  if (isNaN(currentVal) || currentVal < 0) {
+    return {
+      isValid: false,
+      isBlocking: true,
+      warningType: 'INVALID_NUMBER',
+      message: 'A quilometragem informada deve ser um número positivo válido.'
+    };
+  }
+
+  const { lastOdometer, lastDate } = getLastValidOdometer(equipment, previousLogs, currentDate);
+
+  // Se o veículo não tem leitura anterior registrada
+  if (lastOdometer <= 0) {
+    if (currentVal > 1500000) {
+      return {
+        isValid: false,
+        isBlocking: true,
+        warningType: 'SUSPICIOUS_HIGH',
+        message: `Quilometragem excessivamente elevada (${currentVal.toLocaleString('pt-BR')} km). Confira se não foram digitados dígitos a mais em relação ao painel físico.`,
+        details: { current: currentVal, previous: 0, diff: currentVal }
+      };
+    }
+    return { isValid: true, isBlocking: false, warningType: 'NONE' };
+  }
+
+  const diff = Number((currentVal - lastOdometer).toFixed(1));
+  const canAuthorizeCorrection = userRole === 'MANUTENCAO' || userRole === 'ADMIN';
+
+  // REGRA A: Impedir hodômetro inferior ao anterior
+  if (diff < 0) {
+    const formattedLastDate = lastDate ? formatDateTimeBR(lastDate) : 'último registro';
+
+    if (canAuthorizeCorrection && isAuthorizedCorrection) {
+      const trimmedJust = justification.trim();
+      if (trimmedJust.length < 5) {
+        return {
+          isValid: false,
+          isBlocking: true,
+          warningType: 'LOWER_THAN_PREVIOUS',
+          message: `Quilometragem inferior à anterior (${currentVal.toLocaleString('pt-BR')} km < ${lastOdometer.toLocaleString('pt-BR')} km). Para confirmar a correção autorizada, informe uma justificativa válida com pelo menos 5 caracteres.`,
+          details: {
+            current: currentVal,
+            previous: lastOdometer,
+            diff,
+            previousDate: lastDate,
+            canAuthorizeCorrection,
+            isAuthorizedCorrection: true
+          }
+        };
+      }
+
+      return {
+        isValid: true,
+        isBlocking: false,
+        warningType: 'NONE',
+        message: `Correção técnica autorizada: ajuste de ${lastOdometer.toLocaleString('pt-BR')} km para ${currentVal.toLocaleString('pt-BR')} km (${diff.toLocaleString('pt-BR')} km).`,
+        details: {
+          current: currentVal,
+          previous: lastOdometer,
+          diff,
+          previousDate: lastDate,
+          canAuthorizeCorrection,
+          isAuthorizedCorrection: true
+        }
+      };
+    }
+
+    return {
+      isValid: false,
+      isBlocking: true,
+      warningType: 'LOWER_THAN_PREVIOUS',
+      message: `Quilometragem inconsistente. A leitura informada (${currentVal.toLocaleString('pt-BR')} km) é inferior à última leitura registrada (${lastOdometer.toLocaleString('pt-BR')} km em ${formattedLastDate}), resultando em uma diferença de ${diff.toLocaleString('pt-BR')} km. O hodômetro de um veículo rodoviário não retrocede. Confira o painel físico do veículo e corrija o valor antes de continuar.`,
+      details: {
+        current: currentVal,
+        previous: lastOdometer,
+        diff,
+        previousDate: lastDate,
+        canAuthorizeCorrection,
+        isAuthorizedCorrection: false
+      }
+    };
+  }
+
+  // REGRA B & C: Detectar aumentos impossíveis pelo tempo transcorrido e saltos suspeitos
+  const now = currentDate ? new Date(currentDate) : new Date();
+  let hoursElapsed: number | undefined;
+  let daysElapsed: number | undefined;
+
+  if (lastDate) {
+    const past = new Date(lastDate);
+    const msDiff = now.getTime() - past.getTime();
+    if (msDiff > 0) {
+      hoursElapsed = msDiff / (1000 * 60 * 60);
+      daysElapsed = hoursElapsed / 24;
+    }
+  }
+
+  // Limite máximo plausível de deslocamento
+  let maxAllowedIncrease: number;
+
+  if (hoursElapsed !== undefined) {
+    if (hoursElapsed <= 0.5) {
+      maxAllowedIncrease = 80;
+    } else if (hoursElapsed <= 24) {
+      maxAllowedIncrease = Math.min(2200, Math.round(hoursElapsed * 110 + 100));
+    } else {
+      const effectiveDays = Math.min(10, Math.max(1, Math.ceil(daysElapsed || 1)));
+      maxAllowedIncrease = Math.round(effectiveDays * 2000 + 300);
+    }
+  } else {
+    maxAllowedIncrease = 5000;
+  }
+
+  const isTypoExtraDigit = (lastOdometer > 1000 && currentVal >= lastOdometer * 2.5 && diff > 1000) ||
+    (lastOdometer > 10000 && currentVal >= lastOdometer * 2 && diff > 5000);
+
+  const isImpossibleJump = diff > maxAllowedIncrease;
+
+  if (isTypoExtraDigit || isImpossibleJump) {
+    const formattedLastDate = lastDate ? formatDateTimeBR(lastDate) : 'última medição';
+    const tempoTranscorridoStr = hoursElapsed !== undefined ? formatElapsedDuration(hoursElapsed) : 'período recente';
+
+    if (canAuthorizeCorrection && isAuthorizedCorrection) {
+      const trimmedJust = justification.trim();
+      if (trimmedJust.length < 5) {
+        return {
+          isValid: false,
+          isBlocking: true,
+          warningType: 'IMPOSSIBLE_INCREASE',
+          message: `Salto expressivo na quilometragem (+${diff.toLocaleString('pt-BR')} km). Para confirmar esta correção autorizada, informe uma justificativa válida com pelo menos 5 caracteres.`,
+          details: {
+            current: currentVal,
+            previous: lastOdometer,
+            diff,
+            previousDate: lastDate,
+            hoursElapsed,
+            daysElapsed,
+            maxAllowedIncrease,
+            canAuthorizeCorrection,
+            isAuthorizedCorrection: true
+          }
+        };
+      }
+
+      return {
+        isValid: true,
+        isBlocking: false,
+        warningType: 'NONE',
+        message: `Correção técnica autorizada: avanço de +${diff.toLocaleString('pt-BR')} km validado sob justificativa da Manutenção.`,
+        details: {
+          current: currentVal,
+          previous: lastOdometer,
+          diff,
+          previousDate: lastDate,
+          hoursElapsed,
+          daysElapsed,
+          maxAllowedIncrease,
+          canAuthorizeCorrection,
+          isAuthorizedCorrection: true
+        }
+      };
+    }
+
+    const motivo = isTypoExtraDigit 
+      ? 'A leitura parece conter dígitos ou zeros a mais digitados acidentalmente.'
+      : `No intervalo de ${tempoTranscorridoStr}, o deslocamento máximo plausível é de aproximadamente ${maxAllowedIncrease.toLocaleString('pt-BR')} km.`;
+
+    return {
+      isValid: false,
+      isBlocking: true,
+      warningType: isTypoExtraDigit ? 'SUSPICIOUS_HIGH' : 'IMPOSSIBLE_INCREASE',
+      message: `Quilometragem inconsistente. A leitura informada (${currentVal.toLocaleString('pt-BR')} km) está muito acima da última leitura registrada (${lastOdometer.toLocaleString('pt-BR')} km em ${formattedLastDate}), gerando uma diferença de +${diff.toLocaleString('pt-BR')} km. ${motivo} Confira o painel físico do veículo e corrija o valor antes de continuar.`,
+      details: {
+        current: currentVal,
+        previous: lastOdometer,
+        diff,
+        previousDate: lastDate,
+        hoursElapsed,
+        daysElapsed,
+        maxAllowedIncrease,
+        canAuthorizeCorrection,
+        isAuthorizedCorrection: false
+      }
+    };
+  }
+
+  // Aviso leve se a leitura for idêntica à anterior
+  if (diff === 0) {
+    return {
+      isValid: true,
+      isBlocking: false,
+      warningType: 'EQUAL_READING',
+      message: `Atenção: A quilometragem informada (${currentVal.toLocaleString('pt-BR')} km) é idêntica à última leitura registrada. Confirme se o veículo rodou entre os abastecimentos.`,
+      details: {
+        current: currentVal,
+        previous: lastOdometer,
+        diff: 0,
+        previousDate: lastDate,
+        hoursElapsed,
+        daysElapsed,
+        maxAllowedIncrease,
+        canAuthorizeCorrection
+      }
+    };
+  }
+
+  // Valor completamente válido
+  return {
+    isValid: true,
+    isBlocking: false,
+    warningType: 'NONE',
+    details: {
+      current: currentVal,
+      previous: lastOdometer,
       diff,
       previousDate: lastDate,
       hoursElapsed,

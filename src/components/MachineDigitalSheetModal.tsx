@@ -241,13 +241,13 @@ const MachineDigitalSheetInner: React.FC<MachineDigitalSheetInnerProps> = ({
     if (machineFuelLogs.length === 0) return 0;
     const isKm = vehicle.category === 'VEICULO';
     if (isKm) {
-      const logsWithAvg = machineFuelLogs.filter(l => l.calculatedAverageKmPerLiter && l.calculatedAverageKmPerLiter > 0);
-      if (logsWithAvg.length === 0) return 3.2;
-      return logsWithAvg.reduce((sum, l) => sum + (l.calculatedAverageKmPerLiter || 0), 0) / logsWithAvg.length;
+      const logsWithAvg = machineFuelLogs.filter(l => typeof l.calculatedAverageKmPerLiter === 'number' && l.calculatedAverageKmPerLiter > 0);
+      if (logsWithAvg.length === 0) return 0;
+      return Number((logsWithAvg.reduce((sum, l) => sum + (l.calculatedAverageKmPerLiter || 0), 0) / logsWithAvg.length).toFixed(2));
     } else {
-      const logsWithAvg = machineFuelLogs.filter(l => l.calculatedAverageLitersPerHour && l.calculatedAverageLitersPerHour > 0);
-      if (logsWithAvg.length === 0) return 18.5;
-      return logsWithAvg.reduce((sum, l) => sum + (l.calculatedAverageLitersPerHour || 0), 0) / logsWithAvg.length;
+      const logsWithAvg = machineFuelLogs.filter(l => typeof l.calculatedAverageLitersPerHour === 'number' && l.calculatedAverageLitersPerHour > 0);
+      if (logsWithAvg.length === 0) return 0;
+      return Number((logsWithAvg.reduce((sum, l) => sum + (l.calculatedAverageLitersPerHour || 0), 0) / logsWithAvg.length).toFixed(2));
     }
   }, [machineFuelLogs, vehicle.category]);
 

@@ -879,6 +879,7 @@ export default function App() {
                 onOpenFuelingModal={() => { setPreSelectedVehicleId(undefined); setIsFuelingModalOpen(true); }}
                 onNavigate={(tab) => setActiveTab(tab)}
                 darkMode={darkMode}
+                currentUser={currentUser}
               />
             )}
 

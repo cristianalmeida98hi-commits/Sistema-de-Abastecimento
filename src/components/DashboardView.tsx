@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { 
   Fuel, DollarSign, Calendar, TrendingUp, Truck, Users, 
-  BarChart2, PieChart, ArrowUpRight, AlertCircle, Plus, FileText, CheckCircle2, ChevronRight,
+  BarChart2, PieChart, ArrowUpRight, AlertCircle, Plus, FileText, CheckCircle2, ChevronRight, Sparkles,
   Settings, AlertTriangle
 } from 'lucide-react';
 import { FuelLog, Vehicle, Sector, SystemSettings, CentralTank, User, OperationType } from '../types';
@@ -10,9 +10,10 @@ import {
   getConsumptionByCategory, getConsumptionByActivity, getEffectiveActivityName, getOperationTypeLabelOnly, OPERATION_OPTIONS, CATEGORY_PALETTE 
 } from '../utils/calculations';
 import { getTankStatus, getCentralTanks, getCurrentUser, updateCentralTank } from '../utils/storage';
+import { DailyFuelingDetails } from './DailyFuelingDetails';
 import { 
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, 
-  PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar, CartesianGrid, Legend 
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceDot, ReferenceLine,
+  PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar, CartesianGrid, Legend
 } from 'recharts';
 const EditCentralTankModal = React.lazy(() => 
   import('./EditCentralTankModal').then(m => ({ default: m.EditCentralTankModal }))
@@ -25,7 +26,10 @@ interface DashboardViewProps {
   onOpenFuelingModal: () => void;
   onNavigate: (tab: string) => void;
   darkMode?: boolean;
+  currentUser?: User | null;
 }
+
+const toDateInputValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 const SECTOR_COLORS: Record<string, string> = {
   PREPARO_SOLO: '#15803d',
@@ -43,12 +47,38 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
   settings,
   onOpenFuelingModal,
   onNavigate,
-  darkMode = true
+  darkMode = true,
+  currentUser: authenticatedUser
 }) => {
   const [selectedTankForConfig, setSelectedTankForConfig] = useState<CentralTank | null>(null);
   const [selectedCategoryForActivity, setSelectedCategoryForActivity] = useState<string>('ALL');
+  const [selectedEquipmentId, setSelectedEquipmentId] = useState('ALL');
+  const [selectedEquipmentCategory, setSelectedEquipmentCategory] = useState('ALL');
+  const [selectedOperationType, setSelectedOperationType] = useState('ALL');
+  const [selectedActivity, setSelectedActivity] = useState('ALL');
+  const [chartPeriod, setChartPeriod] = useState<'7' | '30' | '90' | 'custom'>('30');
+  const [chartMetric, setChartMetric] = useState<'liters' | 'spending'>('liters');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [selectedChartPoint, setSelectedChartPoint] = useState<string | null>(null);
   const [areChartsReady, setAreChartsReady] = useState<boolean>(false);
-  const currentUser = getCurrentUser() || { id: 'usr-admin', name: 'Administrador', role: 'ADMIN' } as User;
+  const currentUser = authenticatedUser || getCurrentUser();
+  const canViewFinancial = currentUser?.role === 'ADMIN' || currentUser?.role === 'MANUTENCAO';
+  const displayFinancial = canViewFinancial && chartMetric === 'spending';
+
+  const dashboardLogs = useMemo(() => fuelLogs.filter(log =>
+    (selectedEquipmentId === 'ALL' || log.equipmentId === selectedEquipmentId) &&
+    (selectedEquipmentCategory === 'ALL' || log.equipmentCategory === selectedEquipmentCategory) &&
+    (selectedOperationType === 'ALL' || (log.operationType || 'GRAMA') === selectedOperationType) &&
+    (selectedActivity === 'ALL' || getEffectiveActivityName(log) === selectedActivity)
+  ), [fuelLogs, selectedEquipmentId, selectedEquipmentCategory, selectedOperationType, selectedActivity]);
+  const clearFilters = () => {
+    setSelectedEquipmentId('ALL');
+    setSelectedEquipmentCategory('ALL');
+    setSelectedOperationType('ALL');
+    setSelectedActivity('ALL');
+    setSelectedCategoryForActivity('ALL');
+  };
 
   React.useEffect(() => {
     // Delay heavy chart mounting by 1 frame to let Bento metrics and tank cards paint at 60fps on mobile
@@ -98,10 +128,10 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       }
     };
 
-    const todayLogs = fuelLogs.filter(l => isSameDay(l.dateTime, now));
-    const weekLogs = fuelLogs.filter(l => new Date(l.dateTime) >= sevenDaysAgo);
-    const monthLogs = fuelLogs.filter(l => new Date(l.dateTime) >= startOfMonth);
-    const yearLogs = fuelLogs.filter(l => new Date(l.dateTime) >= startOfYear);
+    const todayLogs = dashboardLogs.filter(l => isSameDay(l.dateTime, now));
+    const weekLogs = dashboardLogs.filter(l => new Date(l.dateTime) >= sevenDaysAgo);
+    const monthLogs = dashboardLogs.filter(l => new Date(l.dateTime) >= startOfMonth);
+    const yearLogs = dashboardLogs.filter(l => new Date(l.dateTime) >= startOfYear);
 
     const todayLiters = todayLogs.reduce((acc, l) => acc + (Number(l.liters) || 0), 0);
     const todaySpent = todayLogs.reduce((acc, l) => acc + (Number(l.totalValue) || 0), 0);
@@ -124,7 +154,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       monthLiters,
       yearSpent
     };
-  }, [fuelLogs]);
+  }, [dashboardLogs]);
 
   const {
     now,
@@ -143,7 +173,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
   // Top Consumers Calculations (Historical for general charts)
   const equipmentConsumption = useMemo(() => {
     const map = new Map<string, { name: string; plate: string; category: string; liters: number; cost: number }>();
-    fuelLogs.forEach(l => {
+    dashboardLogs.forEach(l => {
       const existing = map.get(l.equipmentId) || {
         name: l.equipmentName,
         plate: l.equipmentPlateOrCode,
@@ -156,7 +186,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       map.set(l.equipmentId, existing);
     });
     return Array.from(map.values());
-  }, [fuelLogs]);
+  }, [dashboardLogs]);
 
   const topVehicle = useMemo(() => {
     return equipmentConsumption
@@ -218,19 +248,19 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
 
   const topOperator = useMemo(() => {
     const map = new Map<string, { name: string; count: number; liters: number }>();
-    fuelLogs.forEach(l => {
+    dashboardLogs.forEach(l => {
       const existing = map.get(l.driverOrOperatorId) || { name: l.driverOrOperatorName, count: 0, liters: 0 };
       existing.count += 1;
       existing.liters += Number(l.liters) || 0;
       map.set(l.driverOrOperatorId, existing);
     });
     return Array.from(map.values()).sort((a, b) => b.liters - a.liters)[0];
-  }, [fuelLogs]);
+  }, [dashboardLogs]);
 
   // Sector Data Chart
   const sectorChartData = useMemo(() => {
     const map = new Map<Sector, number>();
-    fuelLogs.forEach(l => {
+    dashboardLogs.forEach(l => {
       const eq = vehicles.find(v => v.id === l.equipmentId);
       const sec = eq ? eq.sector : 'AGRICOLA';
       map.set(sec, (map.get(sec) || 0) + l.totalValue);
@@ -241,45 +271,51 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       key: sec,
       value: Math.round(value)
     }));
-  }, [fuelLogs, vehicles]);
+  }, [dashboardLogs, vehicles]);
 
-  // Monthly Spending History Chart
+  const chartRange = useMemo(() => {
+    const end = chartPeriod === 'custom' && customEndDate ? new Date(`${customEndDate}T23:59:59`) : now;
+    const start = chartPeriod === 'custom' && customStartDate
+      ? new Date(`${customStartDate}T00:00:00`)
+      : new Date(end.getTime() - (Number(chartPeriod === 'custom' ? 30 : chartPeriod) - 1) * 86400000);
+    return { start, end };
+  }, [chartPeriod, customStartDate, customEndDate, now]);
+
   const monthlyHistoryData = useMemo(() => {
-    const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    const currentMonthIdx = now.getMonth();
-    const data = [];
-
-    for (let i = 5; i >= 0; i--) {
-      const idx = (currentMonthIdx - i + 12) % 12;
-      const monthName = months[idx];
-      // Generate realistic monthly aggregate from fuelLogs or fallback estimation
-      const logsForMonth = fuelLogs.filter(l => {
-        const d = new Date(l.dateTime);
-        return d.getMonth() === idx;
+    const startDay = Date.UTC(chartRange.start.getFullYear(), chartRange.start.getMonth(), chartRange.start.getDate());
+    const endDay = Date.UTC(chartRange.end.getFullYear(), chartRange.end.getMonth(), chartRange.end.getDate());
+    const days = Math.max(1, Math.min(366, Math.floor((endDay - startDay) / 86400000) + 1));
+    return Array.from({ length: days }, (_, index) => {
+      const day = new Date(chartRange.start);
+      day.setDate(day.getDate() + index);
+      const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+      const logsForDay = dashboardLogs.filter(log => {
+        const date = new Date(log.dateTime);
+        return !Number.isNaN(date.getTime()) && date.getFullYear() === day.getFullYear() && date.getMonth() === day.getMonth() && date.getDate() === day.getDate();
       });
-      const total = logsForMonth.reduce((acc, l) => acc + l.totalValue, 0);
-      data.push({
-        month: monthName,
-        Gasto: total,
-        Litros: logsForMonth.reduce((acc, l) => acc + l.liters, 0)
-      });
-    }
-
-    return data;
-  }, [fuelLogs]);
+      return {
+        date: key,
+        label: day.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
+        Gasto: logsForDay.reduce((total, log) => total + (Number(log.totalValue) || 0), 0),
+        Litros: logsForDay.reduce((total, log) => total + (Number(log.liters) || 0), 0),
+        abastecimentos: logsForDay.length
+      };
+    });
+  }, [dashboardLogs, chartRange]);
 
   // Operation Types Breakdown
   const operationTypeData = useMemo(() => {
     const map = new Map<string, { label: string; liters: number; cost: number; count: number }>();
     const labels: Record<string, string> = {
-      GRAMA: '🌱 Grama',
-      COLHEITA: '🌾 Colheita',
-      PLANTIO: '🚜 Plantio',
-      TRANSPORTE: '🚚 Transporte',
-      OUTROS: '🔧 Outros'
+      GRAMA: 'Grama',
+      COLHEITA: 'Colheita',
+      PLANTIO: 'Plantio',
+      TRANSPORTE: 'Transporte',
+      CANA: 'Cana',
+      OUTROS: 'Outros'
     };
 
-    fuelLogs.forEach(l => {
+    dashboardLogs.forEach(l => {
       const opKey = l.operationType || 'GRAMA';
       const existing = map.get(opKey) || { label: labels[opKey] || opKey, liters: 0, cost: 0, count: 0 };
       existing.liters += l.liters;
@@ -292,12 +328,12 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       key,
       ...data
     })).sort((a, b) => b.liters - a.liters);
-  }, [fuelLogs]);
+  }, [dashboardLogs]);
 
   // Consumo por Categoria (Gráfico 1: Litros e Porcentagem)
   const categoryConsumption = useMemo(() => {
-    return getConsumptionByCategory(fuelLogs);
-  }, [fuelLogs]);
+    return getConsumptionByCategory(dashboardLogs);
+  }, [dashboardLogs]);
 
   const totalCategoryLiters = useMemo(() => {
     return categoryConsumption.reduce((acc, c) => acc + c.liters, 0);
@@ -305,8 +341,8 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
 
   // Consumo por Atividade / Serviço (Gráfico 2: Serviço existente / Atividade personalizada + Litros)
   const activityConsumption = useMemo(() => {
-    return getConsumptionByActivity(fuelLogs, selectedCategoryForActivity);
-  }, [fuelLogs, selectedCategoryForActivity]);
+    return getConsumptionByActivity(dashboardLogs, selectedCategoryForActivity);
+  }, [dashboardLogs, selectedCategoryForActivity]);
 
   const totalActivityLiters = useMemo(() => {
     return activityConsumption.reduce((acc, a) => acc + a.liters, 0);
@@ -314,8 +350,10 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
 
   // Executive summary narrative line: all figures must come from the current month.
   const executiveSummaryText = useMemo(() => {
-    if (fuelLogs.length === 0) {
-      return "Nova Empresa: Nenhum abastecimento registrado ainda. Os custos estão zerados (R$ 0,00). Faça um lançamento de teste no sistema para validar os cálculos.";
+    if (dashboardLogs.length === 0) {
+      return canViewFinancial
+        ? "Nenhum abastecimento registrado ainda. Os custos estão zerados (R$ 0,00)."
+        : "Nenhum abastecimento registrado ainda.";
     }
 
     const totalMonthLiters = monthLiters;
@@ -353,16 +391,92 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
     const activityName = topMonthlyGroup.activityName;
 
     return `Este mês foram consumidos ${totalMonthLiters.toLocaleString('pt-BR')} litros de combustível, sendo ${topMonthlyGroup.liters.toLocaleString('pt-BR')} litros utilizados na operação ${operationName}, atividade ${activityName}, pelo operador ${topMonthlyGroup.operatorName}.`;
-  }, [fuelLogs.length, monthLiters, monthLogs]);
+  }, [dashboardLogs.length, monthLiters, monthLogs, canViewFinancial]);
+
+  const todayInputValue = toDateInputValue(now);
+  const customEndDateLimit = useMemo(() => {
+    if (!customStartDate) return todayInputValue;
+    const start = new Date(`${customStartDate}T00:00:00`);
+    start.setDate(start.getDate() + 364);
+    return toDateInputValue(new Date(Math.min(start.getTime(), now.getTime())));
+  }, [customStartDate, todayInputValue, now]);
+
+  const selectedDayLogs = useMemo(() => {
+    if (!selectedChartPoint) return [];
+    return dashboardLogs
+      .filter(log => {
+        const date = new Date(log.dateTime);
+        if (Number.isNaN(date.getTime())) return false;
+        return toDateInputValue(date) === selectedChartPoint;
+      })
+      .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
+  }, [dashboardLogs, selectedChartPoint]);
+
+  const selectedChartDataPoint = selectedChartPoint
+    ? monthlyHistoryData.find(point => point.date === selectedChartPoint)
+    : undefined;
+  const selectedChartValue = selectedChartDataPoint
+    ? (displayFinancial ? selectedChartDataPoint.Gasto : selectedChartDataPoint.Litros)
+    : undefined;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <div className="flex flex-col gap-5 pb-6 animate-in fade-in duration-300 sm:gap-6">
+      <header className="rounded-[28px] border border-emerald-800/60 bg-[radial-gradient(ellipse_at_top_right,_rgba(16,185,129,0.16),_transparent_45%),linear-gradient(135deg,#06291f,#031a14)] p-5 shadow-xl shadow-black/20 sm:p-7">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl">
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-300">Andrade Agro <span className="mx-2 text-emerald-700">/</span> Painel operacional</p>
+            <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Visão Geral</h1>
+            <p className="mt-2 text-sm leading-relaxed text-emerald-100/75">Acompanhe abastecimentos, consumo e disponibilidade da frota em um só lugar.</p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="rounded-2xl border border-emerald-700/50 bg-black/15 px-4 py-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/80">Hoje</p>
+              <p className="mt-1 text-sm font-semibold text-white">{now.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</p>
+            </div>
+            <button onClick={onOpenFuelingModal} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-[#FACC15] px-5 text-sm font-extrabold text-[#173b2c] shadow-lg shadow-yellow-950/20 transition hover:bg-yellow-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-200">
+              <Plus className="h-4 w-4" /> Registrar abastecimento
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <details className="group rounded-2xl border border-emerald-800/60 bg-[#06251c] shadow-lg shadow-black/10">
+        <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-bold text-white marker:hidden sm:px-5 [&::-webkit-details-marker]:hidden">
+          <span className="flex items-center gap-2"><Settings className="h-4 w-4 text-[#FACC15]" />Filtros do painel</span>
+          <span className="text-xs font-medium text-emerald-300">{dashboardLogs.length} de {fuelLogs.length} registros <span className="ml-2 inline-block transition-transform group-open:rotate-180">⌄</span></span>
+        </summary>
+        <div className="grid grid-cols-1 gap-3 border-t border-emerald-900/70 p-4 sm:grid-cols-2 lg:grid-cols-4 sm:p-5">
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-emerald-200">Equipamento
+            <select value={selectedEquipmentId} onChange={event => setSelectedEquipmentId(event.target.value)} className="min-h-11 rounded-xl border border-emerald-800 bg-[#031a14] px-3 text-sm text-white focus:border-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-400/20">
+              <option value="ALL">Todos os equipamentos</option>{vehicles.map(vehicle => <option key={vehicle.id} value={vehicle.id}>{vehicle.model} · {vehicle.licensePlate || vehicle.patrimonyCode}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-emerald-200">Categoria
+            <select value={selectedEquipmentCategory} onChange={event => setSelectedEquipmentCategory(event.target.value)} className="min-h-11 rounded-xl border border-emerald-800 bg-[#031a14] px-3 text-sm text-white focus:border-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-400/20">
+              <option value="ALL">Todas as categorias</option><option value="VEICULO">Veículos</option><option value="TRATOR">Tratores</option><option value="MAQUINA_AGRICOLA">Máquinas agrícolas</option><option value="IMPLEMENTO">Implementos</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-emerald-200">Tipo de operação
+            <select value={selectedOperationType} onChange={event => setSelectedOperationType(event.target.value)} className="min-h-11 rounded-xl border border-emerald-800 bg-[#031a14] px-3 text-sm text-white focus:border-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-400/20">
+              <option value="ALL">Todas as operações</option>{OPERATION_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1.5 text-xs font-semibold text-emerald-200">Atividade / serviço
+            <select value={selectedActivity} onChange={event => setSelectedActivity(event.target.value)} className="min-h-11 rounded-xl border border-emerald-800 bg-[#031a14] px-3 text-sm text-white focus:border-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-400/20">
+              <option value="ALL">Todas as atividades</option>{Array.from(new Set(fuelLogs.map(getEffectiveActivityName).filter(name => name && name !== '-'))).map(name => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
+          <div className="flex items-end sm:col-span-2 lg:col-span-4">
+            <button type="button" onClick={clearFilters} disabled={selectedEquipmentId === 'ALL' && selectedEquipmentCategory === 'ALL' && selectedOperationType === 'ALL' && selectedActivity === 'ALL' && selectedCategoryForActivity === 'ALL'} className="min-h-11 rounded-xl border border-emerald-700 px-4 text-sm font-bold text-emerald-100 transition hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-40">Limpar filtros</button>
+          </div>
+        </div>
+      </details>
 
       {/* Executive Operational Narrative Banner */}
-      <div className="p-5 rounded-3xl bg-gradient-to-r from-[#064E3B] to-[#043327] border-2 border-[#FACC15] shadow-md text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-emerald-800/70 bg-gradient-to-r from-[#063a2c] to-[#05251d] p-4 text-white shadow-sm sm:flex-row sm:items-center sm:p-5">
         <div className="flex items-start md:items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-[#FACC15] text-[#064E3B] flex items-center justify-center shrink-0 font-extrabold text-lg shadow-sm">
-            💡
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FACC15] text-[#064E3B] shadow-sm">
+            <Sparkles className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
             <span className="text-[10px] uppercase font-black tracking-widest text-[#FACC15]">
@@ -382,14 +496,12 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       </div>
       
       {/* Top Bento Stats Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         
         {/* Bento Stat 1: Abastecimentos Hoje */}
-        <div className="p-5 rounded-3xl border shadow-sm transition-all flex flex-col justify-between bg-[#042d23] border-emerald-900/60 text-slate-100">
+        <div className="group p-5 rounded-3xl border shadow-sm transition-all duration-200 flex flex-col justify-between bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70 text-slate-100 hover:-translate-y-0.5 hover:border-emerald-500/70 hover:shadow-lg hover:shadow-emerald-950/30">
           <div>
-            <p className="text-emerald-300 text-xs font-bold uppercase tracking-wider mb-2">
-              Abastecimentos (Hoje)
-            </p>
+            <div className="mb-2 flex items-center gap-2"><Fuel className="h-4 w-4 text-[#FACC15]" aria-hidden="true" /><p className="text-emerald-300 text-xs font-bold uppercase tracking-wider">Abastecimentos (Hoje)</p></div>
             <div className="flex items-baseline gap-2">
               <span className="text-3xl font-bold text-slate-100">{todayLogs.length}</span>
               <span className="text-emerald-300 text-xs font-bold px-2 py-0.5 bg-emerald-950/80 rounded-md border border-emerald-800">
@@ -398,16 +510,14 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-emerald-300/90 mt-3 font-semibold">
-            {todaySpent > 0 ? `Gasto hoje: ${formatCurrency(todaySpent)}` : 'Nenhum lançamento hoje'}
+              {canViewFinancial ? (todaySpent > 0 ? `Gasto hoje: ${formatCurrency(todaySpent)}` : 'Nenhum lançamento hoje') : `${todayLogs.length} abastecimento(s) registrado(s) hoje`}
           </p>
         </div>
 
         {/* Bento Stat 2: Total Litros (Semana) */}
-        <div className="p-5 rounded-3xl border shadow-sm transition-all flex flex-col justify-between bg-[#042d23] border-emerald-900/60 text-slate-100">
+        <div className="group p-5 rounded-3xl border shadow-sm transition-all duration-200 flex flex-col justify-between bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70 text-slate-100 hover:-translate-y-0.5 hover:border-emerald-500/70 hover:shadow-lg hover:shadow-emerald-950/30">
           <div>
-            <p className="text-emerald-300 text-xs font-bold uppercase tracking-wider mb-2">
-              Total Litros (Semana)
-            </p>
+            <div className="mb-2 flex items-center gap-2"><TrendingUp className="h-4 w-4 text-[#FACC15]" aria-hidden="true" /><p className="text-emerald-300 text-xs font-bold uppercase tracking-wider">Total Litros (Semana)</p></div>
             <div className="flex items-baseline gap-2">
               <span className="text-3xl font-bold text-slate-100">
                 {weekLogs.reduce((acc, l) => acc + l.liters, 0).toLocaleString('pt-BR')}
@@ -416,21 +526,22 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <p className="text-[11px] text-emerald-300/90 mt-3 font-semibold">
-            Consumo estável vs. período anterior
+            Volume registrado nos últimos 7 dias
           </p>
         </div>
 
         {/* Bento Stat 3: Gasto Mensal */}
-        <div className="p-5 rounded-3xl border shadow-sm transition-all flex flex-col justify-between bg-[#042d23] border-emerald-900/60 text-slate-100">
+        <div className="group p-5 rounded-3xl border shadow-sm transition-all duration-200 flex flex-col justify-between bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70 text-slate-100 hover:-translate-y-0.5 hover:border-emerald-500/70 hover:shadow-lg hover:shadow-emerald-950/30">
           <div>
-            <p className="text-emerald-300 text-xs font-bold uppercase tracking-wider mb-2">
-              Gasto Mensal
-            </p>
+            <div className="mb-2 flex items-center gap-2"><DollarSign className="h-4 w-4 text-[#FACC15]" aria-hidden="true" /><p className="text-emerald-300 text-xs font-bold uppercase tracking-wider">{canViewFinancial ? 'Gasto Mensal' : 'Consumo no Mês'}</p></div>
             <div className="flex items-baseline gap-1">
-              <span className="text-xs font-bold text-emerald-300">R$</span>
+              {canViewFinancial ? <span className="text-xs font-bold text-emerald-300">R$</span> : null}
               <span className="text-3xl font-bold text-slate-100">
-                {monthSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                {canViewFinancial
+                  ? monthSpent.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+                  : monthLiters.toLocaleString('pt-BR')}
               </span>
+              {!canViewFinancial && <span className="text-sm font-bold text-emerald-300">L</span>}
             </div>
           </div>
           <p className="text-[11px] text-emerald-300 font-bold mt-3">
@@ -441,9 +552,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
         {/* Bento Stat 4: High-Impact Emerald Card - Frota Ativa */}
         <div className="bg-[#064E3B] p-5 rounded-3xl border border-[#064E3B] shadow-lg shadow-emerald-900/10 text-white flex flex-col justify-between">
           <div>
-            <p className="text-emerald-100 text-xs font-bold uppercase tracking-wider mb-2">
-              Frota & Máquinas Ativas
-            </p>
+            <div className="mb-2 flex items-center gap-2"><Truck className="h-4 w-4 text-[#FACC15]" aria-hidden="true" /><p className="text-emerald-100 text-xs font-bold uppercase tracking-wider">Frota & Máquinas Ativas</p></div>
             <div className="flex items-baseline gap-2">
               <span className="text-3xl font-bold text-[#FACC15]">{vehicles.filter(v => v.status === 'ATIVO').length}</span>
               <span className="text-emerald-200 text-sm font-bold">/ {vehicles.length}</span>
@@ -468,21 +577,39 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Main Chart Section - 8 cols */}
-        <div className="lg:col-span-8 rounded-3xl border shadow-sm p-6 flex flex-col bg-[#042d23] border-emerald-900/60">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
-            <div>
-              <h3 className="font-bold text-lg text-slate-100">Fluxo de Consumo</h3>
-              <p className="text-xs text-emerald-200 font-medium">Evolução dos abastecimentos por mês e por setor</p>
+        <div className="lg:col-span-8 rounded-3xl border shadow-sm p-6 flex flex-col bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70 hover:border-emerald-600/60 transition-colors">
+          <div className="mb-5 flex flex-col gap-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div><p className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300">Análise principal</p><h2 className="text-lg font-bold text-white sm:text-xl">Fluxo de Consumo</h2><p className="mt-1 text-xs text-emerald-200/75">Consumo diário com base nos abastecimentos registrados</p></div>
+              <div className="flex flex-wrap gap-1 rounded-xl border border-emerald-800/70 bg-[#031a14] p-1" role="group" aria-label="Período do gráfico">
+                {(['7', '30', '90', 'custom'] as const).map(period => <button key={period} type="button" aria-pressed={chartPeriod === period} onClick={() => { if (period === 'custom' && !customStartDate) { const end = now; const start = new Date(end); start.setDate(start.getDate() - 29); setCustomStartDate(toDateInputValue(start)); setCustomEndDate(toDateInputValue(end)); } setChartPeriod(period); setSelectedChartPoint(null); }} className={`min-h-10 rounded-lg px-3 text-xs font-bold transition ${chartPeriod === period ? 'bg-[#FACC15] text-[#183b2c]' : 'text-emerald-100 hover:bg-emerald-900/70'}`}>{period === 'custom' ? 'Personalizado' : `${period} dias`}</button>)}
+              </div>
             </div>
-            <span className="self-start sm:self-auto text-xs font-bold text-[#FACC15] bg-[#FACC15]/10 px-3 py-1.5 rounded-full border border-[#FACC15]/20">
-              Mês Atual: {now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
-            </span>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {chartPeriod === 'custom' ? <div className="flex flex-wrap gap-2">
+                <label className="flex items-center gap-2 text-xs text-emerald-200">De <input aria-label="Data inicial do gráfico" type="date" value={customStartDate} max={todayInputValue} onChange={event => {
+                  const nextStart = event.target.value;
+                  setCustomStartDate(nextStart);
+                  if (customEndDate && (customEndDate < nextStart || new Date(`${customEndDate}T00:00:00`).getTime() - new Date(`${nextStart}T00:00:00`).getTime() > 364 * 86400000)) setCustomEndDate(nextStart);
+                  setSelectedChartPoint(null);
+                }} className="min-h-11 rounded-lg border border-emerald-800 bg-[#031a14] px-2 text-white" /></label>
+                <label className="flex items-center gap-2 text-xs text-emerald-200">Até <input aria-label="Data final do gráfico" type="date" value={customEndDate} min={customStartDate || undefined} max={customEndDateLimit} onChange={event => {
+                  const nextEnd = event.target.value;
+                  if (nextEnd && customStartDate && nextEnd >= customStartDate && nextEnd <= customEndDateLimit) setCustomEndDate(nextEnd);
+                  setSelectedChartPoint(null);
+                }} className="min-h-11 rounded-lg border border-emerald-800 bg-[#031a14] px-2 text-white" /></label>
+              </div> : <span className="text-xs text-emerald-300">{chartRange.start.toLocaleDateString('pt-BR')} — {chartRange.end.toLocaleDateString('pt-BR')}</span>}
+              <div className="flex gap-1 self-start rounded-xl bg-emerald-950/80 p-1" role="group" aria-label="Métrica do gráfico">
+                <button type="button" aria-pressed={chartMetric === 'liters'} onClick={() => setChartMetric('liters')} className={`min-h-10 rounded-lg px-3 text-xs font-bold ${chartMetric === 'liters' ? 'bg-emerald-700 text-white' : 'text-emerald-200'}`}>Litros</button>
+                {canViewFinancial && <button type="button" aria-pressed={chartMetric === 'spending'} onClick={() => setChartMetric('spending')} className={`min-h-10 rounded-lg px-3 text-xs font-bold ${chartMetric === 'spending' ? 'bg-emerald-700 text-white' : 'text-emerald-200'}`}>Gastos</button>}
+              </div>
+            </div>
           </div>
 
-          <div className="h-64 sm:h-72 w-full flex items-center justify-center">
-            {areChartsReady ? (
+          <div className="h-64 w-full touch-pan-y sm:h-72" role="group" aria-label={displayFinancial ? 'Gráfico interativo de gastos por dia' : 'Gráfico interativo de consumo diário em litros'}>
+            {areChartsReady && monthlyHistoryData.some(point => point.abastecimentos > 0) ? (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={monthlyHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <AreaChart data={monthlyHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} onClick={(state: any) => { const point = state?.activePayload?.[0]?.payload || monthlyHistoryData.find(item => item.date === state?.activeLabel); if (point?.date) setSelectedChartPoint(point.date); }}>
                   <defs>
                     <linearGradient id="colorGastoBento" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#064E3B" stopOpacity={0.8}/>
@@ -490,10 +617,11 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#064e3b" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} />
-                  <YAxis tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} tickFormatter={(v) => `R$${v/1000}k`} />
-                  <Tooltip 
-                    formatter={(val: any) => [formatCurrency(Number(val)), 'Total Gasto']}
+                  <XAxis dataKey="date" interval="preserveStartEnd" tickFormatter={(value) => new Date(`${value}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} />
+                  <YAxis tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} tickFormatter={(value) => displayFinancial ? `R$${Number(value).toLocaleString('pt-BR')}` : `${Number(value).toLocaleString('pt-BR')} L`} />
+                  <Tooltip
+                    labelFormatter={(label, payload) => payload?.[0]?.payload?.date ? new Date(`${payload[0].payload.date}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }) : label}
+                    formatter={(val: any) => [displayFinancial ? formatCurrency(Number(val)) : `${Number(val).toLocaleString('pt-BR')} L`, displayFinancial ? 'Gastos' : 'Consumo']}
                     contentStyle={{
                       backgroundColor: '#022c22',
                       borderColor: '#065f46',
@@ -504,27 +632,38 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                       boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'
                     }}
                   />
-                  <Area type="monotone" dataKey="Gasto" stroke="#FACC15" strokeWidth={3} fillOpacity={1} fill="url(#colorGastoBento)" />
+                  {selectedChartDataPoint && selectedChartValue !== undefined && <ReferenceLine x={selectedChartDataPoint.date} stroke="#FACC15" strokeDasharray="4 4" strokeWidth={1.5} />}
+                  <Area type="monotone" dataKey={displayFinancial ? 'Gasto' : 'Litros'} stroke="#FACC15" strokeWidth={3} fillOpacity={1} fill="url(#colorGastoBento)" activeDot={{ r: 6, stroke: '#f8fafc', strokeWidth: 2 }} dot={{ r: 2, fill: '#FACC15', stroke: '#05251d', strokeWidth: 1 }} animationDuration={700} />
+                  {selectedChartDataPoint && selectedChartValue !== undefined && <ReferenceDot x={selectedChartDataPoint.date} y={selectedChartValue} r={7} fill="#FACC15" stroke="#ffffff" strokeWidth={2.5} />}
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <div className="w-full h-full rounded-2xl bg-emerald-950/40 animate-pulse border border-emerald-900/30" />
+              <div className="flex h-full w-full items-center justify-center rounded-2xl border border-dashed border-emerald-800/60 bg-emerald-950/20 px-5 text-center text-sm text-emerald-200">
+                {areChartsReady ? 'Não há abastecimentos neste período e com os filtros selecionados.' : 'Carregando análise…'}
+              </div>
             )}
           </div>
+          {selectedChartPoint && selectedChartDataPoint && <div aria-live="polite">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-yellow-700/40 bg-emerald-950/70 px-4 py-3 text-sm">
+              <span className="font-semibold text-white">Dia selecionado: {new Date(`${selectedChartPoint}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}</span>
+              <button type="button" onClick={() => setSelectedChartPoint(null)} className="min-h-11 rounded-lg border border-emerald-700 px-3 text-xs font-bold text-emerald-100 transition hover:bg-emerald-900/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FACC15]">Voltar à visão do período</button>
+            </div>
+            <DailyFuelingDetails date={selectedChartPoint} logs={selectedDayLogs} canViewFinancial={canViewFinancial} />
+          </div>}
 
           {/* Sector Bars Preview inside Bento Card */}
-          <div className="mt-6 pt-4 border-t border-emerald-900/40 grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {canViewFinancial && <div className="mt-6 pt-4 border-t border-emerald-900/40 grid grid-cols-2 sm:grid-cols-4 gap-3">
             {sectorChartData.slice(0, 4).map((sec, idx) => (
               <div key={idx} className="bg-emerald-950/60 p-3 rounded-2xl border border-emerald-900/40">
                 <p className="text-[10px] font-extrabold text-emerald-300 uppercase truncate">{sec.name}</p>
                 <p className="text-sm font-bold text-slate-100 mt-0.5">{formatCurrency(sec.value)}</p>
               </div>
             ))}
-          </div>
+          </div>}
         </div>
 
         {/* Recent Registrations Bento Card - 4 cols */}
-        <div className="lg:col-span-4 rounded-3xl border shadow-sm p-6 flex flex-col justify-between bg-[#042d23] border-emerald-900/60">
+        <div className="lg:col-span-4 rounded-3xl border shadow-sm p-6 flex flex-col justify-between bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70">
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-lg text-slate-100">Últimos Registros</h3>
@@ -537,19 +676,20 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
             </div>
 
             <div className="space-y-3">
-              {fuelLogs.slice(0, 4).map((log) => (
+              {dashboardLogs.slice(0, 4).map((log) => (
                 <div key={log.id} className="flex items-center gap-3 p-3 bg-emerald-950/60 rounded-2xl transition-colors hover:bg-emerald-900/40 border border-emerald-900/40">
                   <div className="w-10 h-10 bg-[#064E3B] text-white rounded-full flex items-center justify-center shrink-0 font-bold shadow-sm">
                     <Fuel className="w-5 h-5 text-[#FACC15]" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-bold text-slate-100 truncate">{log.equipmentName}</p>
-                    <p className="text-[11px] text-emerald-200 uppercase font-bold truncate">
-                      {log.driverOrOperatorName} • <span className="text-[#FACC15]">{log.liters}L</span>
+                    <p className="text-[11px] text-emerald-200 font-bold truncate">
+                      {log.driverOrOperatorName} • <span className="text-[#FACC15]">{Number(log.liters).toLocaleString('pt-BR')} L</span>
                     </p>
+                    <p className="text-[10px] text-emerald-300/70 truncate">{getEffectiveActivityName(log)}</p>
                   </div>
                   <div className="text-[11px] font-bold text-emerald-300 shrink-0">
-                    {formatDateTimeBR(log.dateTime).split(' ')[1] || 'Hoje'}
+                    {formatDateTimeBR(log.dateTime).split(' ')[0] || 'Data indisponível'}
                   </div>
                 </div>
               ))}
@@ -567,11 +707,11 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Tanques Centrais Section - Side by Side (Quadra & Itapeva) */}
-      <div className="rounded-3xl border p-6 shadow-sm bg-[#042d23] border-emerald-900/60">
+      <div className="rounded-3xl border p-6 shadow-sm bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xl">⛽</span>
+              <Fuel className="h-5 w-5 text-[#FACC15]" aria-hidden="true" />
               <h3 className="font-extrabold text-lg text-slate-100">Tanques Centrais</h3>
             </div>
             <p className="text-xs text-emerald-200 font-medium mt-0.5">
@@ -600,7 +740,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
           {centralTanksStatus.map(({ tank, status }) => {
             const isCritical = status.isCritical;
             const isLow = status.isLow;
-            const statusLabel = isCritical ? '🔴 Estoque Crítico' : (isLow ? '⚠️ Estoque Baixo' : '🟢 Normal');
+            const statusLabel = isCritical ? 'Estoque crítico' : (isLow ? 'Estoque baixo' : 'Normal');
             const statusBadgeClass = isCritical 
               ? 'bg-red-500/20 text-red-400 border-red-500/40 animate-pulse'
               : (isLow 
@@ -618,7 +758,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-base">⛽</span>
+                      <Fuel className="h-4 w-4 text-[#FACC15]" aria-hidden="true" />
                       <h4 className="font-extrabold text-base text-slate-100">
                         {tank.name}
                       </h4>
@@ -669,7 +809,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                     }`}>
                       <AlertTriangle className="w-4 h-4 shrink-0" />
                       <span>
-                        🔴 Estoque baixo (Estoque atual: <strong>{Math.round(status.currentStock).toLocaleString('pt-BR')} L</strong> • Estoque mínimo: <strong>{status.minStockAlert.toLocaleString('pt-BR')} L</strong>)
+                        Estoque baixo (Estoque atual: <strong>{Math.round(status.currentStock).toLocaleString('pt-BR')} L</strong> • Estoque mínimo: <strong>{status.minStockAlert.toLocaleString('pt-BR')} L</strong>)
                       </span>
                     </div>
                   )}
@@ -747,7 +887,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                 <p className="font-extrabold text-sm text-slate-100">{todayTopOperator.name}</p>
                 <div className="flex items-center justify-between text-[11px] text-emerald-200 border-t border-emerald-900/40 pt-1.5 mt-1">
                   <span>{todayTopOperator.count} abastecimento(s) hoje</span>
-                  <span className="font-bold text-slate-200">{formatCurrency(todayTopOperator.cost)}</span>
+                  {canViewFinancial && <span className="font-bold text-slate-200">{formatCurrency(todayTopOperator.cost)}</span>}
                 </div>
                 {todayTopEquipment && (
                   <p className="text-[10px] text-emerald-400/80 truncate">
@@ -775,22 +915,23 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Operation Breakdown Row */}
-      <div className="rounded-3xl border p-6 shadow-sm bg-[#042d23] border-emerald-900/60">
+      <div className="rounded-3xl border p-6 shadow-sm bg-gradient-to-br from-[#073b2d] to-[#04251d] border-emerald-800/70">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-extrabold text-base text-slate-100">Consumo por Tipo de Operação</h3>
             <p className="text-xs text-emerald-200 font-medium">Distribuição de combustível entre Grama, Colheita, Plantio e Transporte</p>
           </div>
           <span className="text-xs font-bold text-[#FACC15] bg-[#FACC15]/10 px-3 py-1 rounded-full border border-[#FACC15]/20">
-            {monthLiters.toLocaleString('pt-BR')} L Totais
+            {operationTypeData.reduce((total, item) => total + item.liters, 0).toLocaleString('pt-BR')} L Totais filtrados
           </span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
           {operationTypeData.map((op) => {
-            const pct = Math.round((op.liters / (monthLiters || 1)) * 100);
+            const operationTotalLiters = operationTypeData.reduce((total, item) => total + item.liters, 0);
+            const pct = operationTotalLiters > 0 ? Math.round((op.liters / operationTotalLiters) * 100) : 0;
             return (
-              <div key={op.key} className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-900/40 flex flex-col justify-between space-y-3">
+              <button key={op.key} type="button" aria-pressed={selectedOperationType === op.key} onClick={() => setSelectedOperationType(selectedOperationType === op.key ? 'ALL' : op.key)} className={`p-4 rounded-2xl border flex flex-col justify-between gap-3 text-left transition hover:border-emerald-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 ${selectedOperationType === op.key ? 'bg-emerald-800/70 border-yellow-400/70' : 'bg-emerald-950/60 border-emerald-900/40'}`}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-extrabold text-slate-100">{op.label}</span>
                   <span className="text-[10px] font-bold text-[#FACC15] bg-emerald-900 px-2 py-0.5 rounded-md">
@@ -802,13 +943,13 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                     {op.liters.toLocaleString('pt-BR')} <span className="text-xs font-bold text-emerald-400">L</span>
                   </p>
                   <p className="text-[11px] text-emerald-300 font-semibold">
-                    {formatCurrency(op.cost)} • {op.count} abastecimentos
+                    {canViewFinancial ? `${formatCurrency(op.cost)} • ` : ''}{op.count} abastecimentos
                   </p>
                 </div>
                 <div className="w-full h-1.5 bg-emerald-900 rounded-full overflow-hidden">
                   <div className="h-full bg-[#FACC15] rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -819,7 +960,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-lg">📊</span>
+              <BarChart2 className="h-5 w-5 text-[#FACC15]" aria-hidden="true" />
               <h3 className="font-black text-lg text-slate-100">
                 Análise Avançada de Consumo (Categoria & Atividade)
               </h3>
@@ -843,7 +984,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-base">🏷️</span>
+                    <PieChart className="h-4 w-4 text-[#FACC15]" aria-hidden="true" />
                     <h4 className="font-extrabold text-base text-slate-100">
                       1. Consumo por Categoria
                     </h4>
@@ -865,6 +1006,8 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                       <RechartsPieChart>
                         <Pie
                           data={categoryConsumption}
+                          activeShape={{ outerRadius: 82 }}
+                          animationDuration={650}
                           cx="50%"
                           cy="50%"
                           innerRadius={50}
@@ -872,6 +1015,8 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                           paddingAngle={4}
                           dataKey="liters"
                           nameKey="label"
+                          cursor="pointer"
+                          onClick={(item: any) => setSelectedCategoryForActivity(selectedCategoryForActivity === item?.key ? 'ALL' : item?.key || 'ALL')}
                         >
                           {categoryConsumption.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color || '#10B981'} stroke="#042d23" strokeWidth={2} />
@@ -906,9 +1051,9 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               {/* Detailed Category Progress List */}
               <div className="space-y-2.5 mt-2">
                 {categoryConsumption.map((cat) => (
-                  <div 
-                    key={cat.key} 
-                    className="p-3 rounded-2xl bg-emerald-950/70 border border-emerald-900/50 space-y-1.5 transition-colors hover:bg-emerald-900/40"
+                  <button type="button" aria-pressed={selectedCategoryForActivity === cat.key} onClick={() => setSelectedCategoryForActivity(selectedCategoryForActivity === cat.key ? 'ALL' : cat.key)}
+                    key={cat.key}
+                    className="w-full p-3 rounded-2xl bg-emerald-950/70 border border-emerald-900/50 space-y-1.5 text-left transition-colors hover:bg-emerald-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                   >
                     <div className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2 min-w-0">
@@ -935,7 +1080,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                         }} 
                       />
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -952,7 +1097,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-base">⚙️</span>
+                    <Settings className="h-4 w-4 text-[#FACC15]" aria-hidden="true" />
                     <h4 className="font-extrabold text-base text-slate-100">
                       2. Consumo por Atividade / Serviço
                     </h4>
@@ -1006,6 +1151,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                         data={activityConsumption.slice(0, 6)}
                         layout="vertical"
                         margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+                        onClick={(state: any) => { const item = state?.activePayload?.[0]?.payload; if (item?.activity) setSelectedActivity(selectedActivity === item.activity ? 'ALL' : item.activity); }}
                       >
                         <CartesianGrid strokeDasharray="3 3" stroke="#064e3b" horizontal={false} />
                         <XAxis type="number" tick={{ fontSize: 10, fill: '#a7f3d0' }} />
@@ -1018,7 +1164,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                         <Tooltip
                           formatter={(val: any, name: any, item: any) => [
                             `${Number(val).toLocaleString('pt-BR')} Litros (${item.payload.percentage}%)`,
-                            item.payload.isCustom ? `⭐ ${item.payload.activity} (Personalizada)` : item.payload.activity
+                            item.payload.isCustom ? `${item.payload.activity} (Personalizada)` : item.payload.activity
                           ]}
                           contentStyle={{
                             backgroundColor: '#022c22',
@@ -1029,7 +1175,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                             color: '#f8fafc',
                           }}
                         />
-                        <Bar dataKey="liters" fill="#FACC15" radius={[0, 8, 8, 0]} />
+                        <Bar dataKey="liters" fill="#FACC15" radius={[0, 8, 8, 0]} activeBar={{ fill: '#fde047', stroke: '#f8fafc', strokeWidth: 1 }} cursor="pointer" />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
@@ -1045,9 +1191,8 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               {/* Activities List with Custom Tag highlight */}
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
                 {activityConsumption.map((act, index) => (
-                  <div
-                    key={act.key || index}
-                    className="p-3 rounded-2xl bg-emerald-950/70 border border-emerald-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-emerald-900/40 transition-colors"
+                  <button type="button" key={act.key || index} aria-pressed={selectedActivity === act.activity} onClick={() => setSelectedActivity(selectedActivity === act.activity ? 'ALL' : act.activity)}
+                    className="w-full p-3 rounded-2xl bg-emerald-950/70 border border-emerald-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-left hover:bg-emerald-900/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                   >
                     <div className="min-w-0 flex-1 space-y-0.5">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1056,7 +1201,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                         </span>
                         {act.isCustom && (
                           <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-[#FACC15]/20 text-[#FACC15] border border-[#FACC15]/30">
-                            ⭐ Atividade Personalizada
+                            Atividade Personalizada
                           </span>
                         )}
                       </div>
@@ -1073,7 +1218,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                         {act.percentage}%
                       </span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>

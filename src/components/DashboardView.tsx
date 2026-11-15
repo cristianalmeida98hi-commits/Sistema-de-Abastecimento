@@ -10,9 +10,10 @@ import {
   getConsumptionByCategory, getConsumptionByActivity, getEffectiveActivityName, getOperationTypeLabelOnly, OPERATION_OPTIONS, CATEGORY_PALETTE 
 } from '../utils/calculations';
 import { getTankStatus, getCentralTanks, getCurrentUser, updateCentralTank } from '../utils/storage';
+import { DailyFuelingDetails } from './DailyFuelingDetails';
 import { 
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, 
-  PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar, CartesianGrid, Legend 
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceDot, ReferenceLine,
+  PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar, CartesianGrid, Legend
 } from 'recharts';
 const EditCentralTankModal = React.lazy(() => 
   import('./EditCentralTankModal').then(m => ({ default: m.EditCentralTankModal }))
@@ -392,12 +393,31 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
     return `Este mês foram consumidos ${totalMonthLiters.toLocaleString('pt-BR')} litros de combustível, sendo ${topMonthlyGroup.liters.toLocaleString('pt-BR')} litros utilizados na operação ${operationName}, atividade ${activityName}, pelo operador ${topMonthlyGroup.operatorName}.`;
   }, [dashboardLogs.length, monthLiters, monthLogs, canViewFinancial]);
 
+  const todayInputValue = toDateInputValue(now);
   const customEndDateLimit = useMemo(() => {
-    if (!customStartDate) return now.toISOString().slice(0, 10);
+    if (!customStartDate) return todayInputValue;
     const start = new Date(`${customStartDate}T00:00:00`);
-    start.setDate(start.getDate() + 365);
-    return new Date(Math.min(start.getTime(), now.getTime())).toISOString().slice(0, 10);
-  }, [customStartDate, now]);
+    start.setDate(start.getDate() + 364);
+    return toDateInputValue(new Date(Math.min(start.getTime(), now.getTime())));
+  }, [customStartDate, todayInputValue, now]);
+
+  const selectedDayLogs = useMemo(() => {
+    if (!selectedChartPoint) return [];
+    return dashboardLogs
+      .filter(log => {
+        const date = new Date(log.dateTime);
+        if (Number.isNaN(date.getTime())) return false;
+        return toDateInputValue(date) === selectedChartPoint;
+      })
+      .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
+  }, [dashboardLogs, selectedChartPoint]);
+
+  const selectedChartDataPoint = selectedChartPoint
+    ? monthlyHistoryData.find(point => point.date === selectedChartPoint)
+    : undefined;
+  const selectedChartValue = selectedChartDataPoint
+    ? (displayFinancial ? selectedChartDataPoint.Gasto : selectedChartDataPoint.Litros)
+    : undefined;
 
   return (
     <div className="flex flex-col gap-5 pb-6 animate-in fade-in duration-300 sm:gap-6">
@@ -567,8 +587,17 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               {chartPeriod === 'custom' ? <div className="flex flex-wrap gap-2">
-                <label className="flex items-center gap-2 text-xs text-emerald-200">De <input aria-label="Data inicial do gráfico" type="date" value={customStartDate} max={now.toISOString().slice(0, 10)} onChange={event => setCustomStartDate(event.target.value)} className="min-h-10 rounded-lg border border-emerald-800 bg-[#031a14] px-2 text-white" /></label>
-                <label className="flex items-center gap-2 text-xs text-emerald-200">Até <input aria-label="Data final do gráfico" type="date" value={customEndDate} min={customStartDate || undefined} max={customEndDateLimit} onChange={event => setCustomEndDate(event.target.value)} className="min-h-10 rounded-lg border border-emerald-800 bg-[#031a14] px-2 text-white" /></label>
+                <label className="flex items-center gap-2 text-xs text-emerald-200">De <input aria-label="Data inicial do gráfico" type="date" value={customStartDate} max={todayInputValue} onChange={event => {
+                  const nextStart = event.target.value;
+                  setCustomStartDate(nextStart);
+                  if (customEndDate && (customEndDate < nextStart || new Date(`${customEndDate}T00:00:00`).getTime() - new Date(`${nextStart}T00:00:00`).getTime() > 364 * 86400000)) setCustomEndDate(nextStart);
+                  setSelectedChartPoint(null);
+                }} className="min-h-11 rounded-lg border border-emerald-800 bg-[#031a14] px-2 text-white" /></label>
+                <label className="flex items-center gap-2 text-xs text-emerald-200">Até <input aria-label="Data final do gráfico" type="date" value={customEndDate} min={customStartDate || undefined} max={customEndDateLimit} onChange={event => {
+                  const nextEnd = event.target.value;
+                  if (nextEnd && customStartDate && nextEnd >= customStartDate && nextEnd <= customEndDateLimit) setCustomEndDate(nextEnd);
+                  setSelectedChartPoint(null);
+                }} className="min-h-11 rounded-lg border border-emerald-800 bg-[#031a14] px-2 text-white" /></label>
               </div> : <span className="text-xs text-emerald-300">{chartRange.start.toLocaleDateString('pt-BR')} — {chartRange.end.toLocaleDateString('pt-BR')}</span>}
               <div className="flex gap-1 self-start rounded-xl bg-emerald-950/80 p-1" role="group" aria-label="Métrica do gráfico">
                 <button type="button" aria-pressed={chartMetric === 'liters'} onClick={() => setChartMetric('liters')} className={`min-h-10 rounded-lg px-3 text-xs font-bold ${chartMetric === 'liters' ? 'bg-emerald-700 text-white' : 'text-emerald-200'}`}>Litros</button>
@@ -577,10 +606,10 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          <div className="h-64 sm:h-72 w-full flex items-center justify-center" role="img" aria-label={displayFinancial ? 'Gráfico de gastos por dia' : 'Gráfico de consumo diário em litros'}>
+          <div className="h-64 w-full touch-pan-y sm:h-72" role="group" aria-label={displayFinancial ? 'Gráfico interativo de gastos por dia' : 'Gráfico interativo de consumo diário em litros'}>
             {areChartsReady && monthlyHistoryData.some(point => point.abastecimentos > 0) ? (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={monthlyHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} onClick={(state: any) => { const point = state?.activePayload?.[0]?.payload || monthlyHistoryData.find(item => item.label === state?.activeLabel); if (point?.date) setSelectedChartPoint(point.date); }}>
+                <AreaChart data={monthlyHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} onClick={(state: any) => { const point = state?.activePayload?.[0]?.payload || monthlyHistoryData.find(item => item.date === state?.activeLabel); if (point?.date) setSelectedChartPoint(point.date); }}>
                   <defs>
                     <linearGradient id="colorGastoBento" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#064E3B" stopOpacity={0.8}/>
@@ -588,7 +617,7 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#064e3b" />
-                  <XAxis dataKey="label" interval="preserveStartEnd" tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} />
+                  <XAxis dataKey="date" interval="preserveStartEnd" tickFormatter={(value) => new Date(`${value}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })} tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} />
                   <YAxis tick={{ fontSize: 11, fill: '#a7f3d0', fontWeight: 600 }} tickFormatter={(value) => displayFinancial ? `R$${Number(value).toLocaleString('pt-BR')}` : `${Number(value).toLocaleString('pt-BR')} L`} />
                   <Tooltip
                     labelFormatter={(label, payload) => payload?.[0]?.payload?.date ? new Date(`${payload[0].payload.date}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }) : label}
@@ -603,7 +632,9 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
                       boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'
                     }}
                   />
-                  <Area type="monotone" dataKey={displayFinancial ? 'Gasto' : 'Litros'} stroke="#FACC15" strokeWidth={3} fillOpacity={1} fill="url(#colorGastoBento)" activeDot={{ r: 6, stroke: '#f8fafc', strokeWidth: 2 }} animationDuration={700} />
+                  {selectedChartDataPoint && selectedChartValue !== undefined && <ReferenceLine x={selectedChartDataPoint.date} stroke="#FACC15" strokeDasharray="4 4" strokeWidth={1.5} />}
+                  <Area type="monotone" dataKey={displayFinancial ? 'Gasto' : 'Litros'} stroke="#FACC15" strokeWidth={3} fillOpacity={1} fill="url(#colorGastoBento)" activeDot={{ r: 6, stroke: '#f8fafc', strokeWidth: 2 }} dot={{ r: 2, fill: '#FACC15', stroke: '#05251d', strokeWidth: 1 }} animationDuration={700} />
+                  {selectedChartDataPoint && selectedChartValue !== undefined && <ReferenceDot x={selectedChartDataPoint.date} y={selectedChartValue} r={7} fill="#FACC15" stroke="#ffffff" strokeWidth={2.5} />}
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
@@ -612,10 +643,13 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
               </div>
             )}
           </div>
-          {selectedChartPoint && (() => {
-            const point = monthlyHistoryData.find(item => item.date === selectedChartPoint);
-            return point ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-800/60 bg-emerald-950/60 px-4 py-3 text-sm" aria-live="polite"><span className="font-semibold text-white">{new Date(`${point.date}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}</span><span className="text-emerald-200">{point.abastecimentos} abastecimento(s) · {point.Litros.toLocaleString('pt-BR')} L</span>{displayFinancial && <span className="font-bold text-[#FACC15]">{formatCurrency(point.Gasto)}</span>}</div> : null;
-          })()}
+          {selectedChartPoint && selectedChartDataPoint && <div aria-live="polite">
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-yellow-700/40 bg-emerald-950/70 px-4 py-3 text-sm">
+              <span className="font-semibold text-white">Dia selecionado: {new Date(`${selectedChartPoint}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}</span>
+              <button type="button" onClick={() => setSelectedChartPoint(null)} className="min-h-11 rounded-lg border border-emerald-700 px-3 text-xs font-bold text-emerald-100 transition hover:bg-emerald-900/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FACC15]">Voltar à visão do período</button>
+            </div>
+            <DailyFuelingDetails date={selectedChartPoint} logs={selectedDayLogs} canViewFinancial={canViewFinancial} />
+          </div>}
 
           {/* Sector Bars Preview inside Bento Card */}
           {canViewFinancial && <div className="mt-6 pt-4 border-t border-emerald-900/40 grid grid-cols-2 sm:grid-cols-4 gap-3">

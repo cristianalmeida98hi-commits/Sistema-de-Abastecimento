@@ -1,15 +1,17 @@
 import type { FuelLog, Vehicle } from '../types';
 import {
   formatCurrency,
-  formatDateBR,
   formatDateTimeBR,
   getFuelTypeName,
   getSectorName,
   getOperationTypeName,
+  getOperationTypeLabelOnly,
   getActivityTypeName,
   getEffectiveActivityName,
   getEffectiveCategoryName
 } from './calculations';
+
+export type PdfReportVariant = 'OFFICIAL' | 'EXECUTIVE';
 
 export interface ReportExportOptions {
   logs: FuelLog[];
@@ -19,6 +21,14 @@ export interface ReportExportOptions {
   canViewFinancial: boolean;
   appliedFiltersDesc?: string;
   reportTitle?: string;
+  variant?: PdfReportVariant;
+}
+
+export interface GroupedSummaryItem {
+  name: string;
+  liters: number;
+  cost: number;
+  count: number;
 }
 
 export interface ReportMetrics {
@@ -26,11 +36,17 @@ export interface ReportMetrics {
   totalCost: number;
   totalCount: number;
   avgLitersPerLog: number;
+  avgPricePerLiter: number;
+  uniqueEquipmentsCount: number;
+  uniqueOperatorsCount: number;
+  suspiciousCount: number;
   sortedAct: Array<{ name: string; liters: number; cost: number; count: number }>;
   sortedEq: Array<{ name: string; code: string; liters: number; cost: number; count: number }>;
   sortedOp: Array<{ name: string; liters: number; cost: number; count: number }>;
   sortedSec: Array<{ name: string; liters: number; cost: number; count: number }>;
   sortedOper: Array<{ name: string; liters: number; cost: number; count: number }>;
+  sortedFuelType: GroupedSummaryItem[];
+  sortedStation: GroupedSummaryItem[];
   sortedTime: Array<{ date: string; liters: number; cost: number }>;
   topEquipment?: { name: string; code: string; liters: number; count: number };
   topOperator?: { name: string; liters: number; count: number };
@@ -40,13 +56,90 @@ export interface ReportMetrics {
 }
 
 /**
- * Agrega e calcula métricas analíticas e gerenciais para os relatórios.
+ * Remove emojis e símbolos fora da codificação padrão Latin-1/WinAnsi do jsPDF (helvetica),
+ * preservando integralmente letras acentuadas em português, números e pontuação.
+ */
+export function sanitizePdfText(text?: string | number | null): string {
+  if (text === undefined || text === null) return '';
+  return String(text)
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0E\uFE0F\u200D]/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function getSortableTimestamp(value?: string): number {
+  if (!value) return 0;
+  const trimmed = value.trim();
+  const normalized = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(trimmed)
+    ? `${trimmed}-03:00`
+    : trimmed;
+  const time = new Date(normalized).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+/**
+ * Retorna uma nova cópia dos abastecimentos ordenada em ordem cronológica crescente,
+ * sem mutar o array original utilizado pelas telas ou pelo cache.
+ */
+export function sortLogsChronologicallyAsc(logs: FuelLog[]): FuelLog[] {
+  return [...logs].sort((a, b) => {
+    const timeA = getSortableTimestamp(a.dateTime);
+    const timeB = getSortableTimestamp(b.dateTime);
+    if (timeA !== timeB) return timeA - timeB;
+
+    const createdA = getSortableTimestamp(a.createdAt);
+    const createdB = getSortableTimestamp(b.createdAt);
+    if (createdA !== createdB) return createdA - createdB;
+
+    const meterA = a.equipmentCategory === 'VEICULO'
+      ? (a.kmAtFueling ?? 0)
+      : (a.hourmeterAtFueling ?? a.kmAtFueling ?? 0);
+    const meterB = b.equipmentCategory === 'VEICULO'
+      ? (b.kmAtFueling ?? 0)
+      : (b.hourmeterAtFueling ?? b.kmAtFueling ?? 0);
+    if (meterA !== meterB) return meterA - meterB;
+
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+}
+
+function formatLitersBR(value: number): string {
+  return (Number(value) || 0).toLocaleString('pt-BR', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  });
+}
+
+function formatMeterReading(log: FuelLog): string {
+  const isKm = log.equipmentCategory === 'VEICULO';
+  if (isKm && log.kmAtFueling !== undefined && log.kmAtFueling !== null) {
+    return `${Number(log.kmAtFueling).toLocaleString('pt-BR')} km`;
+  }
+  if (log.hourmeterAtFueling !== undefined && log.hourmeterAtFueling !== null) {
+    return `${Number(log.hourmeterAtFueling).toLocaleString('pt-BR')} h`;
+  }
+  if (log.kmAtFueling !== undefined && log.kmAtFueling !== null) {
+    return `${Number(log.kmAtFueling).toLocaleString('pt-BR')} km`;
+  }
+  return '-';
+}
+
+function formatTankFillStatus(log: FuelLog): string {
+  if (log.isFullTank === true) return 'Cheio';
+  if (log.isFullTank === false) return 'Parcial';
+  return '-';
+}
+
+/**
+ * Agrega e calcula métricas analíticas e gerenciais para os relatórios,
+ * consumindo exclusivamente os valores já existentes nos registros.
  */
 export function calculateReportMetrics(logs: FuelLog[], vehicles: Vehicle[]): ReportMetrics {
-  const totalLiters = logs.reduce((acc, l) => acc + (l.liters || 0), 0);
-  const totalCost = logs.reduce((acc, l) => acc + (l.totalValue || 0), 0);
+  const totalLiters = logs.reduce((acc, l) => acc + (Number(l.liters) || 0), 0);
+  const totalCost = logs.reduce((acc, l) => acc + (Number(l.totalValue) || 0), 0);
   const totalCount = logs.length;
   const avgLitersPerLog = totalCount > 0 ? totalLiters / totalCount : 0;
+  const avgPricePerLiter = totalLiters > 0 ? totalCost / totalLiters : 0;
 
   const vehicleMap = new Map<string, Vehicle>();
   vehicles.forEach(v => {
@@ -58,11 +151,16 @@ export function calculateReportMetrics(logs: FuelLog[], vehicles: Vehicle[]): Re
   const actMap = new Map<string, { name: string; liters: number; cost: number; count: number }>();
   const operMap = new Map<string, { name: string; liters: number; cost: number; count: number }>();
   const secMap = new Map<string, { name: string; liters: number; cost: number; count: number }>();
+  const fuelMap = new Map<string, GroupedSummaryItem>();
+  const stationMap = new Map<string, GroupedSummaryItem>();
   const timeMap = new Map<string, { date: string; liters: number; cost: number }>();
 
+  let suspiciousCount = 0;
+
   logs.forEach(l => {
-    const liters = l.liters || 0;
-    const cost = l.totalValue || 0;
+    const liters = Number(l.liters) || 0;
+    const cost = Number(l.totalValue) || 0;
+    if (l.flaggedSuspicious) suspiciousCount += 1;
 
     // Equipamento
     const eqKey = l.equipmentId || l.equipmentName || 'OUTRO';
@@ -117,6 +215,22 @@ export function calculateReportMetrics(logs: FuelLog[], vehicles: Vehicle[]): Re
     secCur.count += 1;
     secMap.set(sectorLabel, secCur);
 
+    // Tipo de Combustível
+    const fuelLabel = getFuelTypeName(l.fuelType);
+    const fuelCur = fuelMap.get(fuelLabel) || { name: fuelLabel, liters: 0, cost: 0, count: 0 };
+    fuelCur.liters += liters;
+    fuelCur.cost += cost;
+    fuelCur.count += 1;
+    fuelMap.set(fuelLabel, fuelCur);
+
+    // Posto / Tanque
+    const stationLabel = l.gasStationName || 'Não Informado';
+    const stationCur = stationMap.get(stationLabel) || { name: stationLabel, liters: 0, cost: 0, count: 0 };
+    stationCur.liters += liters;
+    stationCur.cost += cost;
+    stationCur.count += 1;
+    stationMap.set(stationLabel, stationCur);
+
     // Temporal
     const dateKey = (l.dateTime || '').slice(0, 10);
     if (dateKey) {
@@ -132,6 +246,8 @@ export function calculateReportMetrics(logs: FuelLog[], vehicles: Vehicle[]): Re
   const sortedAct = Array.from(actMap.values()).sort((a, b) => b.liters - a.liters);
   const sortedOper = Array.from(operMap.values()).sort((a, b) => b.liters - a.liters);
   const sortedSec = Array.from(secMap.values()).sort((a, b) => b.liters - a.liters);
+  const sortedFuelType = Array.from(fuelMap.values()).sort((a, b) => b.liters - a.liters);
+  const sortedStation = Array.from(stationMap.values()).sort((a, b) => b.liters - a.liters);
   const sortedTime = Array.from(timeMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 
   return {
@@ -139,11 +255,17 @@ export function calculateReportMetrics(logs: FuelLog[], vehicles: Vehicle[]): Re
     totalCost,
     totalCount,
     avgLitersPerLog,
+    avgPricePerLiter,
+    uniqueEquipmentsCount: sortedEq.length,
+    uniqueOperatorsCount: sortedOp.length,
+    suspiciousCount,
     sortedAct,
     sortedEq,
     sortedOp,
     sortedSec,
     sortedOper,
+    sortedFuelType,
+    sortedStation,
     sortedTime,
     topEquipment: sortedEq[0],
     topOperator: sortedOp[0],
@@ -333,9 +455,125 @@ export function createTimelineChartPng(options: {
   return canvas.toDataURL('image/png').split(',')[1];
 }
 
-/**
- * Desenha caixa com título e subtítulo para gráficos vetoriais no PDF.
- */
+// ============================================================================
+// CONSTANTES DE LAYOUT E AUXILIARES VETORIAIS PARA PDF (A4 PAISAGEM 297x210mm)
+// ============================================================================
+const PDF_PAGE_W = 297;
+const PDF_PAGE_H = 210;
+const PDF_MARGIN_L = 14;
+const PDF_MARGIN_R = 14;
+const PDF_CONTENT_W = PDF_PAGE_W - PDF_MARGIN_L - PDF_MARGIN_R; // 269 mm
+const PDF_CONTENT_TOP_Y = 30.5;
+const PDF_MAX_CONTENT_Y = 194.5;
+const PDF_MARGIN_BOTTOM = PDF_PAGE_H - PDF_MAX_CONTENT_Y; // 15.5 mm
+const PDF_FOOTER_LINE_Y = 198.5;
+const PDF_FOOTER_TEXT_Y = 203.5;
+
+function fitTextWidth(doc: any, text: string, maxWidthMm: number): string {
+  const clean = sanitizePdfText(text);
+  if (!clean) return '';
+  if (doc.getTextWidth(clean) <= maxWidthMm) return clean;
+  const ellipsis = '...';
+  let end = clean.length;
+  while (end > 1 && doc.getTextWidth(clean.slice(0, end) + ellipsis) > maxWidthMm) {
+    end -= 1;
+  }
+  return clean.slice(0, Math.max(1, end)).trimEnd() + ellipsis;
+}
+
+function drawSectionHeading(doc: any, title: string, y: number, subtitle?: string) {
+  doc.setFillColor(15, 56, 34);
+  doc.rect(PDF_MARGIN_L, y - 3.3, 1.8, 4.2, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(15, 56, 34);
+  doc.text(sanitizePdfText(title).toUpperCase(), PDF_MARGIN_L + 3.6, y);
+
+  if (subtitle) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.2);
+    doc.setTextColor(100, 115, 110);
+    doc.text(sanitizePdfText(subtitle), PDF_PAGE_W - PDF_MARGIN_R, y, { align: 'right' });
+  }
+}
+
+function drawPdfHeader(
+  doc: any,
+  params: {
+    companyInfo: { name: string; slogan: string; cnpj: string };
+    reportTitle: string;
+    dateRangeStr: string;
+    appliedFiltersDesc: string;
+    issuedAtStr: string;
+    totalLogsCount: number;
+  }
+) {
+  const { companyInfo, reportTitle, dateRangeStr, appliedFiltersDesc, issuedAtStr, totalLogsCount } = params;
+
+  // Faixa superior verde institucional
+  doc.setFillColor(15, 56, 34);
+  doc.rect(0, 0, PDF_PAGE_W, 18.2, 'F');
+
+  // Filete dourado de destaque
+  doc.setFillColor(217, 165, 32);
+  doc.rect(0, 18.2, PDF_PAGE_W, 0.9, 'F');
+
+  // Empresa e slogan à esquerda
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13.5);
+  doc.text(sanitizePdfText(companyInfo.name || 'AndradeAgro').toUpperCase(), PDF_MARGIN_L, 8.2);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(215, 236, 223);
+  doc.text(
+    fitTextWidth(doc, companyInfo.slogan || 'Gestão Inteligente do Agronegócio', 120),
+    PDF_MARGIN_L,
+    14.0
+  );
+
+  // Título do relatório e emissão à direita
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.text(
+    fitTextWidth(doc, reportTitle.toUpperCase(), 138),
+    PDF_PAGE_W - PDF_MARGIN_R,
+    8.2,
+    { align: 'right' }
+  );
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.setTextColor(215, 236, 223);
+  const cnpjPart = companyInfo.cnpj ? ` | CNPJ: ${sanitizePdfText(companyInfo.cnpj)}` : '';
+  doc.text(`Emitido em: ${issuedAtStr}${cnpjPart}`, PDF_PAGE_W - PDF_MARGIN_R, 14.0, { align: 'right' });
+
+  // Faixa de contexto (Período e Filtros) com largura controlada para não colidir
+  doc.setFillColor(244, 248, 245);
+  doc.setDrawColor(210, 224, 215);
+  doc.setLineWidth(0.25);
+  doc.rect(PDF_MARGIN_L, 20.6, PDF_CONTENT_W, 6.8, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(20, 60, 40);
+  const leftSummary = fitTextWidth(
+    doc,
+    `Período: ${dateRangeStr}  |  ${totalLogsCount} registro(s)`,
+    118
+  );
+  doc.text(leftSummary, PDF_MARGIN_L + 3, 25.0);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.2);
+  doc.setTextColor(75, 95, 85);
+  const rightFilters = fitTextWidth(doc, appliedFiltersDesc || 'Todos os filtros', 140);
+  doc.text(rightFilters, PDF_PAGE_W - PDF_MARGIN_R - 3, 25.0, { align: 'right' });
+}
+
 function drawPdfChartBox(
   doc: any,
   x: number,
@@ -343,260 +581,647 @@ function drawPdfChartBox(
   w: number,
   h: number,
   title: string,
-  subtitle: string
+  subtitle: string,
+  accentRgb: [number, number, number]
 ) {
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(215, 225, 220);
+  doc.setLineWidth(0.25);
   doc.rect(x, y, w, h, 'FD');
 
   doc.setFillColor(246, 249, 247);
-  doc.rect(x, y, w, 7.5, 'F');
-  doc.setDrawColor(225, 235, 230);
-  doc.line(x, y + 7.5, x + w, y + 7.5);
+  doc.rect(x, y, w, 7.8, 'F');
 
-  doc.setFontSize(7.5);
+  // Marcador vetorial de cor no canto esquerdo do título do gráfico
+  doc.setFillColor(accentRgb[0], accentRgb[1], accentRgb[2]);
+  doc.rect(x, y, 2.0, 7.8, 'F');
+
+  doc.setDrawColor(225, 235, 230);
+  doc.line(x, y + 7.8, x + w, y + 7.8);
+
+  doc.setFontSize(7.6);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(20, 60, 40);
-  doc.text(title, x + 3, y + 5);
+  doc.text(sanitizePdfText(title), x + 4.2, y + 5.2);
 
-  doc.setFontSize(6.5);
+  doc.setFontSize(6.6);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 115, 110);
-  doc.text(subtitle, x + w - 3, y + 5, { align: 'right' });
+  doc.text(sanitizePdfText(subtitle), x + w - 3, y + 5.2, { align: 'right' });
 }
 
-/**
- * Renderiza os 4 gráficos vetoriais analíticos no PDF (Atividade, Máquina, Operador, Setor/Temporal).
- */
-function drawPdfVectorCharts(
+function drawHorizontalBarChartPanel(
   doc: any,
-  metrics: ReportMetrics,
-  startY: number,
-  panelHeight: number = 52
+  options: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    title: string;
+    subtitle: string;
+    accentRgb: [number, number, number];
+    totalLiters: number;
+    items: Array<{ label: string; liters: number }>;
+  }
 ) {
-  const panelW = 132.5;
-  const panelH = panelHeight;
-  const totalLiters = metrics.totalLiters;
+  const { x, y, w, h, title, subtitle, accentRgb, totalLiters, items } = options;
+  drawPdfChartBox(doc, x, y, w, h, title, subtitle, accentRgb);
 
-  // 1. Gráfico Top Atividades (Top Left)
-  const g1X = 14;
-  const g1Y = startY;
-  drawPdfChartBox(doc, g1X, g1Y, panelW, panelH, '📊 CONSUMO POR ATIVIDADE (LITROS)', 'Top 5 Atividades');
-  const top5Activities = metrics.sortedAct.slice(0, 5);
-  const maxActLiters = top5Activities.length > 0 ? Math.max(...top5Activities.map(a => a.liters), 1) : 1;
-
-  if (top5Activities.length === 0) {
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text('Sem abastecimentos no período selecionado.', g1X + 15, g1Y + 22);
-  } else {
-    top5Activities.forEach((act, idx) => {
-      const itemY = g1Y + 10 + idx * 8.2;
-      const barMaxWidth = panelW - 54;
-      const barW = Math.max(2, (act.liters / maxActLiters) * barMaxWidth);
-      const pct = totalLiters > 0 ? ((act.liters / totalLiters) * 100).toFixed(1) : '0';
-
-      doc.setFontSize(7);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(40, 50, 45);
-      doc.text(act.name.length > 18 ? `${act.name.slice(0, 16)}..` : act.name, g1X + 3, itemY + 3.2);
-
-      doc.setFillColor(240, 244, 242);
-      doc.rect(g1X + 34, itemY, barMaxWidth, 4.2, 'F');
-
-      doc.setFillColor(16, 140, 75);
-      doc.rect(g1X + 34, itemY, barW, 4.2, 'F');
-
-      doc.setFontSize(6.5);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(20, 60, 40);
-      doc.text(`${act.liters.toLocaleString('pt-BR')} L (${pct}%)`, g1X + panelW - 3, itemY + 3.3, { align: 'right' });
-    });
+  const topItems = items.slice(0, 5);
+  if (topItems.length === 0) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(7.5);
+    doc.setTextColor(140, 150, 145);
+    doc.text('Nenhum abastecimento no período selecionado.', x + 5, y + h / 2 + 2);
+    return;
   }
 
-  // 2. Gráfico Top Equipamentos / Máquinas (Top Right)
-  const g2X = 150.5;
-  const g2Y = startY;
-  drawPdfChartBox(doc, g2X, g2Y, panelW, panelH, '🚜 CONSUMO POR EQUIPAMENTO / MÁQUINA', 'Top 5 Máquinas');
-  const top5Equipments = metrics.sortedEq.slice(0, 5);
-  const maxEqLiters = top5Equipments.length > 0 ? Math.max(...top5Equipments.map(e => e.liters), 1) : 1;
+  const maxLiters = Math.max(...topItems.map(i => i.liters), 1);
+  // Geometria dedicada sem sobreposição:
+  // Rótulo: [x+3 .. x+45.5] (42.5 mm) | Barra: [x+46.5 .. x+97.5] (51 mm) | Valor/%: [x+99 .. x+w-3] (30.5 mm alinhado à direita)
+  const labelMaxW = 42.5;
+  const barX = x + 46.5;
+  const barMaxW = w - 46.5 - 33.5; // ~52.5 mm em painel de 132.5 mm
+  const rowStep = (h - 11.5) / 5;
+  const barH = 4.6;
 
-  if (top5Equipments.length === 0) {
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text('Sem abastecimentos no período selecionado.', g2X + 15, g2Y + 22);
-  } else {
-    top5Equipments.forEach((eq, idx) => {
-      const itemY = g2Y + 10 + idx * 8.2;
-      const barMaxWidth = panelW - 54;
-      const barW = Math.max(2, (eq.liters / maxEqLiters) * barMaxWidth);
-      const pct = totalLiters > 0 ? ((eq.liters / totalLiters) * 100).toFixed(1) : '0';
+  topItems.forEach((item, idx) => {
+    const rowY = y + 10.8 + idx * rowStep;
+    const pct = totalLiters > 0 ? ((item.liters / totalLiters) * 100).toFixed(1) : '0.0';
 
-      const label = eq.code ? `${eq.name.slice(0, 13)} (${eq.code.slice(0, 6)})` : eq.name.slice(0, 18);
-      doc.setFontSize(7);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(40, 50, 45);
-      doc.text(label, g2X + 3, itemY + 3.2);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.1);
+    doc.setTextColor(35, 45, 40);
+    const labelText = fitTextWidth(doc, item.label, labelMaxW);
+    doc.text(labelText, x + 3, rowY + 3.4);
 
-      doc.setFillColor(240, 244, 242);
-      doc.rect(g2X + 42, itemY, barMaxWidth - 8, 4.2, 'F');
+    // Fundo da trilha
+    doc.setFillColor(240, 244, 242);
+    doc.rect(barX, rowY, barMaxW, barH, 'F');
 
-      doc.setFillColor(217, 119, 6);
-      doc.rect(g2X + 42, itemY, (barW / barMaxWidth) * (barMaxWidth - 8), 4.2, 'F');
+    // Barra preenchida
+    const barW = Math.max(1.5, (item.liters / maxLiters) * barMaxW);
+    doc.setFillColor(accentRgb[0], accentRgb[1], accentRgb[2]);
+    doc.rect(barX, rowY, barW, barH, 'F');
 
-      doc.setFontSize(6.5);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(140, 60, 10);
-      doc.text(`${eq.liters.toLocaleString('pt-BR')} L (${pct}%)`, g2X + panelW - 3, itemY + 3.3, { align: 'right' });
-    });
+    // Valor e percentual isolados à direita da barra
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.8);
+    doc.setTextColor(25, 45, 35);
+    doc.text(`${formatLitersBR(item.liters)} L (${pct}%)`, x + w - 3, rowY + 3.4, { align: 'right' });
+  });
+}
+
+function drawTimelineChartPanel(
+  doc: any,
+  options: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    sortedTime: Array<{ date: string; liters: number }>;
+  }
+) {
+  const { x, y, w, h, sortedTime } = options;
+  const subtitle = sortedTime.length > 31
+    ? `Últimos 31 de ${sortedTime.length} dias com registro`
+    : sortedTime.length > 0
+      ? `${sortedTime.length} dia(s) com registro`
+      : 'Litros por Data';
+
+  drawPdfChartBox(doc, x, y, w, h, 'EVOLUÇÃO DO CONSUMO NO PERÍODO', subtitle, [15, 118, 110]);
+
+  if (sortedTime.length === 0) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(7.5);
+    doc.setTextColor(140, 150, 145);
+    doc.text('Nenhum abastecimento no período selecionado.', x + 5, y + h / 2 + 2);
+    return;
   }
 
-  // 3. Gráfico Top Operadores / Motoristas (Bottom Left)
-  const g3X = 14;
-  const g3Y = startY + panelH + 3.5;
-  drawPdfChartBox(doc, g3X, g3Y, panelW, panelH, '👤 CONSUMO POR OPERADOR / MOTORISTA', 'Top 5 Operadores');
-  const top5Operators = metrics.sortedOp.slice(0, 5);
-  const maxOpLiters = top5Operators.length > 0 ? Math.max(...top5Operators.map(o => o.liters), 1) : 1;
+  // Preserva todo o período até 31 pontos; para intervalos longos exibe os últimos 31 dias sinalizando claramente
+  const timeSlice = sortedTime.length > 31 ? sortedTime.slice(-31) : sortedTime;
+  const maxTimeLiters = Math.max(...timeSlice.map(t => t.liters), 1);
 
-  if (top5Operators.length === 0) {
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text('Sem abastecimentos no período selecionado.', g3X + 15, g3Y + 22);
-  } else {
-    top5Operators.forEach((op, idx) => {
-      const itemY = g3Y + 10 + idx * 8.2;
-      const barMaxWidth = panelW - 54;
-      const barW = Math.max(2, (op.liters / maxOpLiters) * barMaxWidth);
-      const pct = totalLiters > 0 ? ((op.liters / totalLiters) * 100).toFixed(1) : '0';
+  const axisLeftX = x + 15;
+  const chartTopY = y + 13.5;
+  const chartInnerW = w - 19;
+  const chartInnerH = h - 22.5;
+  const baseLineY = chartTopY + chartInnerH;
 
-      doc.setFontSize(7);
+  // Linhas de referência horizontais (100% e 50%) + rótulos de escala Y
+  doc.setDrawColor(232, 238, 235);
+  doc.setLineWidth(0.2);
+  doc.line(axisLeftX, chartTopY, axisLeftX + chartInnerW, chartTopY);
+  doc.line(axisLeftX, chartTopY + chartInnerH / 2, axisLeftX + chartInnerW, chartTopY + chartInnerH / 2);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(5.8);
+  doc.setTextColor(110, 125, 120);
+  doc.text(`${Math.round(maxTimeLiters).toLocaleString('pt-BR')}L`, axisLeftX - 1.5, chartTopY + 1.5, { align: 'right' });
+  doc.text(`${Math.round(maxTimeLiters / 2).toLocaleString('pt-BR')}L`, axisLeftX - 1.5, chartTopY + chartInnerH / 2 + 1.5, { align: 'right' });
+  doc.text('0L', axisLeftX - 1.5, baseLineY + 1, { align: 'right' });
+
+  // Eixo base
+  doc.setDrawColor(195, 210, 202);
+  doc.line(axisLeftX, baseLineY, axisLeftX + chartInnerW, baseLineY);
+
+  const colStep = chartInnerW / Math.max(timeSlice.length, 1);
+  const barWidth = Math.max(1.6, Math.min(colStep * 0.62, 8.5));
+  const labelStep = Math.max(1, Math.ceil(timeSlice.length / 12));
+
+  timeSlice.forEach((pt, idx) => {
+    const colX = axisLeftX + idx * colStep + (colStep - barWidth) / 2;
+    const barH = Math.max(1.2, (pt.liters / maxTimeLiters) * chartInnerH);
+    const barY = baseLineY - barH;
+
+    doc.setFillColor(15, 118, 110);
+    doc.rect(colX, barY, barWidth, barH, 'F');
+
+    if (timeSlice.length <= 12) {
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(40, 50, 45);
-      doc.text(op.name.length > 18 ? `${op.name.slice(0, 16)}..` : op.name, g3X + 3, itemY + 3.2);
+      doc.setFontSize(5.7);
+      doc.setTextColor(15, 90, 80);
+      doc.text(`${Math.round(pt.liters)}`, colX + barWidth / 2, barY - 1.2, { align: 'center' });
+    }
 
-      doc.setFillColor(240, 244, 242);
-      doc.rect(g3X + 34, itemY, barMaxWidth, 4.2, 'F');
-
-      doc.setFillColor(37, 99, 235);
-      doc.rect(g3X + 34, itemY, barW, 4.2, 'F');
-
-      doc.setFontSize(6.5);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(30, 64, 175);
-      doc.text(`${op.liters.toLocaleString('pt-BR')} L (${pct}%)`, g3X + panelW - 3, itemY + 3.3, { align: 'right' });
-    });
-  }
-
-  // 4. Gráfico Evolução Temporal no Período (Bottom Right)
-  const g4X = 150.5;
-  const g4Y = startY + panelH + 3.5;
-  drawPdfChartBox(doc, g4X, g4Y, panelW, panelH, '📅 EVOLUÇÃO DOS ABASTECIMENTOS NO PERÍODO', 'Litros por Data');
-
-  if (metrics.sortedTime.length === 0) {
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text('Sem abastecimentos no período selecionado.', g4X + 15, g4Y + 22);
-  } else {
-    const timeSlice = metrics.sortedTime.slice(-14);
-    const maxTimeLiters = Math.max(...timeSlice.map(t => t.liters), 1);
-    const chartInnerW = panelW - 20;
-    const chartInnerH = panelH - 20;
-    const colStep = chartInnerW / Math.max(timeSlice.length, 1);
-    const barWidth = Math.min(colStep * 0.65, 8);
-
-    doc.setDrawColor(210, 220, 215);
-    doc.line(g4X + 10, g4Y + 12 + chartInnerH, g4X + 10 + chartInnerW, g4Y + 12 + chartInnerH);
-
-    timeSlice.forEach((pt, idx) => {
-      const colX = g4X + 10 + idx * colStep + (colStep - barWidth) / 2;
-      const barH = Math.max(1.5, (pt.liters / maxTimeLiters) * chartInnerH);
-      const barY = g4Y + 12 + chartInnerH - barH;
-
-      doc.setFillColor(15, 118, 110);
-      doc.rect(colX, barY, barWidth, barH, 'F');
-
-      if (timeSlice.length <= 10) {
-        doc.setFontSize(5.5);
-        doc.setFont('helvetica', 'bold');
-        doc.setTextColor(15, 90, 80);
-        doc.text(`${Math.round(pt.liters)}`, colX + barWidth / 2, barY - 1, { align: 'center' });
-      }
-
+    const shouldShowDate = idx === 0 || idx === timeSlice.length - 1 || idx % labelStep === 0;
+    if (shouldShowDate) {
       const parts = pt.date.split('-');
-      const d = parts[2] || '';
-      const m = parts[1] || '';
-      doc.setFontSize(5.5);
+      const dateLabel = parts.length === 3 ? `${parts[2]}/${parts[1]}` : pt.date;
       doc.setFont('helvetica', 'normal');
-      doc.setTextColor(90, 105, 100);
-      doc.text(`${d}/${m}`, colX + barWidth / 2, g4Y + 15 + chartInnerH, { align: 'center' });
-    });
-  }
+      doc.setFontSize(5.6);
+      doc.setTextColor(85, 100, 95);
+      doc.text(dateLabel, colX + barWidth / 2, baseLineY + 3.8, { align: 'center' });
+    }
+  });
 }
 
 /**
- * Renderiza os cards de Resumo Gerencial / Indicadores no PDF.
+ * Renderiza os cards de Indicadores Executivos (4 cards sem financeiro, 5 cards com financeiro).
  */
-function drawPdfKpiCards(
+function drawExecutiveKpiCards(
   doc: any,
   metrics: ReportMetrics,
   startY: number,
   canViewFinancial: boolean
 ) {
-  const cardW = 64.5;
-  const cardH = 12.5;
   const cardGap = 4;
+  const topEq = metrics.topEquipment;
+  const topAct = metrics.topActivity;
+  const eqPct = metrics.totalLiters > 0 && topEq ? ((topEq.liters / metrics.totalLiters) * 100).toFixed(1) : '0.0';
+  const actPct = metrics.totalLiters > 0 && topAct ? ((topAct.liters / metrics.totalLiters) * 100).toFixed(1) : '0.0';
 
-  const kpis = [
+  const kpis: Array<{
+    title: string;
+    value: string;
+    subtitle: string;
+    color: [number, number, number];
+    compactValueFont?: boolean;
+  }> = [
     {
       title: 'VOLUME TOTAL',
-      value: `${metrics.totalLiters.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} L`,
+      value: `${formatLitersBR(metrics.totalLiters)} L`,
+      subtitle: `Média: ${formatLitersBR(metrics.avgLitersPerLog)} L/abast.`,
       color: [16, 110, 60]
     },
     {
-      title: 'INVESTIMENTO TOTAL',
-      value: canViewFinancial ? formatCurrency(metrics.totalCost) : 'Restrito',
-      color: canViewFinancial ? [180, 100, 15] : [100, 110, 120]
-    },
-    {
-      title: 'MÉDIA POR ABASTECIMENTO',
-      value: `${metrics.avgLitersPerLog.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} L`,
+      title: 'ABASTECIMENTOS',
+      value: `${metrics.totalCount} registro(s)`,
+      subtitle: `${metrics.uniqueEquipmentsCount} equip. | ${metrics.uniqueOperatorsCount} oper.`,
       color: [14, 116, 144]
-    },
-    {
-      title: 'MÁQUINA MAIOR CONSUMO',
-      value: metrics.topEquipment ? `${metrics.topEquipment.name.slice(0, 18)}` : 'N/A',
-      color: [120, 53, 15]
     }
   ];
 
+  if (canViewFinancial) {
+    kpis.push({
+      title: 'INVESTIMENTO TOTAL',
+      value: formatCurrency(metrics.totalCost),
+      subtitle: `Preço médio: ${formatCurrency(metrics.avgPricePerLiter)}/L`,
+      color: [180, 100, 15]
+    });
+  }
+
+  kpis.push(
+    {
+      title: 'MAIOR CONSUMO (MÁQ.)',
+      value: topEq ? sanitizePdfText(topEq.name) : 'N/A',
+      subtitle: topEq ? `${formatLitersBR(topEq.liters)} L (${eqPct}%)` : 'Sem registros',
+      color: [180, 83, 9],
+      compactValueFont: true
+    },
+    {
+      title: 'ATIVIDADE PRINCIPAL',
+      value: topAct ? sanitizePdfText(topAct.name) : 'N/A',
+      subtitle: topAct ? `${formatLitersBR(topAct.liters)} L (${actPct}%)` : 'Sem registros',
+      color: [30, 64, 175],
+      compactValueFont: true
+    }
+  );
+
+  const count = kpis.length;
+  const cardW = (PDF_CONTENT_W - cardGap * (count - 1)) / count;
+  const cardH = 18.5;
+
   kpis.forEach((kpi, idx) => {
-    const x = 14 + idx * (cardW + cardGap);
+    const x = PDF_MARGIN_L + idx * (cardW + cardGap);
     const y = startY;
 
     doc.setFillColor(255, 255, 255);
-    doc.setDrawColor(220, 230, 225);
+    doc.setDrawColor(215, 226, 220);
+    doc.setLineWidth(0.25);
     doc.rect(x, y, cardW, cardH, 'FD');
 
     doc.setFillColor(kpi.color[0], kpi.color[1], kpi.color[2]);
-    doc.rect(x, y, cardW, 1.2, 'F');
+    doc.rect(x, y, cardW, 1.5, 'F');
 
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(6.5);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(100, 115, 110);
-    doc.text(kpi.title, x + 2.5, y + 4.2);
+    doc.setTextColor(95, 110, 105);
+    doc.text(kpi.title, x + 3, y + 5.2);
 
-    doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
+    doc.setFontSize(kpi.compactValueFont ? 8.3 : 10.5);
     doc.setTextColor(kpi.color[0], kpi.color[1], kpi.color[2]);
-    doc.text(kpi.value, x + 2.5, y + 9.5);
+    doc.text(fitTextWidth(doc, kpi.value, cardW - 6), x + 3, y + 11.2);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.7);
+    doc.setTextColor(90, 105, 100);
+    doc.text(fitTextWidth(doc, kpi.subtitle, cardW - 6), x + 3, y + 16.0);
   });
 }
 
 /**
- * EXPORTAÇÃO OFICIAL EM PDF (ESTRUTURA COMPLETA UNIFICADA):
- * 1. Cabeçalho Principal no Topo
- * 2. Tabela Principal Completa com todos os Lançamentos e Colunas
- * 3. Gráficos Analíticos e Resumo Gerencial posicionados dinamicamente APÓS a tabela no final do documento
+ * Faixa de resumo operacional para o PDF Oficial / Operacional.
+ */
+function drawOfficialSummaryStrip(
+  doc: any,
+  metrics: ReportMetrics,
+  startY: number,
+  canViewFinancial: boolean
+) {
+  const stripH = 14.5;
+  doc.setFillColor(246, 250, 247);
+  doc.setDrawColor(208, 224, 214);
+  doc.setLineWidth(0.25);
+  doc.rect(PDF_MARGIN_L, startY, PDF_CONTENT_W, stripH, 'FD');
+
+  doc.setFillColor(15, 56, 34);
+  doc.rect(PDF_MARGIN_L, startY, 2.0, stripH, 'F');
+
+  const cols: Array<{ label: string; value: string; sub: string }> = [
+    {
+      label: 'TOTAL DE REGISTROS',
+      value: `${metrics.totalCount} lançamento(s)`,
+      sub: `${metrics.uniqueEquipmentsCount} equipamento(s)`
+    },
+    {
+      label: 'VOLUME TOTAL ABASTECIDO',
+      value: `${formatLitersBR(metrics.totalLiters)} L`,
+      sub: `Média de ${formatLitersBR(metrics.avgLitersPerLog)} L por registro`
+    },
+    {
+      label: 'POSTOS / COMBUSTÍVEIS',
+      value: `${metrics.sortedStation.length} posto(s) | ${metrics.sortedFuelType.length} comb.`,
+      sub: metrics.topEquipment ? `Maior vol.: ${fitTextWidth(doc, metrics.topEquipment.name, 48)}` : '-'
+    }
+  ];
+
+  if (canViewFinancial) {
+    cols.push({
+      label: 'INVESTIMENTO TOTAL',
+      value: formatCurrency(metrics.totalCost),
+      sub: `Preço médio: ${formatCurrency(metrics.avgPricePerLiter)}/L`
+    });
+  }
+
+  const colW = (PDF_CONTENT_W - 6) / cols.length;
+  cols.forEach((col, idx) => {
+    const colX = PDF_MARGIN_L + 5 + idx * colW;
+    if (idx > 0) {
+      doc.setDrawColor(220, 232, 224);
+      doc.line(colX - 3, startY + 2.5, colX - 3, startY + stripH - 2.5);
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.3);
+    doc.setTextColor(90, 110, 100);
+    doc.text(col.label, colX, startY + 4.4);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.2);
+    doc.setTextColor(15, 56, 34);
+    doc.text(fitTextWidth(doc, col.value, colW - 6), colX, startY + 9.2);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(95, 110, 105);
+    doc.text(fitTextWidth(doc, col.sub, colW - 6), colX, startY + 12.8);
+  });
+}
+
+function drawDetailedFuelLogsTable(
+  doc: any,
+  autoTable: any,
+  sortedLogs: FuelLog[],
+  metrics: ReportMetrics,
+  startY: number,
+  canViewFinancial: boolean,
+  onDrawPageHeader: (pageNumber: number) => void
+): number {
+  const tableData = sortedLogs.map(log => {
+    const opLabel = log.operationType ? getOperationTypeLabelOnly(log.operationType) : '-';
+    const actLabel = log.activityType ? getActivityTypeName(log.activityType, log.operationType) : '';
+    const opAndActivity = sanitizePdfText(
+      actLabel && actLabel !== '-' ? `${opLabel} - ${actLabel}` : opLabel
+    );
+
+    const row: string[] = [
+      formatDateTimeBR(log.dateTime),
+      sanitizePdfText(log.equipmentPlateOrCode || '-'),
+      sanitizePdfText(log.equipmentName || '-'),
+      formatMeterReading(log),
+      formatTankFillStatus(log),
+      sanitizePdfText(log.driverOrOperatorName || '-'),
+      opAndActivity,
+      sanitizePdfText(log.gasStationName || '-'),
+      sanitizePdfText(getFuelTypeName(log.fuelType)),
+      `${formatLitersBR(log.liters)} L`
+    ];
+
+    if (canViewFinancial) {
+      row.push(formatCurrency(log.pricePerLiter));
+      row.push(formatCurrency(log.totalValue));
+    }
+
+    const avgLabel = log.isFullTank && log.calculatedAverageKmPerLiter
+      ? `${log.calculatedAverageKmPerLiter} km/L`
+      : log.isFullTank && log.calculatedAverageLitersPerHour
+        ? `${log.calculatedAverageLitersPerHour} L/h`
+        : '-';
+    row.push(avgLabel);
+
+    return row;
+  });
+
+  const headCols = canViewFinancial
+    ? ['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Horím./KM', 'Tanque', 'Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'R$/L', 'Total R$', 'Média']
+    : ['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Horím./KM', 'Tanque', 'Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'Média'];
+
+  const footCols = canViewFinancial
+    ? ['TOTAL', `${sortedLogs.length} reg.`, '', '', '', '', '', '', '', `${formatLitersBR(metrics.totalLiters)} L`, formatCurrency(metrics.avgPricePerLiter), formatCurrency(metrics.totalCost), '']
+    : ['TOTAL', `${sortedLogs.length} reg.`, '', '', '', '', '', '', '', `${formatLitersBR(metrics.totalLiters)} L`, ''];
+
+  // Larguras exatas somando 269 mm para evitar estouro ou desalinhamento
+  const columnStyles: Record<number, any> = canViewFinancial
+    ? {
+        0: { cellWidth: 23, halign: 'left' },
+        1: { cellWidth: 16, halign: 'center' },
+        2: { cellWidth: 30, halign: 'left' },
+        3: { cellWidth: 17, halign: 'right' },
+        4: { cellWidth: 12, halign: 'center' },
+        5: { cellWidth: 24, halign: 'left' },
+        6: { cellWidth: 34, halign: 'left' },
+        7: { cellWidth: 26, halign: 'left' },
+        8: { cellWidth: 20, halign: 'left' },
+        9: { cellWidth: 18, halign: 'right', fontStyle: 'bold' },
+        10: { cellWidth: 14, halign: 'right' },
+        11: { cellWidth: 19, halign: 'right', fontStyle: 'bold' },
+        12: { cellWidth: 16, halign: 'right' }
+      }
+    : {
+        0: { cellWidth: 24, halign: 'left' },
+        1: { cellWidth: 18, halign: 'center' },
+        2: { cellWidth: 37, halign: 'left' },
+        3: { cellWidth: 20, halign: 'right' },
+        4: { cellWidth: 14, halign: 'center' },
+        5: { cellWidth: 30, halign: 'left' },
+        6: { cellWidth: 40, halign: 'left' },
+        7: { cellWidth: 30, halign: 'left' },
+        8: { cellWidth: 22, halign: 'left' },
+        9: { cellWidth: 18, halign: 'right', fontStyle: 'bold' },
+        10: { cellWidth: 16, halign: 'right' }
+      };
+
+  autoTable(doc, {
+    startY,
+    head: [headCols],
+    body: tableData,
+    foot: [footCols],
+    showHead: 'everyPage',
+    showFoot: 'lastPage',
+    rowPageBreak: 'avoid',
+    theme: 'grid',
+    headStyles: {
+      fillColor: [20, 78, 46],
+      textColor: [255, 255, 255],
+      fontStyle: 'bold',
+      fontSize: 7.0,
+      cellPadding: 1.6,
+      valign: 'middle'
+    },
+    footStyles: {
+      fillColor: [228, 240, 233],
+      textColor: [15, 56, 34],
+      fontStyle: 'bold',
+      fontSize: 7.2,
+      cellPadding: 1.8
+    },
+    styles: {
+      font: 'helvetica',
+      fontSize: 6.9,
+      cellPadding: 1.45,
+      textColor: [30, 41, 59],
+      lineColor: [222, 232, 226],
+      lineWidth: 0.2,
+      overflow: 'linebreak',
+      valign: 'middle'
+    },
+    alternateRowStyles: {
+      fillColor: [248, 251, 249]
+    },
+    columnStyles,
+    margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L, right: PDF_MARGIN_R, bottom: PDF_MARGIN_BOTTOM },
+    didDrawPage: (data: any) => {
+      onDrawPageHeader(data.pageNumber);
+    }
+  });
+
+  return (doc as any).lastAutoTable?.finalY || startY;
+}
+
+function drawFuelAndStationClosingTables(
+  doc: any,
+  autoTable: any,
+  metrics: ReportMetrics,
+  startY: number,
+  canViewFinancial: boolean,
+  onDrawPageHeader: (pageNumber: number) => void
+): number {
+  const buildRows = (items: GroupedSummaryItem[]) =>
+    items.map(item => {
+      const pct = metrics.totalLiters > 0 ? ((item.liters / metrics.totalLiters) * 100).toFixed(1) : '0.0';
+      const row: string[] = [
+        sanitizePdfText(item.name),
+        String(item.count),
+        `${formatLitersBR(item.liters)} L`,
+        `${pct}%`
+      ];
+      if (canViewFinancial) {
+        row.push(formatCurrency(item.cost));
+      }
+      return row;
+    });
+
+  const fuelHead = canViewFinancial
+    ? ['Tipo de Combustível', 'Qtd.', 'Litros', '%', 'Total R$']
+    : ['Tipo de Combustível', 'Qtd.', 'Litros', '%'];
+  const stationHead = canViewFinancial
+    ? ['Posto / Tanque', 'Qtd.', 'Litros', '%', 'Total R$']
+    : ['Posto / Tanque', 'Qtd.', 'Litros', '%'];
+
+  const fuelFoot = canViewFinancial
+    ? ['TOTAL', String(metrics.totalCount), `${formatLitersBR(metrics.totalLiters)} L`, '100%', formatCurrency(metrics.totalCost)]
+    : ['TOTAL', String(metrics.totalCount), `${formatLitersBR(metrics.totalLiters)} L`, '100%'];
+  const stationFoot = [...fuelFoot];
+
+  const halfW = 131.5; // 131.5 + 6 gap + 131.5 = 269 mm
+  const colStylesSide: Record<number, any> = canViewFinancial
+    ? {
+        0: { cellWidth: 53.5, halign: 'left' },
+        1: { cellWidth: 13, halign: 'center' },
+        2: { cellWidth: 24, halign: 'right', fontStyle: 'bold' },
+        3: { cellWidth: 15, halign: 'right' },
+        4: { cellWidth: 26, halign: 'right', fontStyle: 'bold' }
+      }
+    : {
+        0: { cellWidth: 74.5, halign: 'left' },
+        1: { cellWidth: 15, halign: 'center' },
+        2: { cellWidth: 26, halign: 'right', fontStyle: 'bold' },
+        3: { cellWidth: 16, halign: 'right' }
+      };
+
+  const canPlaceSideBySide = metrics.sortedFuelType.length <= 10 && metrics.sortedStation.length <= 10;
+
+  if (canPlaceSideBySide) {
+    const startPage = (doc as any).internal.getCurrentPageInfo().pageNumber;
+
+    autoTable(doc, {
+      startY,
+      head: [fuelHead],
+      body: buildRows(metrics.sortedFuelType),
+      foot: [fuelFoot],
+      showHead: 'everyPage',
+      showFoot: 'lastPage',
+      rowPageBreak: 'avoid',
+      theme: 'grid',
+      headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.0, cellPadding: 1.5 },
+      footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.0, cellPadding: 1.5 },
+      styles: { font: 'helvetica', fontSize: 6.9, cellPadding: 1.4, lineColor: [222, 232, 226], lineWidth: 0.2 },
+      alternateRowStyles: { fillColor: [248, 251, 249] },
+      columnStyles: colStylesSide,
+      margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L, right: PDF_MARGIN_R + halfW + 6, bottom: PDF_MARGIN_BOTTOM },
+      didDrawPage: (data: any) => onDrawPageHeader(data.pageNumber)
+    });
+    const leftFinalY = (doc as any).lastAutoTable?.finalY || startY;
+    const leftEndPage = (doc as any).internal.getCurrentPageInfo().pageNumber;
+
+    // Volta à página inicial do bloco para desenhar a tabela da direita alinhada ao topo
+    doc.setPage(startPage);
+    autoTable(doc, {
+      startY,
+      head: [stationHead],
+      body: buildRows(metrics.sortedStation),
+      foot: [stationFoot],
+      showHead: 'everyPage',
+      showFoot: 'lastPage',
+      rowPageBreak: 'avoid',
+      theme: 'grid',
+      headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.0, cellPadding: 1.5 },
+      footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.0, cellPadding: 1.5 },
+      styles: { font: 'helvetica', fontSize: 6.9, cellPadding: 1.4, lineColor: [222, 232, 226], lineWidth: 0.2 },
+      alternateRowStyles: { fillColor: [248, 251, 249] },
+      columnStyles: colStylesSide,
+      margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L + halfW + 6, right: PDF_MARGIN_R, bottom: PDF_MARGIN_BOTTOM },
+      didDrawPage: (data: any) => onDrawPageHeader(data.pageNumber)
+    });
+    const rightFinalY = (doc as any).lastAutoTable?.finalY || startY;
+    const rightEndPage = (doc as any).internal.getCurrentPageInfo().pageNumber;
+
+    const maxPage = Math.max(leftEndPage, rightEndPage);
+    doc.setPage(maxPage);
+    if (leftEndPage > rightEndPage) return leftFinalY;
+    if (rightEndPage > leftEndPage) return rightFinalY;
+    return Math.max(leftFinalY, rightFinalY);
+  }
+
+  // Fallback empilhado largura total quando houver muitos postos/combustíveis
+  const colStylesFull: Record<number, any> = canViewFinancial
+    ? {
+        0: { cellWidth: 149, halign: 'left' },
+        1: { cellWidth: 20, halign: 'center' },
+        2: { cellWidth: 35, halign: 'right', fontStyle: 'bold' },
+        3: { cellWidth: 25, halign: 'right' },
+        4: { cellWidth: 40, halign: 'right', fontStyle: 'bold' }
+      }
+    : {
+        0: { cellWidth: 179, halign: 'left' },
+        1: { cellWidth: 25, halign: 'center' },
+        2: { cellWidth: 40, halign: 'right', fontStyle: 'bold' },
+        3: { cellWidth: 25, halign: 'right' }
+      };
+
+  autoTable(doc, {
+    startY,
+    head: [fuelHead],
+    body: buildRows(metrics.sortedFuelType),
+    foot: [fuelFoot],
+    showHead: 'everyPage',
+    showFoot: 'lastPage',
+    rowPageBreak: 'avoid',
+    theme: 'grid',
+    headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.6 },
+    footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.6 },
+    styles: { font: 'helvetica', fontSize: 7.0, cellPadding: 1.5, lineColor: [222, 232, 226], lineWidth: 0.2 },
+    alternateRowStyles: { fillColor: [248, 251, 249] },
+    columnStyles: colStylesFull,
+    margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L, right: PDF_MARGIN_R, bottom: PDF_MARGIN_BOTTOM },
+    didDrawPage: (data: any) => onDrawPageHeader(data.pageNumber)
+  });
+
+  let nextY = ((doc as any).lastAutoTable?.finalY || startY) + 6;
+  if (nextY > PDF_MAX_CONTENT_Y - 28) {
+    doc.addPage('a4', 'landscape');
+    const pageNum = (doc as any).internal.getCurrentPageInfo().pageNumber;
+    onDrawPageHeader(pageNum);
+    nextY = PDF_CONTENT_TOP_Y + 2;
+  }
+
+  autoTable(doc, {
+    startY: nextY,
+    head: [stationHead],
+    body: buildRows(metrics.sortedStation),
+    foot: [stationFoot],
+    showHead: 'everyPage',
+    showFoot: 'lastPage',
+    rowPageBreak: 'avoid',
+    theme: 'grid',
+    headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.6 },
+    footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.6 },
+    styles: { font: 'helvetica', fontSize: 7.0, cellPadding: 1.5, lineColor: [222, 232, 226], lineWidth: 0.2 },
+    alternateRowStyles: { fillColor: [248, 251, 249] },
+    columnStyles: colStylesFull,
+    margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L, right: PDF_MARGIN_R, bottom: PDF_MARGIN_BOTTOM },
+    didDrawPage: (data: any) => onDrawPageHeader(data.pageNumber)
+  });
+
+  return (doc as any).lastAutoTable?.finalY || nextY;
+}
+
+/**
+ * EXPORTAÇÃO EM PDF — DUAL VARIANT:
+ * - 'OFFICIAL' (Relatório Oficial / Operacional): Foco em conferência e auditoria cronológica crescente + fechamento por combustível e posto/tanque.
+ * - 'EXECUTIVE' (Relatório Executivo Gerencial): Foco em análise gerencial com KPIs e gráficos na abertura, seguido de resumo por combustível/posto e detalhamento cronológico.
  */
 export async function exportReportPDF(options: ReportExportOptions) {
   const {
@@ -606,11 +1231,19 @@ export async function exportReportPDF(options: ReportExportOptions) {
     dateRangeStr,
     canViewFinancial,
     appliedFiltersDesc = 'Filtros aplicados: Período selecionado',
-    reportTitle = 'RELATÓRIO OFICIAL DE ABASTECIMENTOS'
+    variant = 'OFFICIAL',
+    reportTitle = variant === 'EXECUTIVE'
+      ? 'RELATÓRIO EXECUTIVO GERENCIAL DE ABASTECIMENTOS'
+      : 'RELATÓRIO OFICIAL DE ABASTECIMENTOS'
   } = options;
 
   const { default: jsPDF } = await import('jspdf');
   const { default: autoTable } = await import('jspdf-autotable');
+
+  // Ordenação cronológica crescente sobre uma cópia sem alterar estado da UI
+  const sortedLogs = sortLogsChronologicallyAsc(logs || []);
+  const metrics = calculateReportMetrics(sortedLogs, vehicles || []);
+  const issuedAtStr = formatDateTimeBR(new Date().toISOString());
 
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -618,161 +1251,269 @@ export async function exportReportPDF(options: ReportExportOptions) {
     format: 'a4'
   });
 
-  const metrics = calculateReportMetrics(logs, vehicles);
+  const headerDrawnPages = new Set<number>();
+  const ensureHeaderOnPage = (pageNum?: number) => {
+    const targetPage = pageNum || (doc as any).internal.getCurrentPageInfo().pageNumber;
+    if (headerDrawnPages.has(targetPage)) return;
+    doc.setPage(targetPage);
+    drawPdfHeader(doc, {
+      companyInfo,
+      reportTitle,
+      dateRangeStr,
+      appliedFiltersDesc,
+      issuedAtStr,
+      totalLogsCount: sortedLogs.length
+    });
+    headerDrawnPages.add(targetPage);
+  };
 
-  // 1. CABEÇALHO DO RELATÓRIO (Página 1)
-  doc.setFillColor(15, 56, 34); // Forest Agro Green
-  doc.rect(0, 0, 297, 22, 'F');
+  // Cabeçalho garantido na Página 1
+  ensureHeaderOnPage(1);
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
-  doc.text(companyInfo.name.toUpperCase(), 14, 10);
+  if (sortedLogs.length === 0) {
+    // Tratamento limpo para relatórios sem registros
+    doc.setFillColor(248, 250, 249);
+    doc.setDrawColor(210, 224, 215);
+    doc.rect(PDF_MARGIN_L, 38, PDF_CONTENT_W, 32, 'FD');
 
-  doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'normal');
-  doc.text(companyInfo.slogan || 'Gestão Inteligente do Agronegócio', 14, 16);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(15, 56, 34);
+    doc.text('Nenhum abastecimento localizado para os filtros aplicados.', PDF_PAGE_W / 2, 51, { align: 'center' });
 
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text(reportTitle.toUpperCase(), 283, 9.5, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(95, 110, 105);
+    doc.text(
+      `Período consultado: ${sanitizePdfText(dateRangeStr)}  |  Ajuste as datas ou filtros e tente exportar novamente.`,
+      PDF_PAGE_W / 2,
+      59,
+      { align: 'center' }
+    );
+  } else if (variant === 'EXECUTIVE') {
+    // =========================================================================
+    // MODELO 1: PDF EXECUTIVO (GERENCIAL)
+    // =========================================================================
+    // Página 1: KPIs + 4 Gráficos Analíticos equilibrados
+    drawSectionHeading(doc, 'Indicadores Gerais de Consumo e Abastecimento', 34.5);
+    drawExecutiveKpiCards(doc, metrics, 37.5, canViewFinancial);
 
-  doc.setFontSize(7.5);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Emissão: ${formatDateTimeBR(new Date().toISOString())} • CNPJ: ${companyInfo.cnpj}`, 283, 15.5, { align: 'right' });
+    drawSectionHeading(
+      doc,
+      'Análise Gráfica do Consumo no Período',
+      62.5,
+      'Top 5 categorias em volume e evolução diária'
+    );
 
-  // Faixa de Contexto & Filtros
-  doc.setFillColor(243, 247, 244);
-  doc.setDrawColor(210, 225, 215);
-  doc.rect(14, 24.5, 269, 7.5, 'FD');
+    const panelW = 132.5;
+    const panelH = 62;
+    const row1Y = 65.5;
+    const row2Y = row1Y + panelH + 4; // 131.5 -> termina em 193.5 (acima de MAX_CONTENT_Y=194.5)
 
-  doc.setTextColor(20, 50, 30);
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`Período: ${dateRangeStr}`, 18, 29.5);
+    drawHorizontalBarChartPanel(doc, {
+      x: PDF_MARGIN_L,
+      y: row1Y,
+      w: panelW,
+      h: panelH,
+      title: 'CONSUMO POR EQUIPAMENTO / MÁQUINA',
+      subtitle: 'Top 5 Máquinas',
+      accentRgb: [217, 119, 6],
+      totalLiters: metrics.totalLiters,
+      items: metrics.sortedEq.map(e => ({
+        label: e.code ? `${e.name} (${e.code})` : e.name,
+        liters: e.liters
+      }))
+    });
 
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(80, 100, 90);
-  doc.text(`${logs.length} lançamentos • ${appliedFiltersDesc}`, 280, 29.5, { align: 'right' });
+    drawHorizontalBarChartPanel(doc, {
+      x: PDF_MARGIN_L + panelW + 4,
+      y: row1Y,
+      w: panelW,
+      h: panelH,
+      title: 'CONSUMO POR ATIVIDADE',
+      subtitle: 'Top 5 Atividades',
+      accentRgb: [16, 140, 75],
+      totalLiters: metrics.totalLiters,
+      items: metrics.sortedAct.map(a => ({
+        label: a.name,
+        liters: a.liters
+      }))
+    });
 
-  // 2. TABELA PRINCIPAL DE LANÇAMENTOS
-  const tableData = logs.map(log => {
-    const row = [
-      formatDateTimeBR(log.dateTime),
-      log.equipmentPlateOrCode || '-',
-      log.equipmentName,
-      log.driverOrOperatorName,
-      `${getOperationTypeName(log.operationType)}${log.activityType ? ' - ' + getActivityTypeName(log.activityType, log.operationType) : ''}`,
-      log.gasStationName,
-      getFuelTypeName(log.fuelType),
-      `${log.liters} L`
-    ];
+    drawHorizontalBarChartPanel(doc, {
+      x: PDF_MARGIN_L,
+      y: row2Y,
+      w: panelW,
+      h: panelH,
+      title: 'CONSUMO POR OPERADOR / MOTORISTA',
+      subtitle: 'Top 5 Operadores',
+      accentRgb: [37, 99, 235],
+      totalLiters: metrics.totalLiters,
+      items: metrics.sortedOp.map(o => ({
+        label: o.name,
+        liters: o.liters
+      }))
+    });
 
-    if (canViewFinancial) {
-      row.push(formatCurrency(log.pricePerLiter));
-      row.push(formatCurrency(log.totalValue));
+    drawTimelineChartPanel(doc, {
+      x: PDF_MARGIN_L + panelW + 4,
+      y: row2Y,
+      w: panelW,
+      h: panelH,
+      sortedTime: metrics.sortedTime
+    });
+
+    // Página 2: Resumo por Combustível e Posto/Tanque + Detalhamento Cronológico
+    doc.addPage('a4', 'landscape');
+    ensureHeaderOnPage();
+
+    drawSectionHeading(
+      doc,
+      'Resumo por Combustível e Posto / Tanque',
+      34.5,
+      canViewFinancial ? 'Consolidado físico e financeiro' : 'Consolidado volumétrico'
+    );
+
+    const closingEndY = drawFuelAndStationClosingTables(
+      doc,
+      autoTable,
+      metrics,
+      37.5,
+      canViewFinancial,
+      ensureHeaderOnPage
+    );
+
+    const remainingForDetails = PDF_MAX_CONTENT_Y - (closingEndY + 8);
+    let detailsStartY: number;
+
+    if (remainingForDetails >= 46) {
+      drawSectionHeading(
+        doc,
+        'Detalhamento dos Abastecimentos',
+        closingEndY + 9,
+        'Ordem cronológica crescente'
+      );
+      detailsStartY = closingEndY + 12;
+    } else {
+      doc.addPage('a4', 'landscape');
+      ensureHeaderOnPage();
+      drawSectionHeading(
+        doc,
+        'Detalhamento dos Abastecimentos',
+        34.5,
+        'Ordem cronológica crescente'
+      );
+      detailsStartY = 37.5;
     }
 
-    row.push(log.isFullTank && log.calculatedAverageKmPerLiter ? `${log.calculatedAverageKmPerLiter} km/L` : log.isFullTank && log.calculatedAverageLitersPerHour ? `${log.calculatedAverageLitersPerHour} L/h` : '-');
-    return row;
-  });
-
-  const headCols = canViewFinancial
-    ? ['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Motorista/Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'R$/L', 'Total R$', 'Média']
-    : ['Data/Hora', 'Placa/Cód.', 'Equipamento', 'Motorista/Operador', 'Operação / Atividade', 'Posto', 'Combustível', 'Litros', 'Média'];
-
-  const footCols = canViewFinancial
-    ? ['TOTAL', `${logs.length} reg.`, '-', '-', '-', '-', '-', `${metrics.totalLiters.toLocaleString('pt-BR')} L`, '-', formatCurrency(metrics.totalCost), '-']
-    : ['TOTAL', `${logs.length} reg.`, '-', '-', '-', '-', '-', `${metrics.totalLiters.toLocaleString('pt-BR')} L`, '-'];
-
-  autoTable(doc, {
-    startY: 34,
-    head: [headCols],
-    body: tableData,
-    foot: [footCols],
-    showHead: 'everyPage',
-    theme: 'grid',
-    headStyles: {
-      fillColor: [20, 78, 46],
-      textColor: [255, 255, 255],
-      fontStyle: 'bold',
-      fontSize: 7.5
-    },
-    footStyles: {
-      fillColor: [230, 240, 234],
-      textColor: [15, 56, 34],
-      fontStyle: 'bold',
-      fontSize: 8
-    },
-    styles: {
-      fontSize: 6.8,
-      cellPadding: 1.4
-    },
-    alternateRowStyles: {
-      fillColor: [248, 250, 248]
-    },
-    margin: { left: 14, right: 14, bottom: 16 }
-  });
-
-  // 3. GRÁFICOS NO FINAL DO MESMO RELATÓRIO (POSICIONAMENTO DINÂMICO APÓS A TABELA)
-  const finalY = (doc as any).lastAutoTable?.finalY || 35;
-  const availableSpace = 196 - finalY;
-  const chartsNeededHeight = 124; // Cards (13mm) + Gap (4mm) + 2x Gráficos (107mm)
-
-  let chartsStartY: number;
-
-  if (availableSpace >= chartsNeededHeight) {
-    // Poucas linhas: Gráficos cabem confortavelmente abaixo da tabela na mesma página
-    chartsStartY = finalY + 6;
-
-    // Linha divisória suave
-    doc.setDrawColor(210, 225, 215);
-    doc.line(14, chartsStartY - 2, 283, chartsStartY - 2);
-
-    // Título da seção analítica
-    doc.setFontSize(8.5);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(15, 56, 34);
-    doc.text('📊 RESUMO GERENCIAL & GRÁFICOS ANALÍTICOS DO PERÍODO', 14, chartsStartY + 2.5);
-
-    drawPdfKpiCards(doc, metrics, chartsStartY + 5, canViewFinancial);
-    drawPdfVectorCharts(doc, metrics, chartsStartY + 21, 48);
+    drawDetailedFuelLogsTable(
+      doc,
+      autoTable,
+      sortedLogs,
+      metrics,
+      detailsStartY,
+      canViewFinancial,
+      ensureHeaderOnPage
+    );
   } else {
-    // Muitas linhas ou espaço insuficiente: Inserir quebra de página dinâmica para não cortar nem sobrepor
-    doc.addPage('a4', 'landscape');
+    // =========================================================================
+    // MODELO 2: PDF OFICIAL / OPERACIONAL (CONFERÊNCIA E AUDITORIA)
+    // =========================================================================
+    drawOfficialSummaryStrip(doc, metrics, 30.5, canViewFinancial);
 
-    // Cabeçalho resumido da página de gráficos
-    doc.setFillColor(15, 56, 34);
-    doc.rect(0, 0, 297, 16, 'F');
+    drawSectionHeading(
+      doc,
+      'Relação Cronológica de Abastecimentos',
+      50.0,
+      'Ordem cronológica crescente'
+    );
 
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(13);
-    doc.setFont('helvetica', 'bold');
-    doc.text(companyInfo.name.toUpperCase(), 14, 8.5);
+    const tableFinalY = drawDetailedFuelLogsTable(
+      doc,
+      autoTable,
+      sortedLogs,
+      metrics,
+      53.0,
+      canViewFinancial,
+      ensureHeaderOnPage
+    );
 
-    doc.setFontSize(8.5);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Resumo Gerencial e Gráficos Analíticos • Período: ${dateRangeStr}`, 14, 13);
+    // Fechamento por combustível e posto/tanque ao final da tabela
+    const maxClosingRows = Math.max(metrics.sortedFuelType.length, metrics.sortedStation.length, 1);
+    const estimatedClosingH = 18 + maxClosingRows * 6.5;
+    const availableAfterTable = PDF_MAX_CONTENT_Y - (tableFinalY + 8);
 
-    doc.text(`Total: ${logs.length} registros`, 283, 10, { align: 'right' });
+    let closingTitleY: number;
+    if (
+      metrics.sortedFuelType.length <= 10 &&
+      metrics.sortedStation.length <= 10 &&
+      availableAfterTable >= estimatedClosingH
+    ) {
+      closingTitleY = tableFinalY + 9;
+    } else {
+      doc.addPage('a4', 'landscape');
+      ensureHeaderOnPage();
+      closingTitleY = 34.5;
+    }
 
-    chartsStartY = 20;
-    drawPdfKpiCards(doc, metrics, chartsStartY, canViewFinancial);
-    drawPdfVectorCharts(doc, metrics, chartsStartY + 16, 52);
+    drawSectionHeading(
+      doc,
+      'Fechamento por Tipo de Combustível e Posto / Tanque',
+      closingTitleY,
+      'Conferência consolidada do período'
+    );
+
+    const closingEndY = drawFuelAndStationClosingTables(
+      doc,
+      autoTable,
+      metrics,
+      closingTitleY + 3.5,
+      canViewFinancial,
+      ensureHeaderOnPage
+    );
+
+    if (metrics.suspiciousCount > 0 && closingEndY + 8 <= PDF_MAX_CONTENT_Y) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7.0);
+      doc.setTextColor(145, 75, 15);
+      doc.text(
+        `Nota de auditoria: ${metrics.suspiciousCount} lançamento(s) no período possuem sinalização de consumo anômalo registrada no sistema.`,
+        PDF_MARGIN_L,
+        closingEndY + 6
+      );
+    }
   }
 
-  // Rodapé em todas as páginas com numeração dinâmica "Página X de Y"
+  // Padronizar cabeçalho (garantia) e rodapé em TODAS as páginas com numeração dinâmica
   const totalPages = (doc as any).internal.getNumberOfPages();
+  const variantFooterLabel = variant === 'EXECUTIVE' ? 'Relatório Executivo' : 'Relatório Oficial';
+
   for (let p = 1; p <= totalPages; p++) {
+    ensureHeaderOnPage(p);
     doc.setPage(p);
-    doc.setFontSize(7);
+
+    doc.setDrawColor(215, 225, 220);
+    doc.setLineWidth(0.25);
+    doc.line(PDF_MARGIN_L, PDF_FOOTER_LINE_Y, PDF_PAGE_W - PDF_MARGIN_R, PDF_FOOTER_LINE_Y);
+
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(120, 135, 130);
-    doc.text(`AndradeAgro • Sistema de Gestão de Abastecimento e Frotas • ${dateRangeStr}`, 14, 203);
-    doc.text(`Página ${p} de ${totalPages}`, 283, 203, { align: 'right' });
+    doc.setFontSize(7.0);
+    doc.setTextColor(105, 120, 115);
+    doc.text(
+      fitTextWidth(
+        doc,
+        `${companyInfo.name || 'AndradeAgro'}  |  ${variantFooterLabel}  |  Período: ${dateRangeStr}`,
+        215
+      ),
+      PDF_MARGIN_L,
+      PDF_FOOTER_TEXT_Y
+    );
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Página ${p} de ${totalPages}`, PDF_PAGE_W - PDF_MARGIN_R, PDF_FOOTER_TEXT_Y, { align: 'right' });
   }
 
-  const cleanFileName = `AndradeAgro_Relatorio_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filePrefix = variant === 'EXECUTIVE' ? 'AndradeAgro_Executivo' : 'AndradeAgro_Oficial';
+  const cleanFileName = `${filePrefix}_${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(cleanFileName);
 }
 

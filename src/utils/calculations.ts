@@ -527,7 +527,8 @@ export async function exportFuelLogsPDF(
     dateRangeStr: options?.dateRangeStr || 'Período Selecionado',
     canViewFinancial,
     appliedFiltersDesc: options?.appliedFiltersDesc || 'Filtros aplicados: Período selecionado',
-    reportTitle: title
+    reportTitle: title,
+    variant: 'OFFICIAL'
   });
 }
 
@@ -546,7 +547,8 @@ export async function exportExecutiveReportPDF(options: ExecutiveReportOptions) 
   const { exportReportPDF } = await import("./reportExportService");
   return exportReportPDF({
     ...options,
-    reportTitle: options.reportTitle || "Relatório Executivo Gerencial"
+    reportTitle: options.reportTitle || "Relatório Executivo Gerencial",
+    variant: 'EXECUTIVE'
   });
 }
 

@@ -460,9 +460,9 @@ export function createTimelineChartPng(options: {
 // ============================================================================
 const PDF_PAGE_W = 297;
 const PDF_PAGE_H = 210;
-const PDF_MARGIN_L = 14;
-const PDF_MARGIN_R = 14;
-const PDF_CONTENT_W = PDF_PAGE_W - PDF_MARGIN_L - PDF_MARGIN_R; // 269 mm
+const PDF_MARGIN_L = 11;
+const PDF_MARGIN_R = 11;
+const PDF_CONTENT_W = PDF_PAGE_W - PDF_MARGIN_L - PDF_MARGIN_R; // 275 mm
 const PDF_CONTENT_TOP_Y = 30.5;
 const PDF_MAX_CONTENT_Y = 194.5;
 const PDF_MARGIN_BOTTOM = PDF_PAGE_H - PDF_MAX_CONTENT_Y; // 15.5 mm
@@ -637,23 +637,26 @@ function drawHorizontalBarChartPanel(
   }
 
   const maxLiters = Math.max(...topItems.map(i => i.liters), 1);
-  // Geometria dedicada sem sobreposição:
-  // Rótulo: [x+3 .. x+45.5] (42.5 mm) | Barra: [x+46.5 .. x+97.5] (51 mm) | Valor/%: [x+99 .. x+w-3] (30.5 mm alinhado à direita)
-  const labelMaxW = 42.5;
-  const barX = x + 46.5;
-  const barMaxW = w - 46.5 - 33.5; // ~52.5 mm em painel de 132.5 mm
-  const rowStep = (h - 11.5) / 5;
-  const barH = 4.6;
+  // Geometria dedicada sem sobreposição (adaptada à largura e altura do painel)
+  const headerH = 7.8;
+  const labelMaxW = 44.0;
+  const barX = x + 48.0;
+  const barMaxW = w - 48.0 - 34.0; // ~53.0 mm em painel de 135 mm
+  const topPad = h < 54 ? 2.0 : 3.0;
+  const bottomPad = h < 54 ? 1.5 : 2.5;
+  const rowStep = (h - headerH - topPad - bottomPad) / 5;
+  const barH = Math.min(4.6, Math.max(3.5, rowStep * 0.54));
 
   topItems.forEach((item, idx) => {
-    const rowY = y + 10.8 + idx * rowStep;
+    const rowY = y + headerH + topPad + idx * rowStep;
+    const textBaselineOffset = barH * 0.72;
     const pct = totalLiters > 0 ? ((item.liters / totalLiters) * 100).toFixed(1) : '0.0';
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.1);
+    doc.setFontSize(h < 54 ? 6.8 : 7.1);
     doc.setTextColor(35, 45, 40);
     const labelText = fitTextWidth(doc, item.label, labelMaxW);
-    doc.text(labelText, x + 3, rowY + 3.4);
+    doc.text(labelText, x + 3, rowY + textBaselineOffset);
 
     // Fundo da trilha
     doc.setFillColor(240, 244, 242);
@@ -666,9 +669,9 @@ function drawHorizontalBarChartPanel(
 
     // Valor e percentual isolados à direita da barra
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
+    doc.setFontSize(h < 54 ? 6.6 : 6.8);
     doc.setTextColor(25, 45, 35);
-    doc.text(`${formatLitersBR(item.liters)} L (${pct}%)`, x + w - 3, rowY + 3.4, { align: 'right' });
+    doc.text(`${formatLitersBR(item.liters)} L (${pct}%)`, x + w - 3, rowY + textBaselineOffset, { align: 'right' });
   });
 }
 
@@ -920,6 +923,43 @@ function drawOfficialSummaryStrip(
   });
 }
 
+function ensureSingleLineCellFit(doc: any, data: any, singleLineCols: Set<number>, minFontSize: number = 5.4) {
+  if (data.section !== 'body' && data.section !== 'foot') return;
+  if (!singleLineCols.has(data.column.index)) return;
+
+  const rawText = Array.isArray(data.cell.text) ? data.cell.text.join(' ').trim() : String(data.cell.text || '').trim();
+  if (!rawText) return;
+
+  // Normaliza espaçamento interno mantendo uma única linha sem quebra automática
+  data.cell.text = [rawText];
+
+  const colWidth = Number(data.cell.styles.cellWidth) || Number(data.column.width) || 0;
+  if (colWidth <= 0) return;
+
+  const pad = data.cell.styles.cellPadding;
+  let horizPad = 3.0;
+  if (typeof pad === 'number') {
+    horizPad = pad * 2;
+  } else if (pad && typeof pad === 'object') {
+    horizPad = (Number(pad.left) || 0) + (Number(pad.right) || 0);
+  }
+
+  const availW = colWidth - horizPad - 0.6;
+  if (availW <= 2) return;
+
+  let fontSize = Number(data.cell.styles.fontSize) || 7.0;
+  const fontName = data.cell.styles.font || 'helvetica';
+  const fontStyle = data.cell.styles.fontStyle || 'normal';
+
+  doc.setFont(fontName, fontStyle);
+  doc.setFontSize(fontSize);
+  while (fontSize > minFontSize && doc.getTextWidth(rawText) > availW) {
+    fontSize = Number((fontSize - 0.2).toFixed(1));
+    doc.setFontSize(fontSize);
+  }
+  data.cell.styles.fontSize = fontSize;
+}
+
 function drawDetailedFuelLogsTable(
   doc: any,
   autoTable: any,
@@ -932,9 +972,11 @@ function drawDetailedFuelLogsTable(
   const tableData = sortedLogs.map(log => {
     const opLabel = log.operationType ? getOperationTypeLabelOnly(log.operationType) : '-';
     const actLabel = log.activityType ? getActivityTypeName(log.activityType, log.operationType) : '';
-    const opAndActivity = sanitizePdfText(
-      actLabel && actLabel !== '-' ? `${opLabel} - ${actLabel}` : opLabel
-    );
+    const cleanOp = sanitizePdfText(opLabel);
+    const cleanAct = sanitizePdfText(actLabel);
+    const opAndActivity = cleanAct && cleanAct !== '-' && cleanAct.toLowerCase() !== cleanOp.toLowerCase()
+      ? `${cleanOp} - ${cleanAct}`
+      : cleanOp;
 
     const row: string[] = [
       formatDateTimeBR(log.dateTime),
@@ -972,36 +1014,40 @@ function drawDetailedFuelLogsTable(
     ? ['TOTAL', `${sortedLogs.length} reg.`, '', '', '', '', '', '', '', `${formatLitersBR(metrics.totalLiters)} L`, formatCurrency(metrics.avgPricePerLiter), formatCurrency(metrics.totalCost), '']
     : ['TOTAL', `${sortedLogs.length} reg.`, '', '', '', '', '', '', '', `${formatLitersBR(metrics.totalLiters)} L`, ''];
 
-  // Larguras exatas somando 269 mm para evitar estouro ou desalinhamento
+  // Larguras exatas somando 275 mm (PDF_CONTENT_W), priorizando colunas de texto longo e evitando qualquer quebra em valores numéricos/monetários
   const columnStyles: Record<number, any> = canViewFinancial
     ? {
-        0: { cellWidth: 23, halign: 'left' },
-        1: { cellWidth: 16, halign: 'center' },
-        2: { cellWidth: 30, halign: 'left' },
-        3: { cellWidth: 17, halign: 'right' },
-        4: { cellWidth: 12, halign: 'center' },
-        5: { cellWidth: 24, halign: 'left' },
-        6: { cellWidth: 34, halign: 'left' },
-        7: { cellWidth: 26, halign: 'left' },
-        8: { cellWidth: 20, halign: 'left' },
-        9: { cellWidth: 18, halign: 'right', fontStyle: 'bold' },
-        10: { cellWidth: 14, halign: 'right' },
-        11: { cellWidth: 19, halign: 'right', fontStyle: 'bold' },
-        12: { cellWidth: 16, halign: 'right' }
+        0: { cellWidth: 23.5, halign: 'left' },
+        1: { cellWidth: 15.0, halign: 'center' },
+        2: { cellWidth: 29.5, halign: 'left' },
+        3: { cellWidth: 16.5, halign: 'right' },
+        4: { cellWidth: 12.5, halign: 'center' },
+        5: { cellWidth: 23.5, halign: 'left' },
+        6: { cellWidth: 38.0, halign: 'left' },
+        7: { cellWidth: 26.5, halign: 'left' },
+        8: { cellWidth: 18.0, halign: 'left' },
+        9: { cellWidth: 19.5, halign: 'right', fontStyle: 'bold' },
+        10: { cellWidth: 15.0, halign: 'right' },
+        11: { cellWidth: 23.5, halign: 'right', fontStyle: 'bold' },
+        12: { cellWidth: 14.0, halign: 'right' }
       }
     : {
-        0: { cellWidth: 24, halign: 'left' },
-        1: { cellWidth: 18, halign: 'center' },
-        2: { cellWidth: 37, halign: 'left' },
-        3: { cellWidth: 20, halign: 'right' },
-        4: { cellWidth: 14, halign: 'center' },
-        5: { cellWidth: 30, halign: 'left' },
-        6: { cellWidth: 40, halign: 'left' },
-        7: { cellWidth: 30, halign: 'left' },
-        8: { cellWidth: 22, halign: 'left' },
-        9: { cellWidth: 18, halign: 'right', fontStyle: 'bold' },
-        10: { cellWidth: 16, halign: 'right' }
+        0: { cellWidth: 24.0, halign: 'left' },
+        1: { cellWidth: 17.0, halign: 'center' },
+        2: { cellWidth: 36.0, halign: 'left' },
+        3: { cellWidth: 19.0, halign: 'right' },
+        4: { cellWidth: 14.0, halign: 'center' },
+        5: { cellWidth: 29.0, halign: 'left' },
+        6: { cellWidth: 46.0, halign: 'left' },
+        7: { cellWidth: 33.0, halign: 'left' },
+        8: { cellWidth: 21.0, halign: 'left' },
+        9: { cellWidth: 20.0, halign: 'right', fontStyle: 'bold' },
+        10: { cellWidth: 16.0, halign: 'right' }
       };
+
+  const singleLineCols = canViewFinancial
+    ? new Set<number>([0, 3, 4, 9, 10, 11, 12])
+    : new Set<number>([0, 3, 4, 9, 10]);
 
   autoTable(doc, {
     startY,
@@ -1017,7 +1063,7 @@ function drawDetailedFuelLogsTable(
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       fontSize: 7.0,
-      cellPadding: 1.6,
+      cellPadding: { top: 1.9, right: 1.4, bottom: 1.9, left: 1.4 },
       valign: 'middle'
     },
     footStyles: {
@@ -1025,12 +1071,13 @@ function drawDetailedFuelLogsTable(
       textColor: [15, 56, 34],
       fontStyle: 'bold',
       fontSize: 7.2,
-      cellPadding: 1.8
+      cellPadding: { top: 2.0, right: 1.4, bottom: 2.0, left: 1.4 },
+      valign: 'middle'
     },
     styles: {
       font: 'helvetica',
-      fontSize: 6.9,
-      cellPadding: 1.45,
+      fontSize: 7.0,
+      cellPadding: { top: 1.75, right: 1.4, bottom: 1.75, left: 1.4 },
       textColor: [30, 41, 59],
       lineColor: [222, 232, 226],
       lineWidth: 0.2,
@@ -1042,6 +1089,7 @@ function drawDetailedFuelLogsTable(
     },
     columnStyles,
     margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L, right: PDF_MARGIN_R, bottom: PDF_MARGIN_BOTTOM },
+    didParseCell: (data: any) => ensureSingleLineCellFit(doc, data, singleLineCols, 5.4),
     didDrawPage: (data: any) => {
       onDrawPageHeader(data.pageNumber);
     }
@@ -1085,21 +1133,25 @@ function drawFuelAndStationClosingTables(
     : ['TOTAL', String(metrics.totalCount), `${formatLitersBR(metrics.totalLiters)} L`, '100%'];
   const stationFoot = [...fuelFoot];
 
-  const halfW = 131.5; // 131.5 + 6 gap + 131.5 = 269 mm
+  const halfW = 134.5; // 134.5 + 6 gap + 134.5 = 275 mm
   const colStylesSide: Record<number, any> = canViewFinancial
     ? {
-        0: { cellWidth: 53.5, halign: 'left' },
-        1: { cellWidth: 13, halign: 'center' },
-        2: { cellWidth: 24, halign: 'right', fontStyle: 'bold' },
-        3: { cellWidth: 15, halign: 'right' },
-        4: { cellWidth: 26, halign: 'right', fontStyle: 'bold' }
+        0: { cellWidth: 55.5, halign: 'left' },
+        1: { cellWidth: 12.5, halign: 'center' },
+        2: { cellWidth: 24.5, halign: 'right', fontStyle: 'bold' },
+        3: { cellWidth: 13.5, halign: 'right' },
+        4: { cellWidth: 28.5, halign: 'right', fontStyle: 'bold' }
       }
     : {
-        0: { cellWidth: 74.5, halign: 'left' },
-        1: { cellWidth: 15, halign: 'center' },
-        2: { cellWidth: 26, halign: 'right', fontStyle: 'bold' },
-        3: { cellWidth: 16, halign: 'right' }
+        0: { cellWidth: 77.5, halign: 'left' },
+        1: { cellWidth: 14.5, halign: 'center' },
+        2: { cellWidth: 26.5, halign: 'right', fontStyle: 'bold' },
+        3: { cellWidth: 16.0, halign: 'right' }
       };
+
+  const singleLineClosingCols = canViewFinancial
+    ? new Set<number>([1, 2, 3, 4])
+    : new Set<number>([1, 2, 3]);
 
   const canPlaceSideBySide = metrics.sortedFuelType.length <= 10 && metrics.sortedStation.length <= 10;
 
@@ -1115,12 +1167,13 @@ function drawFuelAndStationClosingTables(
       showFoot: 'lastPage',
       rowPageBreak: 'avoid',
       theme: 'grid',
-      headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.0, cellPadding: 1.5 },
-      footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.0, cellPadding: 1.5 },
-      styles: { font: 'helvetica', fontSize: 6.9, cellPadding: 1.4, lineColor: [222, 232, 226], lineWidth: 0.2 },
+      headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.0, cellPadding: { top: 1.7, right: 1.4, bottom: 1.7, left: 1.4 } },
+      footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.1, cellPadding: { top: 1.8, right: 1.4, bottom: 1.8, left: 1.4 } },
+      styles: { font: 'helvetica', fontSize: 7.0, cellPadding: { top: 1.6, right: 1.4, bottom: 1.6, left: 1.4 }, lineColor: [222, 232, 226], lineWidth: 0.2, valign: 'middle' },
       alternateRowStyles: { fillColor: [248, 251, 249] },
       columnStyles: colStylesSide,
       margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L, right: PDF_MARGIN_R + halfW + 6, bottom: PDF_MARGIN_BOTTOM },
+      didParseCell: (data: any) => ensureSingleLineCellFit(doc, data, singleLineClosingCols, 5.4),
       didDrawPage: (data: any) => onDrawPageHeader(data.pageNumber)
     });
     const leftFinalY = (doc as any).lastAutoTable?.finalY || startY;
@@ -1137,12 +1190,13 @@ function drawFuelAndStationClosingTables(
       showFoot: 'lastPage',
       rowPageBreak: 'avoid',
       theme: 'grid',
-      headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.0, cellPadding: 1.5 },
-      footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.0, cellPadding: 1.5 },
-      styles: { font: 'helvetica', fontSize: 6.9, cellPadding: 1.4, lineColor: [222, 232, 226], lineWidth: 0.2 },
+      headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.0, cellPadding: { top: 1.7, right: 1.4, bottom: 1.7, left: 1.4 } },
+      footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.1, cellPadding: { top: 1.8, right: 1.4, bottom: 1.8, left: 1.4 } },
+      styles: { font: 'helvetica', fontSize: 7.0, cellPadding: { top: 1.6, right: 1.4, bottom: 1.6, left: 1.4 }, lineColor: [222, 232, 226], lineWidth: 0.2, valign: 'middle' },
       alternateRowStyles: { fillColor: [248, 251, 249] },
       columnStyles: colStylesSide,
       margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L + halfW + 6, right: PDF_MARGIN_R, bottom: PDF_MARGIN_BOTTOM },
+      didParseCell: (data: any) => ensureSingleLineCellFit(doc, data, singleLineClosingCols, 5.4),
       didDrawPage: (data: any) => onDrawPageHeader(data.pageNumber)
     });
     const rightFinalY = (doc as any).lastAutoTable?.finalY || startY;
@@ -1158,16 +1212,16 @@ function drawFuelAndStationClosingTables(
   // Fallback empilhado largura total quando houver muitos postos/combustíveis
   const colStylesFull: Record<number, any> = canViewFinancial
     ? {
-        0: { cellWidth: 149, halign: 'left' },
+        0: { cellWidth: 153, halign: 'left' },
         1: { cellWidth: 20, halign: 'center' },
-        2: { cellWidth: 35, halign: 'right', fontStyle: 'bold' },
-        3: { cellWidth: 25, halign: 'right' },
-        4: { cellWidth: 40, halign: 'right', fontStyle: 'bold' }
+        2: { cellWidth: 36, halign: 'right', fontStyle: 'bold' },
+        3: { cellWidth: 24, halign: 'right' },
+        4: { cellWidth: 42, halign: 'right', fontStyle: 'bold' }
       }
     : {
-        0: { cellWidth: 179, halign: 'left' },
+        0: { cellWidth: 184, halign: 'left' },
         1: { cellWidth: 25, halign: 'center' },
-        2: { cellWidth: 40, halign: 'right', fontStyle: 'bold' },
+        2: { cellWidth: 41, halign: 'right', fontStyle: 'bold' },
         3: { cellWidth: 25, halign: 'right' }
       };
 
@@ -1180,12 +1234,13 @@ function drawFuelAndStationClosingTables(
     showFoot: 'lastPage',
     rowPageBreak: 'avoid',
     theme: 'grid',
-    headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.6 },
-    footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.6 },
-    styles: { font: 'helvetica', fontSize: 7.0, cellPadding: 1.5, lineColor: [222, 232, 226], lineWidth: 0.2 },
+    headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.7 },
+    footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.8 },
+    styles: { font: 'helvetica', fontSize: 7.0, cellPadding: 1.6, lineColor: [222, 232, 226], lineWidth: 0.2, valign: 'middle' },
     alternateRowStyles: { fillColor: [248, 251, 249] },
     columnStyles: colStylesFull,
     margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L, right: PDF_MARGIN_R, bottom: PDF_MARGIN_BOTTOM },
+    didParseCell: (data: any) => ensureSingleLineCellFit(doc, data, singleLineClosingCols, 5.4),
     didDrawPage: (data: any) => onDrawPageHeader(data.pageNumber)
   });
 
@@ -1206,12 +1261,13 @@ function drawFuelAndStationClosingTables(
     showFoot: 'lastPage',
     rowPageBreak: 'avoid',
     theme: 'grid',
-    headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.6 },
-    footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.6 },
-    styles: { font: 'helvetica', fontSize: 7.0, cellPadding: 1.5, lineColor: [222, 232, 226], lineWidth: 0.2 },
+    headStyles: { fillColor: [20, 78, 46], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.7 },
+    footStyles: { fillColor: [230, 240, 234], textColor: [15, 56, 34], fontStyle: 'bold', fontSize: 7.2, cellPadding: 1.8 },
+    styles: { font: 'helvetica', fontSize: 7.0, cellPadding: 1.6, lineColor: [222, 232, 226], lineWidth: 0.2, valign: 'middle' },
     alternateRowStyles: { fillColor: [248, 251, 249] },
     columnStyles: colStylesFull,
     margin: { top: PDF_CONTENT_TOP_Y, left: PDF_MARGIN_L, right: PDF_MARGIN_R, bottom: PDF_MARGIN_BOTTOM },
+    didParseCell: (data: any) => ensureSingleLineCellFit(doc, data, singleLineClosingCols, 5.4),
     didDrawPage: (data: any) => onDrawPageHeader(data.pageNumber)
   });
 
@@ -1233,7 +1289,8 @@ function drawChartsGridSection(
 
   drawSectionHeading(doc, headingTitle, headingY, headingSubtitle);
 
-  const panelW = 132.5;
+  const panelGap = 5;
+  const panelW = (PDF_CONTENT_W - panelGap) / 2; // 135 mm
   const row1Y = headingY + 3.0;
   const row2Y = row1Y + panelH + rowGap;
 
@@ -1253,7 +1310,7 @@ function drawChartsGridSection(
   });
 
   drawHorizontalBarChartPanel(doc, {
-    x: PDF_MARGIN_L + panelW + 4,
+    x: PDF_MARGIN_L + panelW + panelGap,
     y: row1Y,
     w: panelW,
     h: panelH,
@@ -1283,7 +1340,7 @@ function drawChartsGridSection(
   });
 
   drawTimelineChartPanel(doc, {
-    x: PDF_MARGIN_L + panelW + 4,
+    x: PDF_MARGIN_L + panelW + panelGap,
     y: row2Y,
     w: panelW,
     h: panelH,
@@ -1404,14 +1461,14 @@ export async function exportReportPDF(options: ReportExportOptions) {
     const remainingForDetails = PDF_MAX_CONTENT_Y - (closingEndY + 8);
     let detailsStartY: number;
 
-    if (remainingForDetails >= 46) {
+    if (remainingForDetails >= 42) {
       drawSectionHeading(
         doc,
         'Detalhamento dos Abastecimentos',
-        closingEndY + 9,
+        closingEndY + 8,
         'Ordem cronológica crescente'
       );
-      detailsStartY = closingEndY + 12;
+      detailsStartY = closingEndY + 11;
     } else {
       doc.addPage('a4', 'landscape');
       ensureHeaderOnPage();
@@ -1456,10 +1513,10 @@ export async function exportReportPDF(options: ReportExportOptions) {
       ensureHeaderOnPage
     );
 
-    // Fechamento por combustível e posto/tanque ao final da tabela
+    // Fechamento por combustível e posto/tanque logo após a tabela sempre que couber
     const maxClosingRows = Math.max(metrics.sortedFuelType.length, metrics.sortedStation.length, 1);
-    const estimatedClosingH = 18 + maxClosingRows * 6.5;
-    const availableAfterTable = PDF_MAX_CONTENT_Y - (tableFinalY + 8);
+    const estimatedClosingH = 17 + maxClosingRows * 6.0 + (metrics.suspiciousCount > 0 ? 7 : 0);
+    const availableAfterTable = PDF_MAX_CONTENT_Y - (tableFinalY + 7);
 
     let closingTitleY: number;
     if (
@@ -1467,7 +1524,7 @@ export async function exportReportPDF(options: ReportExportOptions) {
       metrics.sortedStation.length <= 10 &&
       availableAfterTable >= estimatedClosingH
     ) {
-      closingTitleY = tableFinalY + 9;
+      closingTitleY = tableFinalY + 8;
     } else {
       doc.addPage('a4', 'landscape');
       ensureHeaderOnPage();
@@ -1503,16 +1560,16 @@ export async function exportReportPDF(options: ReportExportOptions) {
       lastOperationalY = closingEndY + 8;
     }
 
-    // Seção Final: Resumo Gráfico do Período (4 gráficos analíticos preservados no Oficial)
-    const minChartsBlockH = 118; // heading (3mm) + 2*55mm + gap (4mm)
-    const availableForCharts = PDF_MAX_CONTENT_Y - (lastOperationalY + 9);
+    // Seção Final: Resumo Gráfico do Período — aproveita o restante da página se houver espaço confortável (>= 98 mm) para evitar página de fechamento vazia
+    const minChartsBlockH = 98; // heading (3mm) + 2*45.5mm + gap (4mm)
+    const availableForCharts = PDF_MAX_CONTENT_Y - (lastOperationalY + 8);
 
     if (availableForCharts >= minChartsBlockH) {
       const fittedPanelH = Math.min(72, Math.floor((availableForCharts - 8) / 2));
       drawChartsGridSection(doc, metrics, {
         headingTitle: 'Resumo Gráfico do Período',
         headingSubtitle: 'Top 5 categorias em volume e evolução diária',
-        headingY: lastOperationalY + 9,
+        headingY: lastOperationalY + 8,
         panelH: fittedPanelH,
         rowGap: 4
       });

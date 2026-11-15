@@ -7,7 +7,7 @@ import {
 import { FuelLog, Vehicle, Sector, SystemSettings, CentralTank, User, OperationType } from '../types';
 import { 
   formatCurrency, formatDateTimeBR, getSectorName, getFuelTypeName,
-  getConsumptionByCategory, getConsumptionByActivity, OPERATION_OPTIONS, CATEGORY_PALETTE 
+  getConsumptionByCategory, getConsumptionByActivity, getEffectiveActivityName, getOperationTypeLabelOnly, OPERATION_OPTIONS, CATEGORY_PALETTE 
 } from '../utils/calculations';
 import { getTankStatus, getCentralTanks, getCurrentUser, updateCentralTank } from '../utils/storage';
 import { 
@@ -323,22 +323,17 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       return "Ainda não há abastecimentos registrados neste mês.";
     }
 
-    const operationLabels: Record<string, string> = {
-      GRAMA: 'grama',
-      COLHEITA: 'colheita',
-      PLANTIO: 'plantio',
-      TRANSPORTE: 'transporte',
-      OUTROS: 'outros'
-    };
-
-    // Group by operation AND operator from the same monthly fuel records.
-    const monthlyGroups = new Map<string, { operationType: string; operatorName: string; liters: number }>();
+    // Group by operation, activity AND operator from the same monthly fuel records.
+    // Use the shared activity formatter so custom "Outras" descriptions match the reports.
+    const monthlyGroups = new Map<string, { operationType: string; activityName: string; operatorName: string; liters: number }>();
     monthLogs.forEach(log => {
       const operationType = log.operationType || 'GRAMA';
+      const activityName = getEffectiveActivityName(log) || 'Atividade não informada';
       const operatorId = log.driverOrOperatorId || log.driverOrOperatorName || 'Operador';
-      const key = `${operationType}::${operatorId}`;
+      const key = `${operationType}::${activityName}::${operatorId}`;
       const existing = monthlyGroups.get(key) || {
         operationType,
+        activityName,
         operatorName: log.driverOrOperatorName || 'Operador',
         liters: 0
       };
@@ -353,9 +348,10 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
       return `Este mês foram consumidos ${totalMonthLiters.toLocaleString('pt-BR')} litros de combustível.`;
     }
 
-    const operationName = operationLabels[topMonthlyGroup.operationType] || topMonthlyGroup.operationType.toLowerCase();
+    const operationName = getOperationTypeLabelOnly(topMonthlyGroup.operationType);
+    const activityName = topMonthlyGroup.activityName;
 
-    return `Este mês foram consumidos ${totalMonthLiters.toLocaleString('pt-BR')} litros de combustível, sendo ${topMonthlyGroup.liters.toLocaleString('pt-BR')} litros utilizados em ${operationName} pelo operador ${topMonthlyGroup.operatorName}.`;
+    return `Este mês foram consumidos ${totalMonthLiters.toLocaleString('pt-BR')} litros de combustível, sendo ${topMonthlyGroup.liters.toLocaleString('pt-BR')} litros utilizados na operação ${operationName}, atividade ${activityName}, pelo operador ${topMonthlyGroup.operatorName}.`;
   }, [fuelLogs.length, monthLiters, monthLogs]);
 
   return (

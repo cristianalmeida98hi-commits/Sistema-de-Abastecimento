@@ -328,7 +328,8 @@ export const DashboardViewComponent: React.FC<DashboardViewProps> = ({
     const monthlyGroups = new Map<string, { operationType: string; activityName: string; operatorName: string; liters: number }>();
     monthLogs.forEach(log => {
       const operationType = log.operationType || 'GRAMA';
-      const activityName = getEffectiveActivityName(log) || 'Atividade não informada';
+      const effectiveActivityName = getEffectiveActivityName(log);
+      const activityName = effectiveActivityName && effectiveActivityName !== '-' ? effectiveActivityName : 'Atividade não informada';
       const operatorId = log.driverOrOperatorId || log.driverOrOperatorName || 'Operador';
       const key = `${operationType}::${activityName}::${operatorId}`;
       const existing = monthlyGroups.get(key) || {

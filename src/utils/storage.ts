@@ -26,6 +26,9 @@ import {
 import { deleteDefectPhotos } from './defectPhotoService';
 import { validateHourmeterReading } from './hourmeterValidation';
 
+// Pausa temporária: mantém o cálculo e a marcação nos abastecimentos, mas não cria alertas/notificações de consumo anômalo.
+const SUSPICIOUS_FUEL_ALERTS_ENABLED = false;
+
 const SESSION_KEYS = {
   SESSION_USER: 'andradeagro_session_user_v1',
   REMEMBERED_EMAIL: 'andradeagro_remembered_email_v1',
@@ -1315,8 +1318,8 @@ export async function addFuelLog(log: Omit<FuelLog, 'id' | 'createdAt'>): Promis
       await updateDoc(doc(db, 'vehicles', targetVehicle.id), vehicleUpdates);
     }
 
-    // Keep one unresolved suspicious-consumption alert per equipment to avoid alert spam.
-    if (cleanedLog.flaggedSuspicious) {
+    // Alertas de consumo anômalo pausados temporariamente; os indicadores continuam sendo calculados e salvos no abastecimento.
+    if (SUSPICIOUS_FUEL_ALERTS_ENABLED && cleanedLog.flaggedSuspicious) {
       const alertTitle = 'Consumo Anômalo no Abastecimento';
       const alertDesc = `${cleanedLog.equipmentName} (${cleanedLog.equipmentPlateOrCode}): ${cleanedLog.suspiciousReason || 'Consumo fora do padrão registrado.'}`;
       const existingAlert = cache.alerts.find(alert =>
